@@ -199,9 +199,14 @@ class WindowModel:
         if states is None:
             raise ValueError("the window model needs the rerun's per-step states (Trajectory.states) to "
                              "relinearise; without them the TL and AD stay on the previous loop's trajectory")
-        self._end = self.window.forward(trajectory=states)
         if self.halo is not None and self.halo_start == "wrfplus":
-            self._halo_to_edge()   # an external trajectory: checked, not changed
+            # WRFPLUS's start on an external trajectory: checked before the base moves, not changed
+            st = states[0]
+            if not bool(np.array_equal(self._host(st[self.halo]), self._host(st["mup"]))):
+                raise ValueError("halo_start='wrfplus': the rerun's state 0 carries a mu halo that is not mup "
+                                 "(WRFPLUS's start resets it to the edge row); reset it, or pass "
+                                 "halo_start='carried'")
+        self._end = self.window.forward(trajectory=states)
         self.base_diff = None
         return self._end
 

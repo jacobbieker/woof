@@ -572,7 +572,7 @@ def analyse(be, obs, first_guess, *, tier: str = "reference", ntmax=50, eps=0.01
         return _analyse_var4d(b, fg, xb, grid, obs, fgat, proj, window, var4d, max_ext_its=max_ext_its,
                               ntmax=ntmax, eps=eps, check_rh=check_rh, landuse_table=landuse_table, write=write,
                               timings=timings, t0=t0, orthonorm_gradient=orthonorm_gradient,
-                              precondition_cg=precondition_cg)
+                              precondition_cg=precondition_cg, report_fit=bool(report_fit))
     if fgat is None:
         wobs = obs if not isinstance(obs, (str, Path)) else ow.read_obs_ascii(obs, proj, **window)
         iv = iw.innovations(wobs, xb)
@@ -642,7 +642,7 @@ def _analysis_state(start: FirstGuess, wrf: dict) -> FirstGuess:
 
 
 def _analyse_var4d(b, fg, xb, grid, obs, fgat, proj, window, var4d, *, max_ext_its, ntmax, eps, check_rh,
-                   landuse_table, write, timings, t0, **cg_kw) -> VarResult:
+                   landuse_table, write, timings, t0, report_fit=False, **cg_kw) -> VarResult:
     """:func:`analyse`'s 4D-Var: :func:`woof.da.var.outer4d.outer_loops` with
     WRFDA's pieces (after :func:`_fgat_refusals`).
 
@@ -655,7 +655,8 @@ def _analyse_var4d(b, fg, xb, grid, obs, fgat, proj, window, var4d, *, max_ext_i
     WRFDA's var4d ``da_get_innov_vector`` leaves slot 1's state in ``grid``.
     The observations are read once; each loop recomputes the innovations
     and QC from them (WRFDA carries the previous loop's QC flags, see
-    docs/var.md).
+    docs/var.md).  ``report_fit``: :func:`_fit` of the last loop (its
+    innovations, about the last rerun, and its own ``xhat``).
     """
     from . import fgat as fm
     from .cost import VarCost
@@ -683,18 +684,17 @@ def _analyse_var4d(b, fg, xb, grid, obs, fgat, proj, window, var4d, *, max_ext_i
             except ValueError as exc:
                 raise ValueError(f"outer loop {it}: the rerun's slots: {exc}") from None
             start = slots[0]
-            xb0, grid0 = wrftoxb(start, landuse_table=landuse_table)
-            if xb0["t"].shape != xb["t"].shape:
-                raise ValueError(f"outer loop {it}: the rerun is on {xb0['t'].shape}, the first guess on "
-                                 f"{xb['t'].shape}")
-        states = _slot_states(slots, xb0, proj, landuse_table=landuse_table,
+        states = _slot_states(slots, xb, proj, landuse_table=landuse_table,
                               what="FGAT slot" if it == 1 else f"outer loop {it}: slot")
+        if it > 1:
+            xb0, grid0 = states[0]   # the rerun's start (WRFDA leaves slot 1 in grid)
         iv = fm.innovations_fgat(wobs, [x for x, _ in states])
         if it > 1 and var4d.base_rtol is not None and callable(getattr(var4d.model, "check_base", None)):
             var4d.model.check_base(states, rtol=var4d.base_rtol)
         term = FourDObsTerm(iv, states, (xb0, grid0), model=var4d.model, press=var4d.press, ph=var4d.ph)
         xbu = {k: xb0[k] for k in _XBU}
         cost = VarCost.reference(b, xbu, [term])
+        last["cost"] = cost
         clock["setup_s" if it > 1 else "setup1_s"] += time.perf_counter() - t
         return cost, (start, xb0, grid0, xbu, term)
 
@@ -728,8 +728,9 @@ def _analyse_var4d(b, fg, xb, grid, obs, fgat, proj, window, var4d, *, max_ext_i
         timings["nl_model_s"] = clock["nl_model_s"]
     _, xb0, grid0, _, term = context
     log = "".join(r.log for r in results)
+    fit = _fit(last["cost"], [term.d], results[-1].xhat, [term]) if report_fit else {}
     return VarResult(log=log, cg=results, cvt=np.asarray(cvt, dtype=np.float64), xa=last["xa"], wrf=last["wrf"],
-                     xb=xb0, grid=grid0, nobs=int(term.mask.sum()), timings=timings)
+                     xb=xb0, grid=grid0, nobs=int(term.mask.sum()), timings=timings, fit=fit)
 
 
 def _fgat_refusals(obs, fgat, first_guess, *, window_minutes, time_window, max_ext_its, radiances, xb_override,
@@ -807,6 +808,8 @@ def _var4d_refusals(var4d, tier, first_guesses, *, max_ext_its: int = 1) -> None
         raise ValueError(f"var4d.press must be one of {t4._PRESS}, not {var4d.press!r}")
     if var4d.ph not in t4._PH:
         raise ValueError(f"var4d.ph must be one of {t4._PH}, not {var4d.ph!r}")
+    if max_ext_its < 1:
+        raise ValueError(f"max_ext_its must be >= 1, not {max_ext_its}")
     if max_ext_its > 1:
         if var4d.nl_model is None:
             raise NotImplementedError(f"4D-Var with max_ext_its = {max_ext_its} needs var4d.nl_model: WRFDA reruns "

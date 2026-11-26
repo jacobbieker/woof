@@ -236,6 +236,7 @@ def test_window_model_relinearises_about_the_rerun():
     bad[0] = dict(bad[0], **{HALO: bad[0][HALO] + 1.0})
     with pytest.raises(ValueError, match="halo"):
         model.relinearise(o4.Trajectory(slots=[], states=bad))
+    assert not getattr(win, "_external", False)   # refused before the base moved
     f4.IdentityModel().relinearise(o4.Trajectory(slots=[]))   # nothing to relinearise
 
 
@@ -302,6 +303,8 @@ def test_analyse_refuses_outer_loop_setups_before_reading_anything(tmp_path):
     kw = dict(fgat=fgs, time_window=("2008-02-05_12:00:00", "2008-02-05_18:00:00"))
     with pytest.raises(NotImplementedError, match="max_ext_its = 2 needs var4d.nl_model"):
         analyse(be, obs, fgs[0], max_ext_its=2, var4d=f4.Var4D(), **kw)
+    with pytest.raises(ValueError, match="max_ext_its must be >= 1"):
+        analyse(be, obs, fgs[0], max_ext_its=0, var4d=f4.Var4D(), **kw)
 
     class Frozen:
         def tl(self, g0, n):
@@ -321,6 +324,99 @@ def test_analyse_refuses_outer_loop_setups_before_reading_anything(tmp_path):
     spaced.sps = 12
     with pytest.raises(ValueError, match="every 12 steps, but var4d_bin / time_step = 3600 / 360 = 10"):
         analyse(be, obs, fgs[0], var4d=f4.Var4D(model=spaced, var4d_bin=3600, time_step=360), **kw)
+
+
+# ------------------------------------------------------------ analyse's outer loop with WRFDA's pieces faked
+
+
+def _fake_pieces(monkeypatch, nslots=3):
+    """``_analyse_var4d`` with its file, ``U``, transfer and observation pieces replaced by the toy's: a
+    first guess is ``{"t": field}``, the observations are ``h`` of each slot's state, ``U`` is ``ToyU``."""
+    from woof.da.var import analysis as A
+    from woof.da.var import cost as C
+    from woof.da.var import fgat as fm
+    from woof.da.var import obs_wrfda as ow
+
+    rng = np.random.default_rng(9)
+    bg = rng.normal(0.0, 1.0, (NX, NY, NZ))
+    y = np.concatenate([h(bg + rng.normal(0.0, 1.5, (NX, NY, NZ)))] * nslots)
+
+    def fg(t, stamp):
+        return A.FirstGuess(path=Path(f"fg_{stamp}"), fields={"t": t}, attrs={}, times=stamp)
+
+    def wrftoxb(f, landuse_table=None):
+        return {k: f.fields["t"] for k in A._XBU}, {"start": f.times}
+
+    def term(iv, states, base, model, press, ph):
+        slots = [x["t"] for x, _ in states]
+        return ToyTerm(model, slots, y - np.concatenate([h(s) for s in slots]))
+
+    monkeypatch.setattr(A, "wrftoxb", wrftoxb)
+    monkeypatch.setattr(A, "xa_from_cv", lambda b, xbu, cv: {"t": SIGMA_B * cv.reshape(NX, NY, NZ)})
+    monkeypatch.setattr(A, "xatowrf", lambda grid, xb, xa, check_rh=0, var4d=False: {"T": xb["t"] + xa["t"]})
+    monkeypatch.setattr(A, "_analysis_state", lambda start, wrf: fg(wrf["T"], start.times))
+    monkeypatch.setattr(ow, "LambertWRFDA", type("P", (), {"from_attributes": staticmethod(lambda a: "proj")}))
+    monkeypatch.setattr(fm, "read_obs_ascii_fgat", lambda paths, proj, **w: "obs")
+    monkeypatch.setattr(fm, "innovations_fgat", lambda wobs, xbs: "iv")
+    monkeypatch.setattr(fm, "first_guess_time", lambda f: f.times)
+    monkeypatch.setattr(fm, "check_fgat", lambda n, times, **w: None)
+    monkeypatch.setattr(f4, "FourDObsTerm", term)
+    monkeypatch.setattr(C.VarCost, "reference", staticmethod(lambda b, xbu, terms: VarCost(ToyU(), terms[0])))
+    stamps = [f"2008-02-05_{12 + n}:00:00" for n in range(nslots)]
+    return A, bg, y, fg, stamps
+
+
+def test_analyse_runs_two_outer_loops_through_its_pieces(monkeypatch):
+    """``analyse``'s 4D-Var outer loop (``_analyse_var4d``) on the toy: loop 2
+    reruns from loop 1's analysis, the base check sees the rerun's slots, the
+    result is the last loop's increment about the rerun's start, the fit and
+    the timings are reported."""
+    import time
+
+    A, bg, y, fg, stamps = _fake_pieces(monkeypatch)
+    calls, checked = [], []
+
+    class Spy(SpyIdentity):
+        def check_base(self, states, rtol):
+            checked.append(([x["t"] for x, _ in states], rtol))
+
+    def nl_model(it, state):
+        calls.append((it, state))
+        return o4.Trajectory(slots=[fg(state.fields["t"], s) for s in stamps])
+
+    model = Spy()
+    first = [fg(bg, s) for s in stamps]
+    xb, grid = A.wrftoxb(first[0])
+
+    def run(nl=nl_model, **kw):
+        return A._analyse_var4d(None, first[0], xb, grid, ["o"] * 3, first, "proj", {"time_window_min": stamps[0],
+                                "time_window_max": stamps[-1]}, f4.Var4D(model=model, nl_model=nl, base_rtol=1e-6),
+                                max_ext_its=2, ntmax=30, eps=1e-8, check_rh=0, landuse_table=None, write=None,
+                                timings={}, t0=time.perf_counter(), **kw)
+
+    r = run(report_fit=True)
+    x1, x2 = (np.asarray(c.xhat) for c in r.cg)
+    a1 = bg + SIGMA_B * x1.reshape(NX, NY, NZ)
+    assert [c[0] for c in calls] == [2] and len(model.relinearised) == 1
+    np.testing.assert_array_equal(calls[0][1].fields["t"], a1)
+    assert len(checked) == 1 and checked[0][1] == 1e-6
+    assert all(np.array_equal(s, a1) for s in checked[0][0])
+    np.testing.assert_array_equal(r.cvt, x1 + x2)
+    np.testing.assert_array_equal(r.xb["t"], a1)
+    assert r.grid == {"start": stamps[0]}
+    np.testing.assert_array_equal(r.xa["t"], SIGMA_B * x2.reshape(NX, NY, NZ))
+    np.testing.assert_array_equal(r.wrf["T"], a1 + SIGMA_B * x2.reshape(NX, NY, NZ))
+    # Jb from the first guess: loop 2 starts at 0.5 |xhat1|^2 + Jo at loop 1's analysis
+    jo1 = 0.5 * float(np.sum(((y - np.concatenate([h(a1)] * 3)) / SIGMA_O) ** 2))
+    assert r.cg[1].j[0] == pytest.approx(0.5 * float(x1 @ x1) + jo1, rel=1e-13)
+    assert {"setup_s", "minimise_s", "transfer_s", "outer_setup_s", "nl_model_s"} <= set(r.timings)
+    assert r.fit["conventional"]["n"] == y.size and r.fit["conventional"]["oma_rms"] < r.fit["conventional"]["omb_rms"]
+    assert r.nobs == y.size and run().fit == {}
+    # a rerun with the wrong slot count, or on another grid, is refused in loop 2
+    with pytest.raises(ValueError, match="outer loop 2: the rerun has 2 slot states, the window 3"):
+        run(nl=lambda it, s: o4.Trajectory(slots=[fg(s.fields["t"], t) for t in stamps[:2]]))
+    with pytest.raises(ValueError, match="outer loop 2: slot 1"):
+        run(nl=lambda it, s: o4.Trajectory(slots=[fg(np.zeros((NX + 1, NY, NZ)), t) for t in stamps]))
 
 
 # ------------------------------------------------------------ the tutorial (identity TL, persistence NL)
