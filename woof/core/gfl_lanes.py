@@ -34,8 +34,17 @@ import re
 LANES = 128
 
 #: Contiguous character bytes per thread: ierrc, ierrcm and ierrcs are one
-#: 50-byte element each at its=ite=1, each 16-byte rounded (3 x 64 = 192).
+#: 50-byte element each at its=ite=1, each 16-byte rounded (3 x 64 = 192),
+#: and fscav's one word (16).
 CHARACTER_BYTES = 256
+#: The same per-thread contiguous region on Metal, which also holds every local whose address the
+#: scheme passes on (:func:`metal_locals`: about 1.6 KB at most, plus the entry's 18 bounds).
+METAL_CHARACTER_BYTES = 2048
+
+
+def character_bytes(metal=False):
+    """Contiguous bytes per lane for this backend's lowering (GF_CHARACTER_BYTES)."""
+    return METAL_CHARACTER_BYTES if metal else CHARACTER_BYTES
 
 #: Resident 128-thread blocks per SM the column kernel is compiled for
 #: (``GFL_MIN_BLOCKS`` in the kernel defines below; a test keeps the two equal).
@@ -48,7 +57,7 @@ SCRATCH_CAP_BYTES = 4 << 30
 #: captured WRF v4.8.0 CONUS 12 km calls used 42,928 bytes at 50 storage levels; cut to 16,
 #: 26, 36 and 50 levels they need 14,784, 24,112, 30,320 and 42,736 (about 820 per level),
 #: against shares of 32,768, 43,008, 53,248 and 67,584. A column that needs more continues
-#: in its slab's spill block, so it stays exact and running.
+#: in a spill entry of the launch's spill pool, so it stays exact and running.
 SHARE_BYTES_PER_LEVEL = 1024
 SHARE_BYTES_FIXED = 16384
 
@@ -71,17 +80,47 @@ def scratch_blocks(slabs, per_slab, *, resident_per_sm, sms, free=None):
     return max(1, min(cap // per_slab, max(1, int(resident_per_sm)) * int(sms), max(1, int(slabs))))
 
 
-def scratch_bytes(nz, columns, sms, *, resident_per_sm=MIN_BLOCKS_PER_SM, free=None):
+def scratch_bytes(nz, columns, sms, *, resident_per_sm=MIN_BLOCKS_PER_SM, free=None, metal=False):
     """Device bytes the GFL column launch holds for ``columns`` columns of ``nz`` mass levels.
 
     The launcher (woof.core.gfl_873b414._column_scratch) allocates exactly
     this; the admission (woof.core.preflight.gf_column_workspace_bytes)
-    prices it. Storage levels are the nz+1 faces, the widest field the
-    adapter passes.
+    prices it, with the spill pool (:func:`spill_pool_bytes`). Storage levels
+    are the nz+1 faces, the widest field the adapter passes.
     """
-    per_slab = (share_bytes(int(nz) + 1, int(nz)) + CHARACTER_BYTES) * LANES
+    per_slab = (share_bytes(int(nz) + 1, int(nz)) + character_bytes(metal)) * LANES
     slabs = -(-max(int(columns), 1) // LANES)
     return scratch_blocks(slabs, per_slab, resident_per_sm=resident_per_sm, sms=sms, free=free) * per_slab
+
+
+#: Spill shares per spill entry: a column deeper than its share continues in an entry this
+#: many shares deep.
+SPILL_SHARES = 2
+#: The most the spill pool holds (upstream 1.1.7's device-heap limit for the same spill).
+SPILL_POOL_BYTES = 256 << 20
+
+
+def spill_pool_slabs(spill_bytes, slabs):
+    """Slabs of the launch's spill pool: one per domain slab (an entry for every thread the
+    launch can start), within SPILL_POOL_BYTES.
+
+    A single slab larger than SPILL_POOL_BYTES (a column so deep that one entry per lane
+    passes the cap) is refused by name rather than allocated over the cap.
+    """
+    per_slab = int(spill_bytes) * LANES
+    if per_slab > SPILL_POOL_BYTES:
+        raise ValueError(
+            f"GFL spill slab of {per_slab} bytes ({int(spill_bytes)} per lane x {LANES} lanes) is larger "
+            f"than the spill pool cap SPILL_POOL_BYTES={SPILL_POOL_BYTES}: the column is too deep for "
+            "the GFL lane launch")
+    return min(max(int(slabs), 1), SPILL_POOL_BYTES // per_slab)
+
+
+def spill_pool_bytes(nz, columns):
+    """Device bytes of the spill pool the GFL column launch holds for ``columns`` columns of
+    ``nz`` mass levels (woof.core.gfl_873b414._spill_pool allocates exactly this)."""
+    spill_bytes = SPILL_SHARES * share_bytes(int(nz) + 1, int(nz))
+    return spill_pool_slabs(spill_bytes, -(-max(int(columns), 1) // LANES)) * spill_bytes * LANES
 
 _DEFINES = r'''#ifndef GF_LANES
 #ifdef GF_HOST_WITNESS
@@ -97,6 +136,14 @@ _DEFINES = r'''#ifndef GF_LANES
 #define GFL_MIN_BLOCKS 3
 #endif
 #define GF_CHARACTER_BYTES 256
+// The launch counters (column, spill pool). 32-bit on Metal, which has no 64-bit atomic add (the
+// launcher bounds both counters there); 64-bit on CUDA, whose kernel then compiles as it did with
+// 64-bit counters (a 32-bit column counter cost a 64-bit-counter build ~40% on an A6000, 2026-11-23).
+#ifdef __WOOF_METAL__
+typedef unsigned int gf_counter;
+#else
+typedef unsigned long long gf_counter;
+#endif
 #ifdef GF_HOST_WITNESS
 #define __forceinline__ inline
 #define __launch_bounds__(...)
@@ -168,14 +215,36 @@ struct GFFrame {
 # Positions count this lane's bytes exactly as before (so capacity, highwater
 # and the spill threshold keep their meaning); a lane byte offset b is the
 # address data + b*GF_LANES, i.e. word b/4 of the lane-interleaved slab.
-_WORKSPACE_NEW = '''struct GFWorkspace {
+_WORKSPACE_NEW = '''#ifndef GF_HOST_WITNESS
+// A spilling column's first free pool entry (e+1; 0 = all held): scan the bitmap, claiming a clear bit with
+// atomicOr (the old word says who won). Out of line so the allocate() inlined at every site stays one call.
+__device__ __noinline__ unsigned long long gf_spill_claim(unsigned int* map,unsigned long long entries){
+  const unsigned long long words=(entries+31ULL)/32ULL;
+  for(unsigned long long w=0;w<words;++w){
+    unsigned int seen=map[w];
+    for(unsigned int b=0;b<32u&&w*32ULL+b<entries;++b){
+      if(seen&(1u<<b))continue;
+      seen=atomicOr(map+w,1u<<b);
+      if((seen&(1u<<b))==0u)return w*32ULL+b+1ULL;
+    }
+  }
+  return 0ULL;
+}
+#endif
+struct GFWorkspace {
   char* data;unsigned long long capacity,position,highwater;unsigned int diagnostics;GFReal row_dx_first;
   // Mutable SAVE, including the early return: WRF v4.8.0 phys/GFL 873b414 module_cu_gfl_deep.F90:2641-2705
   bool fct1d3_error;
-  // A column whose need passes its share continues in its slab's spill block (spill_bytes per lane, lane-interleaved
-  // like the share, made by the first lane that needs it and freed when the block ends): the share is sized to what
-  // columns use, the spill keeps a deeper column exact and running.
-  char** spill;unsigned long long spill_bytes;
+  // A column whose need passes its share continues in a spill entry of spill_bytes, lane-interleaved like the share:
+  // entry e is word e%GF_LANES of slab e/GF_LANES of the launch's spill pool (host-allocated, spill_entries entries).
+  // A column that spills takes a free entry (spill_entry, e+1, 0 = none) from the pool's bitmap (spill_map, bit e
+  // set while entry e is held; 32-bit atomics, which Metal has) and the kernel returns it when the column ends.
+  // Metal has no device heap, so the pool stands in for an in-kernel malloc on every backend: placement only, the
+  // same words. The share is sized to what columns use, the spill keeps a deeper column exact and running.
+  // The limit: at most spill_entries columns can be spilling AT THE SAME TIME; one more traps (gf_trap, a loud
+  // failure, never a wrong word). Upstream 1.1.7 gave each spilling block a heap slab of 128 entries for the rest
+  // of the block's run (256 MiB heap), so the pool admits every launch upstream did, and more.
+  char* spill_pool;unsigned long long spill_bytes,spill_entries;unsigned int* spill_map;unsigned long long spill_entry;
   // Character arrays are read bytewise: contiguous per thread.
   char* bytes;unsigned long long bcapacity,bposition;unsigned int lane;
   __device__ void* allocate(unsigned long long n){
@@ -186,13 +255,13 @@ _WORKSPACE_NEW = '''struct GFWorkspace {
 #else
       if(position<capacity)position=capacity;
       if(position+n>capacity+spill_bytes){gf_trap();return nullptr;}
-      char* block=*(char* volatile*)spill;
-      if(block==nullptr){
-        char* fresh=(char*)malloc(spill_bytes*GF_LANES);if(fresh==nullptr){gf_trap();return nullptr;}
-        block=(char*)atomicCAS((unsigned long long*)spill,0ULL,(unsigned long long)fresh);
-        if(block==nullptr)block=fresh;else free(fresh);
+      if(spill_entry==0ULL){
+        spill_entry=gf_spill_claim(spill_map,spill_entries);
+        if(spill_entry==0ULL){gf_trap();return nullptr;}  // more columns spilling at once than entries
       }
-      void* result=block+4ULL*lane+(position-capacity)*GF_LANES;position+=n;highwater=gf_max(highwater,position);return result;
+      const unsigned long long entry=spill_entry-1ULL;
+      char* block=spill_pool+(entry/GF_LANES)*spill_bytes*GF_LANES+4ULL*(entry%GF_LANES);
+      void* result=block+(position-capacity)*GF_LANES;position+=n;highwater=gf_max(highwater,position);return result;
 #endif
     }
     void* result=data+position*GF_LANES;position+=n;highwater=gf_max(highwater,position);return result;
@@ -235,8 +304,13 @@ def _pointer_plus(scheme):
     return ''.join(out), count
 
 
-def lower(support, scheme, entry):
-    """Return the lane-interleaved CUDA source (support, scheme, lane entry) from the pinned pieces."""
+def lower(support, scheme, entry, metal=False):
+    """Return the lane-interleaved CUDA source (support, scheme, lane entry) from the pinned pieces.
+
+    ``metal``: the Metal lowering (:func:`metal_locals`), the same operations in
+    the same order with every local whose address is passed on held in device
+    memory; the CUDA text is unchanged by it.
+    """
     assert support.count(_WORKSPACE_OLD) == 1, 'GFL workspace support changed'
     support = support.replace(_WORKSPACE_OLD, _WORKSPACE_NEW)
     assert support.count('typedef char GFText[50];') == 1
@@ -246,7 +320,108 @@ def lower(support, scheme, entry):
     assert call, 'GFL column entry changed'
     arguments, count = _ARGUMENT.subn(lambda m: f'({m[1]}*)(gfl_field(ptrs,strides,{m[2]},col))', call[1])
     assert count == 46, count
-    return _DEFINES + support + '\n' + lane_scheme(scheme) + '\n' + _ENTRY.replace('@ARGUMENTS@', arguments)
+    defines, lane_entry = _DEFINES, _ENTRY.replace('@ARGUMENTS@', arguments)
+    lowered = lane_scheme(scheme)
+    if metal:
+        lowered, need = metal_locals(lowered)
+        lane_entry, bounds = _metal_bounds(lane_entry)
+        # ierrc/ierrcm/ierrcs (192), fscav (16), the promoted locals (nested calls at most add up) and the bounds
+        assert 192 + 16 + need + bounds <= METAL_CHARACTER_BYTES, need
+        defines = defines.replace('#define GF_CHARACTER_BYTES %d\n' % CHARACTER_BYTES,
+                                  '#define GF_CHARACTER_BYTES %d\n' % METAL_CHARACTER_BYTES)
+        # Every lane pointer now points into device memory (scratch, fields, the byte region).
+        assert support.count(_LANE_FIELD) == 1
+        support = support.replace(_LANE_FIELD, _LANE_FIELD_METAL)
+    return defines + support + '\n' + lowered + '\n' + lane_entry
+
+
+#: Scalar and array types of the scheme's locals.
+_LOCAL_TYPES = {'GFReal': 4, 'int': 4, 'bool': 1, 'long long': 8, 'unsigned int': 4}
+#: A scheme function: every one takes the column workspace first.
+_SCHEME_FUNCTION = re.compile(r'^__device__ [^\n;]*\(GFWorkspace &workspace[^;{]*\)\s*\n\{\n', re.M)
+_FUNCTION_END = re.compile(r'^\}\n', re.M)
+_LOCAL_TYPE = '|'.join(re.escape(t) for t in _LOCAL_TYPES)
+
+
+def _address_taken(body):
+    """Names after an address-of ``&`` (as written in the lowered scheme), not the right side of ``&&``."""
+    names = set()
+    for m in re.finditer(r'&\s*(\w+)', body):
+        at = m.start()
+        if body[at + 1:at + 2] == '&' or body[at - 1:at] == '&':
+            continue
+        if body[at - 1:at].isalnum() or body[at - 1:at] in ('_', '.', '>'):
+            continue
+        names.add(m[1])
+    return names
+
+
+def metal_locals(scheme):
+    """Hold every local whose address a scheme function passes on in the thread's contiguous region.
+
+    On CUDA a lane pointer or descriptor may point at a local (``&itf``, a
+    Fortran constant ``&C_7360``, ``zuh2``) or at the scratch: generic
+    addressing covers both. A Metal pointer has one address space, so here
+    each such local of a function becomes a reference to a 16-byte slot of
+    one block the function takes from the workspace's byte region on entry
+    (released on return by its own GFFrame). An initialised local is
+    assigned its initialiser where it was declared. Only placement moves.
+    Returns the lowered scheme and the bytes all functions take together
+    (an upper bound on what nested calls hold at once).
+    """
+    out, pos, total = [], 0, 0
+    for head in list(_SCHEME_FUNCTION.finditer(scheme)):
+        end = _FUNCTION_END.search(scheme, head.end()).end()
+        body = scheme[head.end():end]
+        names = _address_taken(body)
+        arrays = set(re.findall(r'^\s+(?:%s) (\w+)\[\d+\]' % _LOCAL_TYPE, body, re.M))
+        names |= {a for a in arrays if re.search(r'[(,]\s*%s\s*[,)]' % re.escape(a), body)}
+        offset = 0
+
+        def slot(m):
+            nonlocal offset
+            indent, kind, name, count, value = m[1], m[2], m[3], m[4], m[5]
+            at = offset
+            offset += (_LOCAL_TYPES[kind] * (int(count) if count else 1) + 15) & ~15
+            if count:
+                assert value is None, name
+                return f'{indent}{kind} (&{name})[{count}] = *({kind} (*)[{count}]) (gf_locals + {at});'
+            line = f'{indent}{kind} &{name} = *({kind} *) (gf_locals + {at});'
+            return line if value is None else f'{line} {name} = {value};'
+
+        if names:
+            alternatives = '|'.join(sorted(map(re.escape, names), key=len, reverse=True))
+            declaration = re.compile(r'^(\s+)(%s) (%s)(?:\[(\d+)\])?(?: = ([^;]*))?;$' % (_LOCAL_TYPE, alternatives), re.M)
+            body = declaration.sub(slot, body)
+        if offset:
+            body = ('  GFFrame gf_locals_frame (workspace);\n'
+                    f'  char *gf_locals = (char *) workspace.allocate_bytes ({offset});\n' + body)
+            total += offset
+        out.append(scheme[pos:head.end()] + body)
+        pos = end
+    out.append(scheme[pos:])
+    return ''.join(out), total
+
+
+_ENTRY_BOUNDS = re.compile(r'^ int (ims=1,[^;]*);$', re.M)
+
+
+def _metal_bounds(entry):
+    """The entry's WRF bounds (passed to the driver by address) in the thread's contiguous region."""
+    m = _ENTRY_BOUNDS.search(entry)
+    assert m, 'GFL entry bounds changed'
+    pairs = [d.split('=', 1) for d in m[1].split(',')]
+    lines = [f' int* gf_bounds=(int*)workspace.allocate_bytes({4 * len(pairs)});']
+    lines += [f' int &{name}=gf_bounds[{i}];{name}={value};' for i, (name, value) in enumerate(pairs)]
+    return entry[:m.start()] + '\n'.join(lines) + entry[m.end():], (4 * len(pairs) + 15) & ~15
+
+
+_FSCAV_LOCAL = '  GFReal fscav[1];\n'
+_FSCAV_SCRATCH = '  GFReal (&fscav)[1] = *(GFReal (*)[1]) workspace.allocate_bytes (16);\n'
+
+
+_LANE_FIELD = '  T* p;\n'
+_LANE_FIELD_METAL = '  T* p __attribute__((annotate("woof_space:device")));\n'
 
 
 def lane_scheme(scheme):
@@ -263,12 +438,18 @@ def lane_scheme(scheme):
         pattern = name + ' = (char *) workspace.allocate ('
         assert scheme.count(pattern) == 1, name
         scheme = scheme.replace(pattern, name + ' = (char *) workspace.allocate_bytes (')
+    # fscav, the driver's one-word local array, is passed by descriptor (data = &fscav[0]) to
+    # cu_gfl_deep_run, whose other descriptors hold scratch words; a Metal struct pointer
+    # field has one address space, so its word lives in the per-thread byte region as well.
+    # A reference to the array keeps every use (sizeof, &fscav[0]) spelled and sized as before.
+    assert scheme.count(_FSCAV_LOCAL) == 1
+    scheme = scheme.replace(_FSCAV_LOCAL, _FSCAV_SCRATCH)
     scheme, plus = _pointer_plus(scheme)
     assert plus == 36, plus
     # Every float/integer/logical pointer in the scheme is a lane pointer. Fixed-size
     # local arrays stay C arrays: alpha/g_alpha/xk/xff_shal are read locally, zuh2 is
-    # passed to get_zu_zd_pdf_fim, which never reads it, and fscav (one word) is read at
-    # element 0 only (descriptor lbound = ubound = 1).
+    # passed to get_zu_zd_pdf_fim, which never reads it, and fscav (one contiguous word, above)
+    # is read at element 0 only (descriptor lbound = ubound = 1).
     before = len(re.findall(r'\bGFReal \*|\bint \*|\bbool \*', scheme))
     scheme = re.sub(r'\bGFReal \*', 'GFP ', scheme)
     scheme = re.sub(r'\bint \*', 'GIP ', scheme)
@@ -306,8 +487,9 @@ __device__ void gfl_column(long long col,const unsigned long long* ptrs,const un
  }
 }
 #ifndef GF_HOST_WITNESS
-// A block is one slab of the scratch (blockDim = GF_LANES; thread t is lane t of the slab and keeps it):
-// its threads share the slab's share and spill block. Each warp takes the next 32 consecutive columns from
+// A block is one slab of the scratch (blockDim = GF_LANES; thread t is lane t of the slab and keeps it; a
+// column that spills holds a spill entry until it ends). next[0] is the column counter (gf_counter: 32-bit
+// on Metal, where the launcher bounds it, 64-bit on CUDA); spill_map is the pool's entry bitmap. Each warp takes the next 32 consecutive columns from
 // the launch's counter until none are left, so a warp held up by convecting columns does not leave the
 // card idle behind it (a fixed column-per-slot round left the last round a few blocks wide). Columns are
 // independent; each executes the complete source order from a fresh workspace, so which warp runs a
@@ -315,35 +497,36 @@ __device__ void gfl_column(long long col,const unsigned long long* ptrs,const un
 extern "C" __global__ void __launch_bounds__(GF_LANES, GFL_MIN_BLOCKS) gfl_lane_columns(long long ncol,
  const unsigned long long* ptrs,const unsigned long long* strides,char* scratch,unsigned long long capacity,
  unsigned long long spill_bytes,unsigned int* diagnostics,unsigned long long* highwater,const int* vertical,
- unsigned int* saved_fct_error,unsigned long long* next){
- __shared__ char* spill;
- if(threadIdx.x==0)spill=nullptr;
- __syncthreads();
+ unsigned int* saved_fct_error,gf_counter* next,char* spill_pool,unsigned long long spill_entries,
+ unsigned int* spill_map){
  const unsigned int lane=threadIdx.x, warp_lane=threadIdx.x&31u;
  char* slab=scratch+(unsigned long long)blockIdx.x*(capacity+GF_CHARACTER_BYTES)*GF_LANES;
  for(;;){
-   unsigned long long first=0;
-   if(warp_lane==0)first=atomicAdd(next,32ULL);
+   gf_counter first=0;
+   if(warp_lane==0)first=atomicAdd(next,(gf_counter)32);
    first=__shfl_sync(0xffffffffu,first,0);
-   if(first>=(unsigned long long)ncol)break;
+   if(first>=(gf_counter)ncol)break;
    const long long col=(long long)first+warp_lane;
    if(col<ncol){
-     GFWorkspace workspace{slab+4ULL*lane,capacity,0,0,0,GFReal(0.0f),false,&spill,spill_bytes,
-       slab+capacity*GF_LANES+(unsigned long long)lane*GF_CHARACTER_BYTES,GF_CHARACTER_BYTES,0,lane};
+     GFWorkspace workspace{slab+4ULL*lane,capacity,0,0,0,GFReal(0.0f),false,spill_pool,spill_bytes,spill_entries,
+       spill_map,0ULL,slab+capacity*GF_LANES+(unsigned long long)lane*GF_CHARACTER_BYTES,GF_CHARACTER_BYTES,0,lane};
      gfl_column(col,ptrs,strides,workspace,diagnostics,highwater,vertical,saved_fct_error);
+     if(workspace.spill_entry!=0ULL){  // the column is done: its spill entry is free for the next one
+       const unsigned long long e=workspace.spill_entry-1ULL;
+       atomicAnd(spill_map+e/32ULL,~(1u<<(unsigned int)(e%32ULL)));
+     }
    }
    __syncwarp();
  }
- __syncthreads();
- if(threadIdx.x==0&&spill!=nullptr)free(spill);
 }
 #else
 extern "C" void gfl_lane_columns_host(long long ncol,const unsigned long long* ptrs,const unsigned long long* strides,
  char* scratch,unsigned long long capacity,unsigned long long spill_bytes,unsigned int* diagnostics,
  unsigned long long* highwater,const int* vertical,unsigned int* saved_fct_error,unsigned long long*){
- char* spill=nullptr;char characters[GF_CHARACTER_BYTES];
+ char characters[GF_CHARACTER_BYTES];
  for(long long c=0;c<ncol;c++){
-   GFWorkspace workspace{scratch,capacity,0,0,0,GFReal(0.0f),false,&spill,spill_bytes,characters,GF_CHARACTER_BYTES,0,0};
+   GFWorkspace workspace{scratch,capacity,0,0,0,GFReal(0.0f),false,nullptr,spill_bytes,0,nullptr,0,characters,
+     GF_CHARACTER_BYTES,0,0};
    gfl_column(c,ptrs,strides,workspace,diagnostics,highwater,vertical,saved_fct_error);
  }
 }

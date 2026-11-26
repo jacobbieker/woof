@@ -14,6 +14,11 @@ Hybrid 3DEnVar is opt-in: ``--ensemble-member`` (members' history files,
 ``gen_be_ep2``'s perturbations) or ``--ep-dir`` (WRFDA ``ep`` files) with
 ``--je-factor``.  FGAT is opt-in: one ``--fgat-obs`` and one
 ``--fgat-first-guess`` per time slot (WRFDA's ``obNN.ascii`` and ``fgNN``).
+4D-Var is opt-in and experimental (``--4dvar``, WRFDA's ``var4d``): the same
+per-slot files, the first guesses being the nonlinear trajectory, with
+WRFPLUS's identity TL model (``enable_identity``) and one outer loop; outer
+loops and P3a's window model are on the Python door
+(``analyse(var4d=Var4D(...))``).
 """
 
 from __future__ import annotations
@@ -104,6 +109,32 @@ def register_cli(subparsers):
                    help="one time slot's first guess (fg01, fg02, ...), in slot order, one per --fgat-obs: the "
                         "window's start, then evenly spaced, the last at its end.  --first-guess stays the "
                         "analysis-time background")
+    v = p.add_argument_group("4D-Var (opt-in, experimental; WRFDA var4d)")
+    v.add_argument("--4dvar", dest="var4d", action="store_true",
+                   help="4D-Var over the --fgat-obs/--fgat-first-guess slots: the first guesses are the nonlinear "
+                        "trajectory (WRFDA's nl_d01 states), --first-guess its start; WRFPLUS's identity TL "
+                        "model (enable_identity), one outer loop")
+    v.add_argument("--var4d-bin", type=positive_int, default=None,
+                   help="WRFDA var4d_bin in seconds (default: the window over the slots); must divide the window "
+                        "and be divisible by the time step")
+    v.add_argument("--time-step", type=positive_int, default=None,
+                   help="WRF time_step in seconds (default: the first guess's DT)")
+    v.add_argument("--time-window-min", default=None,
+                   help="WRFDA time_window_min, YYYY-MM-DD_hh:mm:ss (default: --first-guess's time); 4D-Var's "
+                        "analysis is at the window's start")
+    v.add_argument("--time-window-max", default=None,
+                   help="WRFDA time_window_max (default: the last --fgat-first-guess's time)")
+    v.add_argument("--var4d-press", choices=("wrfda", "dnw"), default="wrfda",
+                   help="da_transfer_xatowrftl's g_p integration: WRFDA's (default, word-exact) or the opt-in "
+                        "dnw correction")
+    v.add_argument("--var4d-ph", choices=("zero", "hydrostatic"), default="zero",
+                   help="the TL start's g_ph: zero as WRFDA (default) or the opt-in hydrostatic g_ph")
+    v.add_argument("--var4d-lbc", action="store_true",
+                   help="WRFDA var4d_lbc (the boundary control): not ported, refused")
+    v.add_argument("--jcdfi-use", action="store_true",
+                   help="WRFDA jcdfi_use (the digital-filter constraint): not ported, refused")
+    v.add_argument("--multi-inc", type=int, choices=(0, 1, 2), default=0,
+                   help="WRFDA multi_inc: only 0 (one resolution) is ported; 1 and 2 are refused")
     p.set_defaults(func=main)
     return p
 
@@ -122,9 +153,14 @@ def main(args) -> int:
     def write(line: str) -> None:
         print(line, flush=True)
 
+    try:
+        var4d_kw, var4d_recipe = _var4d_kwargs(args)
+    except ValueError as exc:
+        print(f"var: {exc}", file=sys.stderr)
+        return 2
     rad_kw = _radiance_kwargs(args) if args.radiance_scene else {}
     try:
-        fgat_kw, fgat_recipe = _fgat_kwargs(args)
+        fgat_kw, fgat_recipe = _fgat_kwargs(args, time_window=var4d_kw.get("time_window"))
         if fgat_kw and (args.ensemble_member or args.ep_dir):
             raise ValueError("FGAT with the hybrid (--ensemble-member/--ep-dir) is not ported: WRFDA bins "
                              "the ensemble by time slot only in 4DEnVar (use_4denvar)")
@@ -134,6 +170,7 @@ def main(args) -> int:
         return 2
     rad_kw.update(hyb_kw)
     rad_kw.update(fgat_kw)
+    rad_kw.update(var4d_kw)
     obs = args.fgat_obs if fgat_kw else args.obs
     result = analyse(args.be, obs, args.first_guess, tier=args.tier, ntmax=args.ntmax, eps=args.eps,
                      max_ext_its=args.max_ext_its, orthonorm_gradient=args.orthonorm_gradient,
@@ -151,6 +188,9 @@ def main(args) -> int:
     if fgat_recipe:
         recipe["fgat"] = fgat_recipe
         notes["var"]["fgat"] = fgat_recipe
+    if var4d_recipe:
+        recipe["var4d"] = var4d_recipe
+        notes["var"]["var4d"] = var4d_recipe
     if result.radiance is not None:
         recipe["radiance_scenes"] = [Path(d).name for d in args.radiance_scene]
         recipe["varbc"] = bool(args.varbc)
@@ -185,10 +225,11 @@ def _sha256(path) -> str:
     return h.hexdigest()
 
 
-def _fgat_kwargs(args) -> tuple[dict, dict | None]:
+def _fgat_kwargs(args, time_window: tuple[str, str] | None = None) -> tuple[dict, dict | None]:
     """``analyse``'s ``fgat`` from --fgat-obs/--fgat-first-guess, and the recipe entry
     (each slot's file names and sha256).  ``({}, None)`` for 3D-Var; every
-    refusal is a ValueError the door prints as ``var: ...``."""
+    refusal is a ValueError the door prints as ``var: ...``.  ``time_window``
+    (4D-Var's) replaces the window around the first guess."""
     import types
 
     obs, fgs = list(args.fgat_obs), list(args.fgat_first_guess)
@@ -210,15 +251,108 @@ def _fgat_kwargs(args) -> tuple[dict, dict | None]:
     from woof.da.var.analysis import obs_window
 
     window = obs_window(types.SimpleNamespace(times=fm.first_guess_time(args.first_guess)), args.window_minutes)
+    if time_window is not None:
+        window.update(time_window_min=time_window[0], time_window_max=time_window[1])
     try:
         fm.check_fgat(len(obs), [fm.first_guess_time(f) for f in fgs], time_window_min=window["time_window_min"],
-                      time_window_max=window["time_window_max"], max_ext_its=args.max_ext_its,
+                      time_window_max=window["time_window_max"],
+                      max_ext_its=1 if time_window is not None else args.max_ext_its,
                       analysis_date=window["analysis_date"])
     except NotImplementedError as exc:
         raise ValueError(str(exc)) from None
     recipe = {"obs": [{"name": Path(p).name, "sha256": _sha256(p)} for p in obs],
               "first_guesses": [{"name": Path(p).name, "sha256": _sha256(p)} for p in fgs]}
     return {"fgat": fgs}, recipe
+
+
+#: 4D-Var flags that mean nothing without --4dvar (flag, attribute, default).
+_VAR4D_FLAGS = (("--var4d-bin", "var4d_bin", None), ("--time-step", "time_step", None),
+                ("--time-window-min", "time_window_min", None), ("--time-window-max", "time_window_max", None),
+                ("--var4d-press", "var4d_press", "wrfda"), ("--var4d-ph", "var4d_ph", "zero"))
+
+
+def _var4d_kwargs(args) -> tuple[dict, dict | None]:
+    """``analyse``'s ``var4d`` and ``time_window`` from --4dvar and its flags, and the recipe entry.
+
+    ``({}, None)`` without --4dvar.  Every refusal is a ValueError the door
+    prints as ``var: ...``: WRFDA's options that are not ported, by their
+    namelist names (``var4d_lbc``, ``jcdfi_use``, ``multi_inc``), WRFDA's
+    window rules (``check_var4d_bins``), a first guess not at the window's
+    start, and what the door cannot run (outer loops: no nonlinear model to
+    rerun; the device tiers).
+    """
+    for flag, name in (("--var4d-lbc", "var4d_lbc"), ("--jcdfi-use", "jcdfi_use")):
+        if getattr(args, name):
+            raise ValueError(f"{flag}: WRFDA's {name} is not ported (4D-Var's "
+                             f"{'lateral boundary control' if name == 'var4d_lbc' else 'digital-filter constraint'}"
+                             "); refused")
+    if args.multi_inc:
+        raise ValueError(f"--multi-inc {args.multi_inc}: WRFDA's multi_inc (multi-resolution incremental 4D-Var) "
+                         "is not ported; only 0")
+    if not args.var4d:
+        given = [flag for flag, key, default in _VAR4D_FLAGS if getattr(args, key) != default]
+        if given:
+            raise ValueError(f"{', '.join(given)} need --4dvar")
+        return {}, None
+    if not args.fgat_obs or not args.fgat_first_guess:
+        raise ValueError("--4dvar needs the trajectory: one --fgat-obs and one --fgat-first-guess per time slot "
+                         "(WRFDA's obNN.ascii and the nonlinear run's state at each slot time)")
+    if args.max_ext_its > 1:
+        raise ValueError(f"--4dvar with --max-ext-its {args.max_ext_its}: each outer loop reruns the nonlinear "
+                         "model from the updated analysis (WRFDA's da_nl_model), and the woof var door has no "
+                         "model to rerun; outer loops are on the Python door "
+                         "(analyse(var4d=Var4D(nl_model=...), max_ext_its=...))")
+    if args.tier != "reference":
+        raise ValueError(f"--4dvar with --tier {args.tier}: the 4D-Var observation term runs on the host in binary64 "
+                         "and has no device tier; use --tier reference")
+    if args.radiance_scene:
+        raise ValueError("--4dvar with --radiance-scene is not ported (WRFDA bins radiances by time slot)")
+    if args.ensemble_member or args.ep_dir:
+        raise ValueError("--4dvar with the hybrid (--ensemble-member/--ep-dir) is not ported")
+    from woof.da.var import fgat as fm
+    from woof.da.var.fourd import Var4D, check_var4d_bins
+
+    for flag, path in (("--fgat-first-guess", p) for p in args.fgat_first_guess):
+        if not Path(path).is_file():
+            raise ValueError(f"{flag} {path} is not a file")
+    fg_time = fm.first_guess_time(args.first_guess)
+    tmin = args.time_window_min or fg_time
+    tmax = args.time_window_max or fm.first_guess_time(args.fgat_first_guess[-1])
+    for flag, stamp in (("--time-window-min", tmin), ("--time-window-max", tmax)):
+        _check_stamp(flag, stamp)
+    if tmin[:16] != fg_time[:16]:
+        raise ValueError(f"--4dvar: --first-guess is at {fg_time}, not at the window's start {tmin[:19]} (WRFDA's "
+                         "4D-Var analysis is at time_window_min: the TL model starts from it)")
+    time_step = args.time_step if args.time_step is not None else _dt_attribute(args.first_guess)
+    bins = check_var4d_bins(tmin, tmax, len(args.fgat_first_guess), var4d_bin=args.var4d_bin, time_step=time_step)
+    var4d = Var4D(press=args.var4d_press, ph=args.var4d_ph, var4d_bin=bins["var4d_bin"], time_step=time_step)
+    recipe = {"time_window": [tmin[:19], tmax[:19]], "var4d_bin": bins["var4d_bin"], "time_step": time_step,
+              "num_fgat_time": bins["num_fgat_time"], "model": "identity", "press": args.var4d_press,
+              "ph": args.var4d_ph}
+    return {"var4d": var4d, "time_window": (tmin[:19], tmax[:19])}, recipe
+
+
+def _check_stamp(flag: str, stamp: str) -> None:
+    import datetime as dt
+
+    try:
+        dt.datetime.strptime(stamp[:19], "%Y-%m-%d_%H:%M:%S")
+    except ValueError:
+        raise ValueError(f"{flag} {stamp!r} is not YYYY-MM-DD_hh:mm:ss") from None
+
+
+def _dt_attribute(path) -> int:
+    """The WRF file's ``DT`` global attribute (its time step, seconds), refused unless whole and positive."""
+    import netCDF4
+
+    with netCDF4.Dataset(Path(path)) as nc:
+        dt = nc.getncattr("DT") if "DT" in nc.ncattrs() else None
+    if dt is None:
+        raise ValueError(f"--4dvar: {Path(path).name} has no DT attribute; give --time-step (WRFDA's time_step)")
+    if not float(dt) > 0 or float(dt) != int(float(dt)):
+        raise ValueError(f"--4dvar: {Path(path).name} has DT = {dt}; WRFDA's time_step is a whole number of "
+                         "seconds, give --time-step")
+    return int(float(dt))
 
 
 #: Hybrid flags that mean nothing without an ensemble, and the ones that belong to --ep-dir.

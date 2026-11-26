@@ -5635,7 +5635,7 @@
    },
    {
     "file": "woof/backend/translate/__init__.py",
-    "sha256": "98bcc4104f8f4115f57697a29c87a14035f10c3c126dbd4583856cb47258e8e2"
+    "sha256": "602a65e938c6e4a4360bd6561e832c92ccad35f68afb893dd5c68b6cbee8ca3f"
    },
    {
     "file": "woof/chem_micm.py",
@@ -5715,15 +5715,15 @@
    },
    {
     "file": "woof/core/gfl.py",
-    "sha256": "f17d2c0f39f71646b1fdd7750c19781b0b09472f2d6b56dbaac5842b74408bc6"
+    "sha256": "2bff47b6e759416add71a0461428e4bf1af7cfa8a62ac43448972e25eda01c38"
    },
    {
     "file": "woof/core/gfl_873b414.py",
-    "sha256": "c6d278a67fef9fd1b2b01bfb71aeec735a0b02afe541fab75ea8d5deed1365aa"
+    "sha256": "9cfb22bf0b5d2a50de10728ac280c5c287d4071d66268a427eb423953503bda5"
    },
    {
     "file": "woof/core/gfl_lanes.py",
-    "sha256": "78d03443c618140b7286e7563417d40b7ec33bfb1b32b06d832b4d4b10c16437"
+    "sha256": "c6e02d408051aeff2675c0fb2d06d300db49763819759083517c5ddab24fc289"
    },
    {
     "file": "woof/core/health_ledger.py",
@@ -5883,7 +5883,7 @@
    },
    {
     "file": "woof/core/preflight.py",
-    "sha256": "2fb7d57f7ec89e24d1270368339c8ab289c56e28ad0d46a46cead4473ba75439"
+    "sha256": "6f113a98a9449a748a0ef268e936c74da85dc44a83090569d3ac0e47a9e28cd2"
    },
    {
     "file": "woof/core/refl.py",
@@ -7413,7 +7413,7 @@
    },
    {
     "file": "woof/core/gfl_lanes.py",
-    "sha256": "8ac9e6ca0e8d6488f6b5da7092d58ba9c16ec4639b980cd9a6018f35a96527cd"
+    "sha256": "632129c483482236cf2be90f69d27584fd7c413503c101827ea0e39b0c65c1c7"
    },
    {
     "file": "woof/core/gfl_lanes.py",
@@ -7421,11 +7421,15 @@
    },
    {
     "file": "woof/core/gfl_lanes.py",
-    "sha256": "9c6e21b5bf8f6c68ab35da916ba9f69b5d6b64b2b4b19363ce2002cb64abb23a"
+    "sha256": "51e750bd472452e2a578995c1e300a2684b889f852b16aad93982b64040bc35e"
    },
    {
     "file": "woof/core/gfl_lanes.py",
     "sha256": "c07db58b7a48483a23857bc025594080b469010fd7ce5c445691ada9eaf37d23"
+   },
+   {
+    "file": "woof/core/gfl_lanes.py",
+    "sha256": "e4cd07cadee056dfa4cd8270581b9eafbf783a85f3da526dbe3c9b223ac7ca5f"
    },
    {
     "file": "woof/core/health_ledger.py",
@@ -27558,7 +27562,7 @@
    },
    "source_sha256": "09a8565214c8550d78b4d3eb0ff3009aeafc1cc8fb9fceaa5b007883370928cb"
   },
-  "literal:woof/core/gfl.py:366": {
+  "literal:woof/core/gfl.py:340": {
    "assessment": "static_diagnostic_only",
    "coverage": "compiled",
    "dataflow_differences": {
@@ -27603,7 +27607,7 @@
    },
    "source_sha256": "ccef701f1f1ddc3fda00b3e023a28874c32e62e1b63b5a02adebd7de47bb51f6"
   },
-  "literal:woof/core/gfl_873b414.py:43867": {
+  "literal:woof/core/gfl_873b414.py:43925": {
    "assessment": "static_diagnostic_only",
    "coverage": "compiled",
    "dataflow_differences": {

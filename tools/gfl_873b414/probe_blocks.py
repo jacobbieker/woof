@@ -26,7 +26,6 @@ def variant(gfl, device, blocks):
     from woof.core.kernels import compile_no_ftz
     import cupy as cp
     with cp.cuda.Device(device):
-        gfl._spill_heap()
         source = f'#define GFL_MIN_BLOCKS {blocks}\n' + gfl.cuda_source()
         return compile_no_ftz(source, module_key=f'{gfl.MODULE_KEY}.mb{blocks}', filename=f'gfl_lanes_mb{blocks}.cu',
                               device=device)
