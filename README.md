@@ -527,8 +527,11 @@ Notes on the 1.1.7 sync:
     separated after the pre-dynamics and combined before each ridging, the
     vertical thermodynamics, the shortwave and `coupling_prep`) and the
     coupled step with the velocity solver, word for
-    word with v8.4.2 on CUDA and Metal. Two v8.4.2 quirks there have opt-in
-    corrections: `subcycle_snow_ice_tracers` (v8.4.2 combines every dynamics
+    word with v8.4.2 on CUDA and Metal. Three v8.4.2 quirks there have opt-in
+    corrections: `zap_snow_area` (`zap_small_areas` hands `zap_snow` the area
+    it has just zeroed, so the snow surface layer's tracer drops out of the
+    flux; the correction passes the category's area),
+    `subcycle_snow_ice_tracers` (v8.4.2 combines every dynamics
     subcycle but separates once a step, so an earlier subcycle's ridging of
     the tracers is lost) and `bgc_snow_new_category` (without the vertical
     thermodynamics `update_snow_bgc` divides 0/0 for a category the last
@@ -744,7 +747,7 @@ Notes on the 1.1.7 sync:
     `set_sfcflux_order`, `ice_velocity_at_cell`,
     `ccsm3_absorbed_solar_layers`, `dedd_zero_volume_ice`,
     `zbgc_c2n_proteins`, `bgc_inactive_diagnostics`, `zsal_solve`,
-    `bgc_snow_new_category` and `subcycle_snow_ice_tracers`;
+    `bgc_snow_new_category`, `subcycle_snow_ice_tracers` and `zap_snow_area`;
     and the MPAS-Seaice velocity solver's `planar_metric_terms`,
     `periodic_local_coords` and `weak_ridge_delta`.
     The list and its values are in
@@ -839,7 +842,12 @@ Notes on the 1.1.7 sync:
     -30 m cut-off removes the surface drag in 32 % of land cells there,
     and against WIS2 stations it raised the 10 m wind bias by 0.5 m/s.
     The seam warns above 4 km
-    ([TERRAIN-DRAG.md](docs/public/TERRAIN-DRAG.md));
+    ([TERRAIN-DRAG.md](docs/public/TERRAIN-DRAG.md)).
+    `slope_rad = 1` on the WOOF column route builds SLOPE and SLP_AZI from
+    the least-squares terrain plane through each cell's mesh neighbours, in
+    place of WRF's grid-axis centred differences (`woof/hex/slope_statics.py`
+    documents the difference); spherical meshes only, and `topo_shading`
+    stays refused;
   - CCPP TKE-EDMF on the column seam;
   - diagnostics: `nwp_diagnostics` maxima, `p_lev`/`z_lev` levels, `tslist`
     station series, `prec_acc_dt` windows and `acc_phy_tend`, AFWA
@@ -868,12 +876,22 @@ Notes on the 1.1.7 sync:
     `--w-damping` and `--inflow-perturbation` run on both the WOOF column
     route and the MPAS v8.4.2 suite route (R2), where the depth is the
     suite's `hpbl`;
+  - WRF diffusion and advection settings (`diff_opt`, `khdif`, `kvdif`,
+    `c_s`, `mix_full_fields` and the `*_adv_order` options) pass on hex
+    only where MPAS-A runs the same operator (`diff_opt=0` with
+    `--horiz-mixing off`, `v_mom_adv_order=3`, `mix_full_fields=true`,
+    `khdif=0`, `kvdif=0`). Every other value is refused with the reason
+    the two operators differ and MPAS's own option for it;
   - WRF's flow-dependent specified zone for the microphysics species a
     regional boundary stream does not drive (`woof hex forecast
     --undriven-species-boundary wrf-flow-dependent`: outflow copies the
     first cell inside the zone, inflow sets 0, or `ccn_conc` for the CCN
-    number). The default, `free`, keeps MPAS's behaviour: those species
-    get no boundary step;
+    number). The default, `free`, keeps MPAS's behaviour: on the WOOF
+    column route those species get no boundary step, and on the MPAS
+    v8.4.2 suite route (R2) they are driven from the boundary pool's
+    allocated values. R2 carries the rule on one card when the flag is
+    given (correct mode and `--quirk-corrections all` leave R2 native): it
+    then drives only the species the boundary files hold;
   - extra-species microphysics on regional hex runs: CAM-MG, Morrison and
     Morrison-aerosol, NSSL-2, Milbrandt-Yau, P3 (mp 50-53), NTU, ISHMAEL,
     UDM, WDM6, Goddard 4-ice, Ferrier-Aligo with advected rime (mp 15)
@@ -895,19 +913,24 @@ Notes on the 1.1.7 sync:
     transition-band diagnostics. The step is set by the smallest cell, so
     a graded mesh costs about what its finest cells cost;
   - an option matrix that runs generic-seam column options through a real
-    hex forecast on CUDA and Metal. Every row now runs or is refused by
-    name with its reason: CAM radiation is refused on Metal, GFDL-Eta on
-    the 149-level case (nominal eta), MAD-WRF (species row) and any
-    radiation-off run with Noah-MP (no GLW source); the WSM3, WSM5
-    and KF-CuP rows state their layer limits. BouLac and QNSE PBL now
-    admit 256 levels (compile-time 128/256 tier; at 128 levels or fewer
-    the unchanged kernel, word for word); their matrix rows still record
-    the old 128-level refusal until the 149-level hex case is re-run.
-    KF-CuP and Multiscale Kain-Fritsch now take up to 256 levels (were
-    128 and 160): both keep every column array in a runtime-sized
-    workspace, so the bound was a refusal guard only, and words at the
-    old level counts are unchanged
-    (`tests/test_cu_kfcup_mskf_256_levels_gpu.py`).
+    hex forecast on CUDA and Metal. Every row runs, is refused by name
+    with its reason, or records its failure: CAM radiation is refused on
+    Metal, GFDL-Eta on the 149-level case (nominal eta), MAD-WRF
+    (species row) and any shortwave-only or radiation-off run with Noah-MP
+    (no GLW source). On the 149-level case the CUDA rows for WSM3, WSM5,
+    WSM7, WDM5, WDM7, BouLac, QNSE (PBL and surface layer), Multiscale
+    Kain-Fritsch and Fu-Liou-Gu now run within the baseline's budget
+    tolerances, since each admits 256 levels (compile-time tiers or
+    runtime-sized workspaces; words at the old level counts unchanged,
+    `tests/test_cu_kfcup_mskf_256_levels_gpu.py` and each family's
+    256-level test). KF-CuP now passes admission there too but its CUDA
+    row stops with negative accumulated `rainc` (a binary32 rounding in
+    the capped downdraft, not the level count); the row records that
+    failure until the fix lands. The Metal entries, KF-CuP's 128-level
+    refusal among them, predate the WRF
+    4.8.0 sync: the case runs the default Grell-Freitas
+    (`gfl_873b414`), which is refused on Metal, so they refresh after the
+    GF Metal port lands.
 
   Limits: the MPAS v8.4.2 suite route (R2) takes a subset of these, and
   refuses the rest by name. WRF's adaptive time step (`--adaptive-timestep`)
@@ -1705,9 +1728,9 @@ Notes on the 1.1.7 sync:
   seam and follows the same bound. WSM6 and WDM6 already ran 256 levels on
   a column workspace; the five here keep the per-thread arrays, so a
   256-level run reserves several GiB of local memory on a large card
-  ([the frame table](docs/kernel_local_memory_bounds.md)). The committed hex
-  option-matrix rows for WSM3 and WSM5 still record the old 80-level
-  refusal at 149 levels until the matrix is re-run on its staged case.
+  ([the frame table](docs/kernel_local_memory_bounds.md)). On the hex
+  option matrix's 149-level case the WSM3, WSM5, WSM7, WDM5 and WDM7 rows
+  run on CUDA.
 - **256-level columns for the GSFC shortwave scheme.** `ra_sw_physics=2`
   was refused above 128 layers: its per-column arena (every array's extent
   and offset) and the entry point's `zero[]` were literals for a 128-layer
@@ -1755,9 +1778,8 @@ Notes on the 1.1.7 sync:
   sized by the column, so the local frame does not grow (928 B on sm_86 at
   both tiers); the workspace grows from 30,301 to 77,101 words per column
   at 100 and 256 layers, and admission prices it per domain. Past 256 is
-  refused by name. The hex option-matrix row still records the old
-  100-level refusal at 149 levels until the matrix is re-run
-  ([the record](docs/kernel_local_memory_bounds.md)).
+  refused by name. The hex option-matrix row runs on CUDA at 149
+  levels ([the record](docs/kernel_local_memory_bounds.md)).
 - **256-level hex member init and TC potential intensity.** The hex GPU
   member init (`woof/hex/init_gpu/physics.cu`) and the TC diagnostics'
   potential-intensity sounding (`tc_climate/potential_intensity.cu`) held
