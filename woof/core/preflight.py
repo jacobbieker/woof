@@ -2401,6 +2401,13 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     "chem_radm2": 1040,
     # MADE/SORGAM: 672 B on sm_86 at NVRTC 13.4.92 (2026-11-08).
     "chem_sorgam": 672,
+    # chem_activation / chem_ftuv / chem_modal_optics / chem_radm2_emiss:
+    # attributes through the production loader on the RTX A6000, sm_86 at
+    # NVRTC 13.4.92 (2026-11-22), both GPUWM_WRF_EXACT modes (same text).
+    "chem_activation": 384,
+    "chem_ftuv": 288,
+    "chem_modal_optics": 96,
+    "chem_radm2_emiss": 0,
     # WRF-Chem's Wesely gas dry deposition (development branch): 0 B on sm_120 and
     # sm_89 at NVRTC 13.4.92 (read 2026-09-30, RTX 5090 and RTX 4090).
     "chem_drydep_wesely": 0,
@@ -2992,7 +2999,9 @@ KERNEL_MAX_LOCAL_SIZE_BYTES: dict[str, int] = {
     # strict identical (kernel_frame_recordings, 2026-11-03).
     "afwa_buoyancy": 0, "afwa_severe": 0, "fogdes": 0, "misc_diag_print": 0,
     "snow_papers": 1136, "tc_exchange": 0, "tc_mixing": 0, "tc_spray": 0,
-    "tc_waves": 0, "vortex_init": 40,
+    # vortex_init reads 80 B on sm_86 (RTX A6000, NVRTC 13.4.92, 2026-11-22)
+    # against 40 B on sm_120: the ceiling is the wider.
+    "tc_waves": 0, "vortex_init": 80,
 }
 
 #: The readings the ceiling above is made of, each naming its box, its
@@ -3556,6 +3565,11 @@ PRODUCTION_LOADED_KERNEL_UNITS = {
     "fddaobs": "woof.fddaobs.forecast:frame_module",
     "nextgen_cfe": "woof.hydro.cfe:frame_module",
     "nextgen_reservoirs": "woof.hydro.reservoirs:frame_module",
+    # Both compile only through their own loaders (snow_papers.cu needs
+    # noahmp_kernel_sources' compile; vortex_init.cu its own options), so the
+    # standalone census cannot load them; their rows are read through these.
+    "snow_papers": "woof.core.snow_papers:frame_module",
+    "vortex_init": "woof.tc.vortex:frame_module",
 }
 
 

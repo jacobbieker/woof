@@ -3236,6 +3236,18 @@ def resolve_surface_statics(arguments, physics, mesh, grid, collected):
         if collected is None:
             raise _refuse(problem)
         collected.append(problem)
+    if selection and int(selection.get("slope_rad", 0) or 0) == 1:
+        # slope_rad's statics are fitted on the mesh at host preparation
+        # (woof.hex.slope_statics); a planar mesh is refused here, before the
+        # card is reserved, not there.
+        from .slope_statics import planar_mesh_problem
+
+        named = getattr(arguments, "grid", None)
+        problem = planar_mesh_problem(named if named is not None else grid)
+        if problem is not None:
+            if collected is None:
+                raise _refuse(problem)
+            collected.append(problem)
     needed = surface_inputs.reads_surface_statics(selection)
     if (not needed and given is not None and physics is not None
             and physics.column_profile is not None

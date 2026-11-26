@@ -415,7 +415,7 @@
     },
     {
       "file": "README.md",
-      "line": 1178,
+      "line": 1193,
       "kind": "prose",
       "anchor": "pairs was checked under both subnormal modes",
       "anchor_sha256": "2d72bca9880fb9136b484ba3ebdab81af419d5df3061964499ecb9120e7d562e",
@@ -29103,7 +29103,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 451,
+      "line": 475,
       "kind": "prose",
       "anchor": "\"factory\": \"load_module_no_ftz\",",
       "anchor_sha256": "b0421ca3cd3bd385c26b85a05030a47384adf627d8ff1b368af865eae647bfa8",
@@ -29114,7 +29114,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 531,
+      "line": 547,
       "kind": "prose",
       "anchor": "\"factory\": \"compile_no_ftz\",",
       "anchor_sha256": "2b225ec73e2c05639325a6bde9f87631f669feca9c207c3ffcbf7d0023e37a6f",
@@ -29125,7 +29125,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 987,
+      "line": 995,
       "kind": "prose",
       "anchor": "\"factory\": \"_load_module_preserving_subnormals\",",
       "anchor_sha256": "9d136622beb9503e39268623e256ca1742422b90f0f8813969de5cb1b7508ef2",
@@ -29136,7 +29136,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 1067,
+      "line": 1075,
       "kind": "prose",
       "anchor": "\"factory\": \"compile_noftz_module\",",
       "anchor_sha256": "901303867d2adb97021d9c0f4e6fea5c89e03c04be4223a66cea1805f6bcfc0d",
@@ -29147,7 +29147,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 1259,
+      "line": 1267,
       "kind": "prose",
       "anchor": "\"factory\": \"load_module_no_ftz\",",
       "anchor_sha256": "b0421ca3cd3bd385c26b85a05030a47384adf627d8ff1b368af865eae647bfa8",
@@ -29158,7 +29158,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 1261,
+      "line": 1269,
       "kind": "prose",
       "anchor": "\"file\": \"woof/core/kernels/no_ftz.py\",",
       "anchor_sha256": "49e696c34493b8f7aceb70e54266067dfd6ce7130465924b65be77ede7460451",
@@ -29169,7 +29169,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 1899,
+      "line": 1907,
       "kind": "prose",
       "anchor": "\"factory\": \"compile_cam_module_no_ftz\",",
       "anchor_sha256": "6d7b417340c11bb8da7a87759b2082beeb41c2e4052dcab0f34849564d65b0b1",
@@ -29180,7 +29180,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 1907,
+      "line": 1915,
       "kind": "prose",
       "anchor": "\"factory\": \"compile_ishmael_no_ftz\",",
       "anchor_sha256": "0878ef123b253b6305e7c8e56de1049c1515cd441166258feafaf73e6161dfee",
@@ -29191,7 +29191,7 @@
     },
     {
       "file": "tools/cuda_rounding_baseline.json",
-      "line": 2147,
+      "line": 2155,
       "kind": "prose",
       "anchor": "\"factory\": \"_subnormal_arith\",",
       "anchor_sha256": "6d86c898bd7196485815fda472a7fed15879a82a033ac9352931e09354e4ddee",
@@ -64941,7 +64941,7 @@
     },
     {
       "file": "woof/core/kernel_frame_recordings.py",
-      "line": 850,
+      "line": 852,
       "kind": "prose",
       "anchor": "# its no-FTZ route, lightning through its direct NVRTC site.",
       "anchor_sha256": "56b44725edb90797fc89bc3e3f18be1cb04d62eadfb62b97f6ee72c3e1774fbb",
@@ -64952,7 +64952,7 @@
     },
     {
       "file": "woof/core/kernel_frame_recordings.py",
-      "line": 1000,
+      "line": 1002,
       "kind": "prose",
       "anchor": "'ftz_probe': 0,",
       "anchor_sha256": "a1a9eb8246a47d262a99c056c9cfa0a5bce9eb78500d054222ef04380c6c150c",
@@ -64963,7 +64963,7 @@
     },
     {
       "file": "woof/core/kernel_frame_recordings.py",
-      "line": 1073,
+      "line": 1075,
       "kind": "prose",
       "anchor": "# the production device-prep loader (--ftz=false), NVRTC 13.4.92,",
       "anchor_sha256": "3e103ac70f35278f19d630768baa064784f3fd56f185a52cf92edc1a2bc1c52d",
@@ -64974,7 +64974,7 @@
     },
     {
       "file": "woof/core/kernel_frame_recordings.py",
-      "line": 1279,
+      "line": 1286,
       "kind": "prose",
       "anchor": "'ftz_probe': 0,",
       "anchor_sha256": "a1a9eb8246a47d262a99c056c9cfa0a5bce9eb78500d054222ef04380c6c150c",
@@ -64985,7 +64985,7 @@
     },
     {
       "file": "woof/core/kernel_frame_recordings.py",
-      "line": 1515,
+      "line": 1522,
       "kind": "prose",
       "anchor": "'ftz_probe': 0,",
       "anchor_sha256": "a1a9eb8246a47d262a99c056c9cfa0a5bce9eb78500d054222ef04380c6c150c",
@@ -64996,7 +64996,7 @@
     },
     {
       "file": "woof/core/kernel_frame_recordings.py",
-      "line": 1708,
+      "line": 1715,
       "kind": "prose",
       "anchor": "# bytes under C++17, fmad=false and ftz=false (lane",
       "anchor_sha256": "5217807fadf3ec266136dbee991cbf8c196d2f67aae72132c6c29ed6cfbcfaed",
@@ -65007,7 +65007,7 @@
     },
     {
       "file": "woof/core/kernel_frame_recordings.py",
-      "line": 1790,
+      "line": 1797,
       "kind": "prose",
       "anchor": "# Old KF measured through the shared no-FTZ loader on G2.",
       "anchor_sha256": "57b4795bdfda0093e6971ad28e43b31dccfedbddeb52f021b001c6b137408b1a",
@@ -65018,7 +65018,7 @@
     },
     {
       "file": "woof/core/kernel_frame_recordings.py",
-      "line": 1865,
+      "line": 1872,
       "kind": "prose",
       "anchor": "'ftz_probe': 0,",
       "anchor_sha256": "a1a9eb8246a47d262a99c056c9cfa0a5bce9eb78500d054222ef04380c6c150c",
@@ -65029,7 +65029,7 @@
     },
     {
       "file": "woof/core/kernel_frame_recordings.py",
-      "line": 2109,
+      "line": 2116,
       "kind": "prose",
       "anchor": "\"-fmad=false --ftz=false; the follower fails standalone.  Read on an \"",
       "anchor_sha256": "1f5cdf2bed698946d5cf8edbf65476dd4d4b04c39c94e986f00d03fe708e8e65",
@@ -65040,7 +65040,7 @@
     },
     {
       "file": "woof/core/kernel_frame_recordings.py",
-      "line": 2128,
+      "line": 2135,
       "kind": "prose",
       "anchor": "\"through the shared no-FTZ loader; this is the unit a grav_settling \"",
       "anchor_sha256": "e29573d6962b84882cce2e980668ab080f4dfb996a3745d6f0310907523d0677",
@@ -65051,7 +65051,7 @@
     },
     {
       "file": "woof/core/kernel_frame_recordings.py",
-      "line": 2138,
+      "line": 2145,
       "kind": "prose",
       "anchor": "\"math header through the shared no-FTZ route. \"",
       "anchor_sha256": "5ca034fe0786595857446e56d0a7c7035d7d42dc0a4cc98277c85ea2e708b539",
@@ -65062,7 +65062,7 @@
     },
     {
       "file": "woof/core/kernel_frame_recordings.py",
-      "line": 2142,
+      "line": 2149,
       "kind": "prose",
       "anchor": "'etanew': 'woof/core/etanew.py composes its math header and etanew.cu through the direct no-FTZ loader. Both V12 arithmetic modes read zero local bytes on sm_120 NVRTC 12.8.93; the stored source-sealed receipts audit that ceiling. Other compiler platforms have no standalone row for this composed source.',",
       "anchor_sha256": "4dcd891d5cb42f30bf83aa7377bb01da1a3068202260997b026bf8b82aa5e570",
@@ -65073,7 +65073,7 @@
     },
     {
       "file": "woof/core/kernel_frame_recordings.py",
-      "line": 2239,
+      "line": 2246,
       "kind": "prose",
       "anchor": "\"urban_bep_bem.cu compiled as one unit with -fmad=false --ftz=false \"",
       "anchor_sha256": "045071aa817635adfff7559c2848d880406a2ec7f0a7c72331cca593e888f831",
@@ -65084,7 +65084,7 @@
     },
     {
       "file": "woof/core/kernel_frame_recordings.py",
-      "line": 2262,
+      "line": 2269,
       "kind": "prose",
       "anchor": "\"with -fmad=false --ftz=false; terrain_drag.cu fails standalone. \"",
       "anchor_sha256": "bac2624eea795c4379e8946cd9d513873473329c9d7c2468285882f72c5a452d",
@@ -65095,7 +65095,7 @@
     },
     {
       "file": "woof/core/kernel_frame_recordings.py",
-      "line": 2344,
+      "line": 2351,
       "kind": "prose",
       "anchor": "TERRAIN_DRAG_COMPOSED_OPTIONS = (\"-std=c++17\", \"-fmad=false\", \"--ftz=false\")",
       "anchor_sha256": "299d9dbc5730a2ebd290c006e60c308d70f7ce2e74750ef501fafe23462b56a9",
@@ -65106,7 +65106,7 @@
     },
     {
       "file": "woof/core/kernel_frame_recordings.py",
-      "line": 2459,
+      "line": 2466,
       "kind": "prose",
       "anchor": "# port compiles every unit with --ftz=false and adds the night-aging",
       "anchor_sha256": "5f75a3de63495832c68567c9e4744cfea3d3d4c9b8446a995bf30a55caca88b7",
@@ -65117,7 +65117,7 @@
     },
     {
       "file": "woof/core/kernel_frame_recordings.py",
-      "line": 2544,
+      "line": 2551,
       "kind": "prose",
       "anchor": "# port compiles every unit with --ftz=false and adds the night-aging",
       "anchor_sha256": "5f75a3de63495832c68567c9e4744cfea3d3d4c9b8446a995bf30a55caca88b7",
@@ -65128,7 +65128,7 @@
     },
     {
       "file": "woof/core/kernel_frame_recordings.py",
-      "line": 2645,
+      "line": 2652,
       "kind": "prose",
       "anchor": "# port compiles every unit with --ftz=false and adds the night-aging",
       "anchor_sha256": "5f75a3de63495832c68567c9e4744cfea3d3d4c9b8446a995bf30a55caca88b7",
@@ -65139,7 +65139,7 @@
     },
     {
       "file": "woof/core/kernel_frame_recordings.py",
-      "line": 2751,
+      "line": 2758,
       "kind": "prose",
       "anchor": "# describes these units (the --ftz=false / night-aging change moved",
       "anchor_sha256": "14eec97a34b1483225c785d71bc3eccee834d87a5e3b3120a54a488348b1fdfb",
@@ -65150,7 +65150,7 @@
     },
     {
       "file": "woof/core/kernel_frame_recordings.py",
-      "line": 2782,
+      "line": 2789,
       "kind": "prose",
       "anchor": "# port compiles every unit with --ftz=false and adds the night-aging",
       "anchor_sha256": "5f75a3de63495832c68567c9e4744cfea3d3d4c9b8446a995bf30a55caca88b7",
@@ -71574,7 +71574,7 @@
     },
     {
       "file": "woof/core/preflight.py",
-      "line": 2449,
+      "line": 2456,
       "kind": "prose",
       "anchor": "# The FTZ receipt's probe rides the production loader from the same",
       "anchor_sha256": "75c3f0473733e9afa9e3d7d9d9230537ef1cb78f9e5b6cc2d4d6828fcdc97f33",
@@ -71585,7 +71585,7 @@
     },
     {
       "file": "woof/core/preflight.py",
-      "line": 2452,
+      "line": 2459,
       "kind": "prose",
       "anchor": "\"ftz_probe\": 0,",
       "anchor_sha256": "3bb7365d1801c6f82b6bd565fa112638740c9bf31ab17e74f29348ed03a9d956",
@@ -71596,7 +71596,7 @@
     },
     {
       "file": "woof/core/preflight.py",
-      "line": 3810,
+      "line": 3824,
       "kind": "prose",
       "anchor": "# Direct no-FTZ units compose their math and radar headers. The column",
       "anchor_sha256": "184948054ba022bbad69bebea2f81b001a2e7b7ecb87d70239779c61b7c82b7a",
@@ -71607,7 +71607,7 @@
     },
     {
       "file": "woof/core/preflight.py",
-      "line": 3828,
+      "line": 3842,
       "kind": "prose",
       "anchor": "# Strict -std=c++17 --fmad=false --ftz=false: acm2_pbl_column keeps scalars",
       "anchor_sha256": "9e2c3aa7d94671e8f147fc58dbf1a25417824d5ce144d07fe2b7ca715d74fb41",
@@ -71618,7 +71618,7 @@
     },
     {
       "file": "woof/core/preflight.py",
-      "line": 4322,
+      "line": 4336,
       "kind": "prose",
       "anchor": "# the direct NVRTC route (--ftz=false); the column arrays live in a",
       "anchor_sha256": "f2e5728c42b24c29e0cdbaee8dae62e5470b144a7383f39941bdf8b4959d8e1e",
@@ -71629,7 +71629,7 @@
     },
     {
       "file": "woof/core/preflight.py",
-      "line": 4328,
+      "line": 4342,
       "kind": "prose",
       "anchor": "# --ftz=false and strict-only --fmad=false, priced as acm2pbl_composed. Its column",
       "anchor_sha256": "8c902ee0768eea050e9eb4c49a9c618660b542f690745a745db2cbb4e0f91960",
@@ -71640,7 +71640,7 @@
     },
     {
       "file": "woof/core/preflight.py",
-      "line": 4335,
+      "line": 4349,
       "kind": "prose",
       "anchor": "# MRF's column unit uses the direct no-FTZ compiler; the separate",
       "anchor_sha256": "c58e3c51ed2580a30a90a625ada80e2683a99b24f0ab860af67502df588d0d58",
@@ -72465,7 +72465,7 @@
     },
     {
       "file": "woof/core/snow_papers.py",
-      "line": 559,
+      "line": 566,
       "kind": "prose",
       "anchor": "return _compile_loaded_module(source, (\"-std=c++17\", \"--ftz=false\"), \"snow_lap\")",
       "anchor_sha256": "2cd986f0ae67cb6d70c0725cd6f543970157d109b7ce5282148f9558806a8a5a",

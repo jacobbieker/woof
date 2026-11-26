@@ -160,6 +160,46 @@
    {
     "call_sha256": "08b412438fea2e6dba53d679fc2ae725f2afef478998519b9395664a71b27959",
     "constructor": "RawModule",
+    "factory": "_device_module",
+    "factory_sha256": "00f32e5a356f1065661f3be621c474782cb05fffeec3f7404ad9c6ef8450bde7",
+    "file": "woof/grad/wrfplus/advect.py",
+    "status": "unresolved"
+   },
+   {
+    "call_sha256": "08b412438fea2e6dba53d679fc2ae725f2afef478998519b9395664a71b27959",
+    "constructor": "RawModule",
+    "factory": "_device_module",
+    "factory_sha256": "97f343d886ef6c6ff50ffde8cecdbc4b75124991f1801d71485c80c2d21b87b2",
+    "file": "woof/grad/wrfplus/lbc.py",
+    "status": "unresolved"
+   },
+   {
+    "call_sha256": "08b412438fea2e6dba53d679fc2ae725f2afef478998519b9395664a71b27959",
+    "constructor": "RawModule",
+    "factory": "_device_module",
+    "factory_sha256": "cdf9b77cdea0bc43bbfeeb8fad69162404665f23a669f827c7c11db5069507b8",
+    "file": "woof/grad/wrfplus/acoustic.py",
+    "status": "unresolved"
+   },
+   {
+    "call_sha256": "08b412438fea2e6dba53d679fc2ae725f2afef478998519b9395664a71b27959",
+    "constructor": "RawModule",
+    "factory": "_device_module",
+    "factory_sha256": "f389f321dcc36680926bb13567f1aa3426f823a598ced0ee3e319650c1ce97f7",
+    "file": "woof/grad/wrfplus/stage.py",
+    "status": "unresolved"
+   },
+   {
+    "call_sha256": "08b412438fea2e6dba53d679fc2ae725f2afef478998519b9395664a71b27959",
+    "constructor": "RawModule",
+    "factory": "_device_module",
+    "factory_sha256": "f4ddf35b946644c9d62f3ab15c133f95ce313c0ecc20b1edf01e085403473ebe",
+    "file": "woof/grad/wrfplus/bigstep.py",
+    "status": "unresolved"
+   },
+   {
+    "call_sha256": "08b412438fea2e6dba53d679fc2ae725f2afef478998519b9395664a71b27959",
+    "constructor": "RawModule",
     "factory": "_diagnostic_module",
     "factory_sha256": "310053f4c9cf92713a4e49628be948659fbbbe0e05636433e739115ab8ecacbd",
     "file": "woof/verify/smallstep_vertical_oracle.py",
@@ -374,22 +414,6 @@
     "status": "unresolved"
    },
    {
-    "call_sha256": "1242c075373bd96f466da0715ad327e28df978e59a7efe988f2dbda632251b48",
-    "constructor": "RawModule",
-    "factory": "_device_module",
-    "factory_sha256": "015c503fa88441b16a67efe137fc68422b75ac95e0b99c13d5cb4190c915a897",
-    "file": "woof/grad/wrfplus/bigstep.py",
-    "status": "unresolved"
-   },
-   {
-    "call_sha256": "1242c075373bd96f466da0715ad327e28df978e59a7efe988f2dbda632251b48",
-    "constructor": "RawModule",
-    "factory": "_device_module",
-    "factory_sha256": "dc15c65c64924ca610c168308193f161263fc025f51758964edbb993954c718c",
-    "file": "woof/grad/wrfplus/lbc.py",
-    "status": "unresolved"
-   },
-   {
     "call_sha256": "128448711859c3c6e1ccb0c6d6b8781bd54ca6f90e9f6bdc098674f62386b13f",
     "constructor": "RawKernel",
     "factory": "_validation_batch_kernel",
@@ -507,14 +531,6 @@
     "factory": "_kernels_on",
     "factory_sha256": "216e2946fdccdaaddec76e41730004660d0487b52d903186e30e2324787bc58c",
     "file": "woof/hex/mpasphys/oml_v842.py",
-    "status": "unresolved"
-   },
-   {
-    "call_sha256": "265dadb152e6a11c49eeafa30d93d879a0d7db76abc0803464b47fc74a3c1308",
-    "constructor": "RawModule",
-    "factory": "_device_module",
-    "factory_sha256": "7a94ad488364e7a73bfc1ac734309d4e9a03b8c0465a40b757c561b0068f789e",
-    "file": "woof/grad/wrfplus/advect.py",
     "status": "unresolved"
    },
    {
@@ -955,14 +971,6 @@
     "factory": "_nonzero",
     "factory_sha256": "19b1b3b8735e0f5404a0ccde5905471dc797dffdfd943bbea298621eb951e965",
     "file": "woof/core/mynn_pbl_gpu.py",
-    "status": "unresolved"
-   },
-   {
-    "call_sha256": "4dff38cbd996fee405f52a00256ed3385ccfcdbcb94ef678f6fc574fdfce34b4",
-    "constructor": "RawModule",
-    "factory": "_device_module",
-    "factory_sha256": "e42471d378d16a5b6d78df905fa4c3eb290b9836dc3265998bb117faf0811573",
-    "file": "woof/grad/wrfplus/acoustic.py",
     "status": "unresolved"
    },
    {
@@ -2147,14 +2155,6 @@
     "factory": "_subnormal_arith",
     "factory_sha256": "be6e3b0f3687e7742865d9e4f8f3b50bba78e094460302e4f8f78f668bf60581",
     "file": "woof/backend/facade/_ops.py",
-    "status": "unresolved"
-   },
-   {
-    "call_sha256": "b52139ec7aa9bd860f5cd1623fed541cbedd8f69729ded5426d74d7a645a1b26",
-    "constructor": "RawModule",
-    "factory": "_device_module",
-    "factory_sha256": "169bc11ed92377e6185f7733c89521519f6b97551eebf58c8e43edc8c6c684f3",
-    "file": "woof/grad/wrfplus/stage.py",
     "status": "unresolved"
    },
    {
@@ -5401,7 +5401,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/column_itd_v842.cu",
-    "sha256": "850573a58c1e3719c5fba8310299d5fdcf9eb054142276e6db6fe007ed5cbbaa"
+    "sha256": "671cf3f8ac7d53a004b1c6a5bae5eac04ada9fab2caa2c9a90ce0b2cb0083c5a"
    },
    {
     "file": "woof/hex/mpas_seaice/column_radiation_v842.cu",
@@ -5731,7 +5731,7 @@
    },
    {
     "file": "woof/core/kernel_frame_recordings.py",
-    "sha256": "3d855350df5b5ccc3f26ba1a4cac5940ea69f7424762ebd3905651d83968a36f"
+    "sha256": "ea9e497e75e6afb78e3d32c849673beab4660672f455477b17b137b7516d821d"
    },
    {
     "file": "woof/core/kernels/__init__.py",
@@ -5867,11 +5867,11 @@
    },
    {
     "file": "woof/core/physics.py",
-    "sha256": "92019c7f0694e846e7e290e922633422e8c5df94a02881b84db8f7c9dad048ba"
+    "sha256": "0fc0fab5b441e73ea8af841032be55c4076c43f3dda2a7d063f394451faeb17e"
    },
    {
     "file": "woof/core/preflight.py",
-    "sha256": "41404ba24f3d173ef52bc029f015b6f83c53d8d175c10249c5781625245f6e97"
+    "sha256": "6f113a98a9449a748a0ef268e936c74da85dc44a83090569d3ac0e47a9e28cd2"
    },
    {
     "file": "woof/core/refl.py",
@@ -6131,23 +6131,23 @@
    },
    {
     "file": "woof/grad/wrfplus/acoustic.py",
-    "sha256": "071685089a99ce27c2f090f00121945a6bdd1742a3c575a733b60643d9a1be80"
+    "sha256": "c7d89311932d18241876fd3bc071f4b48f7384e69614e22eca19690a77ad65db"
    },
    {
     "file": "woof/grad/wrfplus/advect.py",
-    "sha256": "9b52d13c2053b6b4a680f0603113c92358e762bb78d7d1b9b9d8fa135e47afe9"
+    "sha256": "b5df5938c4f0e7db139343ddd11961c2883cfe91381b32e48e3d9cc7889dde37"
    },
    {
     "file": "woof/grad/wrfplus/bigstep.py",
-    "sha256": "67c6e72c2a532f42e552e406c151acc5dda75eb99b274c64d5bc6c0affe06777"
+    "sha256": "de9a8e36a65755085e533151869dfebfe2079896de0c815515a9ded71d531bf7"
    },
    {
     "file": "woof/grad/wrfplus/lbc.py",
-    "sha256": "227b5dbbdda6dc32a2b121b30bb99cfd77a82d63b244da3542604e18beec8045"
+    "sha256": "239c5029b70cc14982970d9004e41f0b1facffdd4ffce97ca0c2d649681c0b08"
    },
    {
     "file": "woof/grad/wrfplus/stage.py",
-    "sha256": "c14c6dae3f02d0ff4923851a77048f25d3f30993b249262fe9294a0c67b83bf1"
+    "sha256": "51233507c9490df50135bc3781f80e59e547ce9316dad73e7d03d2b84db66587"
    },
    {
     "file": "woof/hex/ad/carrier.py",
@@ -6559,7 +6559,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/column_itd_v842.py",
-    "sha256": "eafa69503d39243d6ebde59d69dbb01c2a555532d64c3ec112a88b6ce8494c25"
+    "sha256": "2e8c09e08f37cf47babbb7d9a2d7c2a969125e5d8a1e0fd6c76814b07a6f6b8e"
    },
    {
     "file": "woof/hex/mpas_seaice/column_radiation_v842.py",
@@ -6575,7 +6575,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/column_v842.py",
-    "sha256": "0d14fe35f3ff8fea389210b7a553485a6fcb2283a6ccbdc86a145ee88434e50f"
+    "sha256": "e694fbb2641472a42bc40b29196c970b7fccce80cc1d26ed8a13b2e5025403ae"
    },
    {
     "file": "woof/hex/mpas_seaice/coupling_prep_v842.py",
@@ -7131,7 +7131,7 @@
    },
    {
     "file": "woof/tc/vortex.py",
-    "sha256": "7207f8709e55766dd9ba8bade5dfb9a0a6053199aaaa0c8340885f97557fd65f"
+    "sha256": "8ad76c1ba43cfbef429fc42c2d3864989ee8e9f39a8049a78bdfa503bb0b1297"
    },
    {
     "file": "woof/tc_accumulator.py",
@@ -15671,20 +15671,25 @@
    "source_sha256": "5524940f27ad7451d813c958fdd8bdb82764c4004dfe8074b95e91d83f2a89e0"
   },
   "kernels:gfdleta_co2_init_l256": {
-   "source_sha256": "14f0f2e2433b5d442a83fbc9655e1cdabd36232ac1f52e80a449f7f6e732724c",
-   "errors": {},
-   "native_errors": {},
    "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
    "differences": {
     "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
     "sites": {
      "100": 0
     }
    },
-   "dataflow_differences": {
-    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "41c087a4ae0944422b083650313a22d907ef41def0fcd2317ea2956c52503769",
     "sites": {
-     "100": 0
+     "100": 622
     }
    },
    "native_differences": {
@@ -15693,29 +15698,24 @@
      "100": 746
     }
    },
-   "native_dataflow_differences": {
-    "sha256": "41c087a4ae0944422b083650313a22d907ef41def0fcd2317ea2956c52503769",
-    "sites": {
-     "100": 622
-    }
-   },
+   "native_errors": {},
    "options": {
-    "120": [
-     "-std=c++17",
-     "--ftz=false",
-     "--device-as-default-execution-space",
-     "-lineinfo",
-     "-arch=compute_120"
-    ],
     "100": [
      "-std=c++17",
      "--ftz=false",
      "--device-as-default-execution-space",
      "-lineinfo",
      "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
     ]
    },
-   "coverage": "compiled"
+   "source_sha256": "14f0f2e2433b5d442a83fbc9655e1cdabd36232ac1f52e80a449f7f6e732724c"
   },
   "kernels:gfdleta_column": {
    "assessment": "static_diagnostic_only",
@@ -15765,20 +15765,25 @@
    "source_sha256": "954b4283f84f00e22d3641b473142887654d02161f30cb53d631147799001b42"
   },
   "kernels:gfdleta_column_l256": {
-   "source_sha256": "ad1448290edf5befdb32f892ccd36a2149b31db21eb32da5971a0114a0fd231d",
-   "errors": {},
-   "native_errors": {},
    "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
    "differences": {
     "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
     "sites": {
      "100": 0
     }
    },
-   "dataflow_differences": {
-    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "5767c6412a495db97aa242241005bca8ad3cebb488c93e2093e5c418395a29f0",
     "sites": {
-     "100": 0
+     "100": 2671
     }
    },
    "native_differences": {
@@ -15787,29 +15792,24 @@
      "100": 111
     }
    },
-   "native_dataflow_differences": {
-    "sha256": "5767c6412a495db97aa242241005bca8ad3cebb488c93e2093e5c418395a29f0",
-    "sites": {
-     "100": 2671
-    }
-   },
+   "native_errors": {},
    "options": {
-    "120": [
-     "-std=c++17",
-     "--ftz=false",
-     "--device-as-default-execution-space",
-     "-lineinfo",
-     "-arch=compute_120"
-    ],
     "100": [
      "-std=c++17",
      "--ftz=false",
      "--device-as-default-execution-space",
      "-lineinfo",
      "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
     ]
    },
-   "coverage": "compiled"
+   "source_sha256": "ad1448290edf5befdb32f892ccd36a2149b31db21eb32da5971a0114a0fd231d"
   },
   "kernels:gfdleta_init": {
    "assessment": "static_diagnostic_only",
