@@ -102,8 +102,18 @@ SPILL_POOL_BYTES = 256 << 20
 
 def spill_pool_slabs(spill_bytes, slabs):
     """Slabs of the launch's spill pool: one per domain slab (an entry for every thread the
-    launch can start), within SPILL_POOL_BYTES, and at least one."""
-    return max(1, min(max(int(slabs), 1), SPILL_POOL_BYTES // (int(spill_bytes) * LANES)))
+    launch can start), within SPILL_POOL_BYTES.
+
+    A single slab larger than SPILL_POOL_BYTES (a column so deep that one entry per lane
+    passes the cap) is refused by name rather than allocated over the cap.
+    """
+    per_slab = int(spill_bytes) * LANES
+    if per_slab > SPILL_POOL_BYTES:
+        raise ValueError(
+            f"GFL spill slab of {per_slab} bytes ({int(spill_bytes)} per lane x {LANES} lanes) is larger "
+            f"than the spill pool cap SPILL_POOL_BYTES={SPILL_POOL_BYTES}: the column is too deep for "
+            "the GFL lane launch")
+    return min(max(int(slabs), 1), SPILL_POOL_BYTES // per_slab)
 
 
 def spill_pool_bytes(nz, columns):

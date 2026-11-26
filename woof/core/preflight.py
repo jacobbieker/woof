@@ -5665,6 +5665,11 @@ def gf_column_workspace_bytes(
     tile_cap = (profile.multiprocessor_count * GF_TILE_BLOCKS_PER_SM
                 * GF_BLOCK)
     worst = 0
+    # The GFL spill pool is one per card, held for the run and grown to the largest any
+    # domain needs, beside the scratch: priced as its own maximum, not per domain with the
+    # scratch (a pool's size is not monotone in nz, so the domain with the largest
+    # scratch need not hold the largest pool).
+    pool = 0
     for dc in exp.domains:
         if int(dc.run.cu_physics) != 3:
             continue
@@ -5672,12 +5677,12 @@ def gf_column_workspace_bytes(
             columns = int(dc.run.nx) * int(dc.run.ny)
             worst = max(worst, gfl_scratch_bytes(
                 int(dc.run.nz), columns, profile.multiprocessor_count,
-                metal=_gfl_on_metal(profile))
-                + gfl_spill_pool_bytes(int(dc.run.nz), columns))
+                metal=_gfl_on_metal(profile)))
+            pool = max(pool, gfl_spill_pool_bytes(int(dc.run.nz), columns))
             continue
         columns = min(int(dc.run.nx) * int(dc.run.ny), tile_cap)
         worst = max(worst, gf_workspace_floats(int(dc.run.nz), columns) * 4)
-    return int(worst)
+    return int(worst + pool)
 
 
 def _gfl_on_metal(profile) -> bool:

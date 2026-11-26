@@ -188,6 +188,43 @@ def test_preflight_prices_gfl_lane_scratch_and_spill_pool_not_gfdrv_tiles(monkey
     assert gf_column_workspace_bytes(exp("gfl_873b414")) == metal
 
 
+def test_spill_pool_refuses_a_slab_over_its_cap_and_is_priced_once_per_card():
+    """A spill slab larger than SPILL_POOL_BYTES is refused by name, and a nest prices its
+    largest scratch plus its largest pool (one pool per card, held across domains).
+
+    Breakage prevented: ``max(1, ...)`` restored a slab over the cap (512 MiB at nz=2031),
+    and pricing max(scratch + pool) per domain under-priced a 150 x 150 nest at nz=49 then
+    nz=99, whose larger scratch (nz=99) and larger pool (nz=49) are held together.
+    """
+    from types import SimpleNamespace
+    from woof import backend
+    from woof.core.gfl_lanes import LANES, SPILL_POOL_BYTES, scratch_bytes, spill_pool_bytes, spill_pool_slabs
+    from woof.core.preflight import gf_column_workspace_bytes, MEASURED_LOCAL_MEMORY_PROFILE
+
+    with pytest.raises(ValueError, match="SPILL_POOL_BYTES"):
+        spill_pool_bytes(2031, 1)
+    assert spill_pool_slabs(SPILL_POOL_BYTES // LANES, 5) == 1             # exactly the cap fits
+    with pytest.raises(ValueError, match="too deep"):
+        spill_pool_slabs(SPILL_POOL_BYTES // LANES + 1, 1)
+    assert spill_pool_bytes(256, 22500) <= SPILL_POOL_BYTES                  # the deepest shipped tier fits
+
+    def run(nz):
+        return SimpleNamespace(cu_physics=3, cu_gf_version="gfl_873b414", nx=150, ny=150, nz=nz)
+    nest = SimpleNamespace(domains=[SimpleNamespace(run=run(49)), SimpleNamespace(run=run(99))])
+    sms = MEASURED_LOCAL_MEMORY_PROFILE.multiprocessor_count
+    backend_active = backend._active
+    try:
+        backend._active = "cuda"
+        priced = gf_column_workspace_bytes(nest)
+    finally:
+        backend._active = backend_active
+    scratch = {nz: scratch_bytes(nz, 22500, sms) for nz in (49, 99)}
+    pool = {nz: spill_pool_bytes(nz, 22500) for nz in (49, 99)}
+    assert scratch[99] > scratch[49] and pool[49] > pool[99]
+    assert priced == scratch[99] + pool[49]
+    assert priced > max(scratch[nz] + pool[nz] for nz in (49, 99))
+
+
 def _unpromote(text):
     """Undo gfl_lanes.metal_locals: each slot reference back to its local declaration."""
     import re
