@@ -1123,6 +1123,15 @@ Each step is one small PR, taken to merged before the next widens.
        `GPUWM_WRF_EXACT=1` `dycore` words on every row) and the WRF
        oracle (17 cases: each row periodic, specified, channel and
        moist, plus theta; `tests/data/wrfplus/diffusion2.npz`).
+     - Cost (A6000, 40 x 120 x 120, binary32, periodic, median of 20,
+       2026-11-26; primal = the strict row kernels): TL 1.2x (u), 1.3x
+       (v), 0.4x (w, whose primal recomputes the deformation) and 1.4x
+       (scalar); AD 35x, 25x, 21x and 31x. The AD is far over G3's ~5x:
+       each input word's thread recomputes every reading output word's
+       whole stencil (the deformation, rho and the metrics at every
+       stage), as `df_ad` did before PR #820. Narrowing the gathers to
+       the reading terms is left to a perf pass, as #820 did for
+       `df_ad`.
 
 Cost is measured from item 2 on. Kernel-level AD/forward ratios are
 reported at every merge, so a G3 cost miss shows up before item 8.
