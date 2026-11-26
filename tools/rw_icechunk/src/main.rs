@@ -170,13 +170,27 @@ fn read_array(file: &NcFile, v: &netcdf_reader::NcVariable, frame: usize) -> Res
         // reader types as String; read_variable_char_bytes takes exactly
         // that and refuses a real (variable-length) string.
         NcType::Char | NcType::String => {
-            let all = file.read_variable_char_bytes(&v.name)?;
+            let all = file.read_variable_char_bytes(&v.name).with_context(|| {
+                format!(
+                    "{} is {:?}, not character data; refusing to omit a history field",
+                    v.name, v.dtype
+                )
+            })?;
             let n: usize = shape.iter().product();
             let offset = if v.dimensions.first().is_some_and(|d| is_time(&d.name)) {
                 frame * n
             } else {
                 0
             };
+            ensure!(
+                offset + n <= all.len(),
+                "{} holds {} bytes; frame {} needs bytes {}..{}",
+                v.name,
+                all.len(),
+                frame,
+                offset,
+                offset + n
+            );
             ("uint8".into(), 1, all[offset..offset + n].to_vec())
         }
         _ => bail!(

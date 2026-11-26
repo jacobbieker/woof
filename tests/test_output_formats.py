@@ -172,9 +172,10 @@ def exercise_writer(tmp_path, *, cells=False, container='NETCDF3_64BIT_OFFSET'):
 
 
 @pytest.mark.parametrize('container', ['NETCDF3_64BIT_OFFSET', 'NETCDF4'])
-def test_native_roundtrip_atomic_resume(tmp_path, container):
-    # NetCDF-4 keeps NC_CHAR (Times) as a one-byte HDF5 string.
-    exercise_writer(tmp_path, container=container)
+@pytest.mark.parametrize('cells', [False, True], ids=['wrf', 'mpas'])
+def test_native_roundtrip_atomic_resume(tmp_path, container, cells):
+    # NetCDF-4 keeps NC_CHAR (Times, xtime) as a one-byte HDF5 string.
+    exercise_writer(tmp_path, cells=cells, container=container)
 
 
 def test_failed_model_does_not_finalize(tmp_path, monkeypatch):
