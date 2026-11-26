@@ -1123,6 +1123,15 @@ Each step is one small PR, taken to merged before the next widens.
        `GPUWM_WRF_EXACT=1` `dycore` words on every row) and the WRF
        oracle (17 cases: each row periodic, specified, channel and
        moist, plus theta; `tests/data/wrfplus/diffusion2.npz`).
+     - Cost (A6000, 40 x 120 x 120, binary32, periodic, median of 20,
+       2026-11-26; primal = the strict row kernels): TL 1.2x (u), 1.3x
+       (v), 0.4x (w, whose primal recomputes the deformation) and 1.4x
+       (scalar); AD 35x, 25x, 21x and 31x. The AD is far over G3's ~5x:
+       each input word's thread recomputes every reading output word's
+       whole stencil (the deformation, rho and the metrics at every
+       stage), as `df_ad` did before PR #820. Narrowing the gathers to
+       the reading terms is left to a perf pass, as #820 did for
+       `df_ad`.
    - 10b. `vertical_diffusion_2` (2b-2): rows vu, vv, vw, vt and vs of
      `h2_tl/h2_ad` (row codes 4-7, stage VROW), on woof's strict
      `dycore.launch_wrf_smag2d_vertical` (`wrf_smag_vd_u/_v/_w/_s` and
@@ -1157,6 +1166,13 @@ Each step is one small PR, taken to merged before the next widens.
        variant through `launch_wrf_smag2d_vertical` with its isfflx and
        surface fields) and the WRF oracle (21 cases;
        `tests/data/wrfplus/vdiffusion2.npz`).
+     - Cost (A6000, 40 x 120 x 120, binary32, periodic, moist, USTM,
+       HFX and QFX, median of 20, 2026-11-26): the primal
+       `launch_wrf_smag2d_vertical` for all rows 0.70 ms; the five rows'
+       TL 1.64 ms (2.4x) and AD 25.8 ms (37x). vw, vt and vs cost about
+       1.1-1.3 ms of AD each (5x their TL); vu and vv take 12 and 10 ms,
+       almost all in the tau13/tau23 stage's gather (the deformation
+       recomputed per reading word). Same follow-up as 10a.
 
 Cost is measured from item 2 on. Kernel-level AD/forward ratios are
 reported at every merge, so a G3 cost miss shows up before item 8.
