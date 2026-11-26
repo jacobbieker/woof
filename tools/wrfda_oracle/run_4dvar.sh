@@ -60,7 +60,12 @@ want = {
     "wrfvar18": {"analysis_date": f"'{H}12:00:00.0000'"},
     "wrfvar21": {"time_window_min": f"'{H}12:00:00.0000'"},
     "wrfvar22": {"time_window_max": f"'{H}18:00:00.0000'"},
-    "time_control": {"run_hours": "6", "start_hour": "12", "end_hour": "18", "force_use_old_data": ".true."},
+    # input_from_file: the Registry default is .false. and the shipped
+    # namelist omits it, so start_em skips the base-state and V3-input
+    # set-up (c1f..c4h, pb/phb/alb, the old-data t_2 fix) and the nonlinear
+    # model steps from garbage (NaN in sfclayrev, KF out of bounds)
+    "time_control": {"run_hours": "6", "start_hour": "12", "end_hour": "18", "force_use_old_data": ".true.",
+                     "input_from_file": ".true."},
     "perturbation": {"trajectory_io": ".true.", "var4d_detail_out": ".true.",
                      "enable_identity": ".true." if lane == "lid" else ".false."},
     "dynamics": {"hybrid_opt": "0", "use_theta_m": "0"},
