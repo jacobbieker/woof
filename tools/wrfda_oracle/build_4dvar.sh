@@ -14,7 +14,8 @@
 #            7 and 8 (apply_dump_patch.sh), and build it
 # The pinned trees are never patched; only the -dump copy is.
 # usage: build_4dvar.sh src|wrfplus|wrfda|dump
-#   J (default 6): make jobs; RESUME=1 (wrfplus): keep the configured tree
+#   J (default 6): make jobs for the wrfplus step (compile all_wrfvar
+#   picks its own); RESUME=1 (wrfplus): keep the configured tree
 #   and its objects, to finish a compile a killed compiler stopped
 set -eux
 STEP=${1:?usage: build_4dvar.sh src|wrfplus|wrfda|dump}

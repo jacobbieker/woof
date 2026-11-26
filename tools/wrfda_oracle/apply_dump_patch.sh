@@ -1,7 +1,9 @@
 #!/bin/bash
 # Hook woof_dump.inc into a COPY of a pinned WRFDA 4.7.1 tree (never the
 # pinned tree): tools/wrfda_oracle/apply_dump_patch.sh <WRFV4.7.1-copy>
-# Then rebuild with ./compile all_wrfvar.  Idempotent.
+# It also edits Registry/registry.var, so rebuild from ./clean -a and
+# ./configure 4dvar, then ./compile all_wrfvar (build_4dvar.sh dump does
+# all of it).  Idempotent.
 set -euo pipefail
 tree=${1:?usage: apply_dump_patch.sh <WRFV4.7.1 copy>}
 here=$(cd "$(dirname "$0")" && pwd)

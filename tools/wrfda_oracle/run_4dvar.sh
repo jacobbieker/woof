@@ -15,7 +15,8 @@
 # Every lane: one outer loop, hybrid_opt = 0 and use_theta_m = 0 (the
 # testdata are V3-style files), trajectory_io with var4d_detail_out so the
 # TL perturbations at each slot, the adjoint forcings and the gradient at
-# 0h are written to disk, and files.sha256 over every input and output.
+# 0h are written to disk (checked non-empty), and files.sha256 over every
+# input and output.
 #
 # Layout under $W (default /d/scratch/wrfda) as run_tutorial.sh.
 # usage: run_4dvar.sh lid|l1|l0 NAME
@@ -66,10 +67,13 @@ want = {
     # model steps from garbage (NaN in sfclayrev, KF out of bounds)
     # io_form_auxhist7/8: the Registry default 0 makes the transfer
     # routines' var4d_detail_out writes (af_d01_*, gradient_d01_*, the TL
-    # slot states) no-ops; 2 = netCDF, as WRFPLUS forces for its own
-    # gradient_wrfplus_d01_*. frames_per_auxhist7/8 = 1: at the Registry
-    # default 999999 med_hist_out keeps the first file open and appends
-    # every later slot to it unflushed, so the files hold a header only
+    # slot states) no-ops; 2 = netCDF. frames_per_auxhist7/8 = 1: at the
+    # Registry default 999999 med_hist_out keeps the first file open and
+    # puts every later slot in it, so there is one file, not one per slot.
+    # The fields themselves need the dump build (apply_dump_patch.sh puts
+    # the a_/g_ fields on streams 7 and 8); WRFPLUS's own
+    # gradient_wrfplus_d01_* stays a header, its Registry has no such
+    # stream on the a_ fields
     "time_control": {"run_hours": "6", "start_hour": "12", "end_hour": "18", "force_use_old_data": ".true.",
                      "input_from_file": ".true.", "io_form_auxhist7": "2", "io_form_auxhist8": "2",
                      "frames_per_auxhist7": "1", "frames_per_auxhist8": "1"},
@@ -128,9 +132,24 @@ status=0
 ulimit -s unlimited
 /usr/bin/time -v ./da_wrfvar.exe > wrfda.out 2> time.txt || status=$?
 grep -E "Elapsed|Maximum resident" time.txt
-grep -q "WRF-Var completed successfully" rsl.out.0000 wrfda.out 2>/dev/null \
+[ "$status" = 0 ] && grep -q "WRF-Var completed successfully" rsl.out.0000 wrfda.out 2>/dev/null \
   || { echo "da_wrfvar.exe did not complete (exit $status)" >&2; exit 1; }
 grep -E "Final cost|Original gradient|Final: " wrfda.out | tail -6
 ls -la
-sha256sum namelist.input fg wrfbdy_d01 be.dat ob0?.ascii woof_*.bin wrfvar_output \
-  $(ls -d tl_d01_* af_d01_* gradient_d01_* auxhist*_d01_* nl_d01_* 2>/dev/null) > files.sha256
+shopt -s nullglob
+# var4d_detail_out under trajectory_io, last inner iteration: the TL
+# perturbation at each of the 7 slots (auxhist8_d01_*, in G_*), the adjoint
+# forcing at each slot (af_d01_*, also in G_*: WRFDA reuses the g_ arrays)
+# and the 0h gradient (gradient_d01_*, in A_*).  A header-only file (no
+# fields on the stream) is about 23 kB
+for g in "auxhist8_d01_* 7" "af_d01_* 7" "gradient_d01_* 1"; do
+  read -r pat n <<< "$g"; f=($pat)
+  [ ${#f[@]} = "$n" ] || { echo "expected $n $pat files, found ${#f[@]}" >&2; exit 1; }
+  for x in "${f[@]}"; do
+    [ "$(stat -c %s "$x")" -gt 65536 ] || { echo "$x holds no fields" >&2; exit 1; }
+  done
+done
+files=(namelist.input fg wrfbdy_d01 be.dat ob0?.ascii wrfvar_output cost_fn grad_fn
+       analysis_increments woof_*.bin tl_d01_* af_d01_* gradient_d01_* gradient_wrfplus_d01_*
+       auxhist*_d01_* nl_d01_*)
+sha256sum "${files[@]}" > files.sha256
