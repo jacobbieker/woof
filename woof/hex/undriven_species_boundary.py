@@ -57,6 +57,13 @@ every driven species, and any declared extra (chemistry, a lane's tracers)
 keep their present treatment.  The receipt lists the species and their WRF
 rule.  A partitioned run is refused: a rank's specified cells may read an
 inner cell on another rank.
+
+The MPAS v8.4.2 suite route carries the same rule on its one-card regional
+runtime (:func:`attach_v842`).  Native MPAS drives every suite scalar from
+``lbc_<name>``, so a species its boundary files do not hold is relaxed and
+set toward the boundary pool's allocated values; under ``wrf-flow-dependent``
+the route drives only the species the files hold (:func:`lbc_driven_prefix`)
+and the rest take WRF's rule.  ``free`` keeps native's treatment.
 """
 from __future__ import annotations
 
@@ -285,21 +292,87 @@ def attach(driver, host: Mapping, mode: str | None):
     if getattr(getattr(runtime.padded, "base", runtime.padded), "partition_layout_v841", None) is not None:
         raise ValueError("--undriven-species-boundary wrf-flow-dependent needs the whole specified zone on one "
                          "card: a rank's specified cell may read an inner cell another rank owns")
+    # RunConfig's defaults (woof.config: wdm6_ccn_conc 1.0e8, nssl_cccn 0.5e9) unless the selection assigns them.
+    return _bind(runtime, tuple(host["scalar_names"]),
+                 wdm6_ccn_conc=_physics_value(host, "wdm6_ccn_conc", 1.0e8),
+                 nssl_cccn=_physics_value(host, "nssl_cccn", 0.5e9))
+
+
+def _bind(runtime, names: Sequence[str], *, wdm6_ccn_conc: float, nssl_cccn: float) -> dict:
+    """The rules for ``names`` against the runtime's driven segments, bound to the runtime."""
+
     from .species_row import species_row_for_names
 
-    names = tuple(host["scalar_names"])
+    names = tuple(names)
     row = species_row_for_names(names)
     extras = {d.name for d in row.declared_extras()}
     row_names = tuple(n for n in row.names() if n not in extras)
     driven = sorted({first + i for first, _pool, count in runtime.scalar_segments for i in range(count)})
-    # RunConfig's defaults (woof.config: wdm6_ccn_conc 1.0e8, nssl_cccn 0.5e9) unless the selection assigns them.
     rules = species_rules(
         names, driven, row_names=row_names, mp_physics=getattr(row, "mp_physics", None),
-        wdm6_ccn_conc=_physics_value(host, "wdm6_ccn_conc", 1.0e8),
-        nssl_cccn=_physics_value(host, "nssl_cccn", 0.5e9))
+        wdm6_ccn_conc=wdm6_ccn_conc, nssl_cccn=nssl_cccn)
     runtime.undriven_species_boundary = UndrivenSpeciesBoundary(runtime, rules)
     return runtime.undriven_species_boundary.receipt()
 
 
+def lbc_driven_prefix(paths: Sequence[str], names: Sequence[str]) -> tuple[str, ...]:
+    """The leading model species every boundary file carries, as ``lbc_<name>``.
+
+    The MPAS suite route (mpasphys.runtime_v842.open_limited_area_dycore) drives every suite scalar from
+    ``lbc_<name>`` as native MPAS does: a species the files do not hold drives the relaxation and specified zones
+    from the boundary pool's allocated values.  Under ``wrf-flow-dependent`` the route drives only the species the
+    files hold, as the WOOF-physics route does (run_cuda_v841_forecast.select_lbc_scalar_names) and as WRF does
+    (``have_bcs_moist``), and the rest take WRF's flow-dependent rule.  The held species must be the model's
+    leading block, unchanged across the files, or a pool row would drive the wrong species.
+    """
+
+    from netCDF4 import Dataset
+
+    wanted = tuple(f"lbc_{name}" for name in names)
+    selected: tuple[str, ...] | None = None
+    for path in paths:
+        with Dataset(path, "r") as dataset:
+            present = tuple(name for name in wanted if name in dataset.variables)
+        if not present or present != wanted[:len(present)]:
+            raise ValueError(
+                f"--undriven-species-boundary wrf-flow-dependent: boundary file {path} carries model species "
+                f"{tuple(n[4:] for n in present)}, which is not the leading block of {tuple(names)}; a pool row "
+                "would drive the wrong species")
+        if selected is not None and present != selected:
+            raise ValueError(
+                f"--undriven-species-boundary wrf-flow-dependent: boundary species change at {path}: "
+                f"{selected} versus {present}; every boundary time must carry each driven species")
+        selected = present
+    if selected is None:
+        raise ValueError("--undriven-species-boundary wrf-flow-dependent: the run names no boundary files")
+    return selected
+
+
+def attach_v842(dycore, names: Sequence[str], mode: str | None, *, physics: Mapping | None = None):
+    """Bind the rule on the MPAS suite route's regional runtime; None (nothing built) for ``free``.
+
+    ``names`` is the suite's scalar block (Registry ``scalars``).  The route opened its regional runtime with
+    only the species the boundary files hold (:func:`lbc_driven_prefix`), so the others are undriven here as on
+    the WOOF-physics route.  ``physics`` holds the suite's ``wdm6_ccn_conc`` / ``nssl_cccn`` if it sets them;
+    no MPAS v8.4.2 scheme carries WRF's ``P_QNN``, so neither is read on the in-tree suites.
+    """
+
+    if mode in (None, DEFAULT_MODE):
+        return None
+    if mode not in MODES:
+        raise ValueError(f"--undriven-species-boundary {mode!r} must be one of {', '.join(MODES)}")
+    runtime = getattr(dycore, "regional_v841", None)
+    if runtime is None:
+        raise ValueError("--undriven-species-boundary sets a regional mesh's specified zone; this mesh is global")
+    if getattr(getattr(runtime.padded, "base", runtime.padded), "partition_layout_v841", None) is not None:
+        raise ValueError("--undriven-species-boundary wrf-flow-dependent needs the whole specified zone on one "
+                         "card: a rank's specified cell may read an inner cell another rank owns")
+    host = {"constructor_values": {"physics": dict(physics or {})}}
+    return _bind(runtime, names,
+                 wdm6_ccn_conc=_physics_value(host, "wdm6_ccn_conc", 1.0e8),
+                 nssl_cccn=_physics_value(host, "nssl_cccn", 0.5e9))
+
+
 __all__ = ["CCN_INFLOW", "DEFAULT_MODE", "FIXED_INFLOW", "MODES", "SpeciesRule", "UndrivenSpeciesBoundary",
-           "ZERO_INFLOW", "apply", "attach", "boundary_geometry", "ccn_inflow", "outflow_mask", "species_rules"]
+           "ZERO_INFLOW", "apply", "attach", "attach_v842", "boundary_geometry", "ccn_inflow", "lbc_driven_prefix",
+           "outflow_mask", "species_rules"]
