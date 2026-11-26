@@ -2706,7 +2706,11 @@ def _umbrella_resolved_as_in_toml(init):
     passed True from its default (True in correct mode), so the names are
     read here.  A call that passes every field (``dataclasses.replace``,
     ``RunConfig(**asdict(cfg), ...)``) restates a resolved configuration:
-    __post_init__ applies the umbrella to all of it.  A dataclass subclass
+    __post_init__ applies the umbrella to all of it, with no refusal, since
+    a restatement cannot tell a key named in the call from one carried in
+    (``replace(cfg, woof_quirk_corrections='all', key=False)`` gives
+    key=True; in exact mode every key arrives False and 'all' must still
+    turn them on).  A dataclass subclass
     (_DfiBackwardRunConfig, built from an admitted configuration) has its
     own __init__ and takes __post_init__'s rule only."""
     import functools
