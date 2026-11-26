@@ -2765,7 +2765,10 @@ on the kernel keeps the cap where `xland < 1.5` and leaves the water value,
 which stays between the lowest level and the surface mixing ratio. Only Q2
 (and what is derived from it) moves (`tests/test_mynn_sfclay_q2_land_cap.py`).
 Read only where `sf_sfclay_physics = 5` at the `wrf_461` variant, off in
-exact mode; not yet scored against observations.
+exact mode; not yet scored against observations. With `sf_surface_physics = 3`
+and `ruc_2m_diagnostic = "log_profile"` the fork diagnostic set applies its own
+final Q2 bound to water after the surface layer, so the key has no effect on
+water there.
 
 ## Passive tracers (`tracer_opt`)
 
