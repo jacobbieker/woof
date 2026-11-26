@@ -119,9 +119,9 @@ JOB_KEYS = frozenset({
 })
 
 #: ``woof go`` flags a job may add, and whether each takes a value.
-#: Everything else is refused: a flag that moves outputs, restarts from a
-#: path on someone else's disk or turns the run into a dry run is not a
-#: per-run knob.
+#: Everything else is refused: a flag that sends outputs outside the
+#: attempt's workdir and the job's own store, restarts from a path on
+#: someone else's disk or turns the run into a dry run is not a per-run knob.
 GO_ARGS: dict[str, bool] = {
     "--cycle": True,
     "--transport": True,
@@ -519,9 +519,9 @@ def _go_args(raw: Any) -> tuple[str, ...]:
                 f"go_args: {flag!r} is not a flag a job may pass to woof go; "
                 f"allowed: {', '.join(sorted(GO_ARGS))}",
                 "A job runs unattended on a machine its author never sees, "
-                "so the flags it may set are a short list that cannot move "
-                "its outputs, point it at another disk's checkpoint or turn "
-                "it into a dry run."))
+                "so the flags it may set are a short list that cannot send "
+                "its outputs outside its workdir and store, point it at "
+                "another disk's checkpoint or turn it into a dry run."))
         index += 1
         if GO_ARGS[flag]:
             if not eq:
