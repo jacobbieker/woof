@@ -156,3 +156,104 @@ def test_free_builds_nothing_and_the_door_passes_nothing():
             SimpleNamespace(undriven_species_boundary="wrf-flow-dependent", local_timestep=True))
     with pytest.raises(ValueError, match="global"):
         usb.attach(SimpleNamespace(regional_v841=None), {}, "wrf-flow-dependent")
+
+
+# -- the MPAS v8.4.2 suite route (R2) ------------------------------------------
+
+
+def _lbc_file(path, names):
+    from netCDF4 import Dataset
+
+    with Dataset(path, "w") as dataset:
+        dataset.createDimension("nCells", 4)
+        dataset.createDimension("nVertLevels", 2)
+        for name in names:
+            dataset.createVariable(f"lbc_{name}", "f4", ("nCells", "nVertLevels"))
+    return str(path)
+
+
+def test_the_suite_route_drives_only_the_leading_species_the_files_hold(tmp_path):
+    names = ("qv", "qc", "qr", "qi", "qs", "qg")
+    first = _lbc_file(tmp_path / "a.nc", ("qv", "qc", "qr", "u"))
+    second = _lbc_file(tmp_path / "b.nc", ("qv", "qc", "qr"))
+    assert usb.lbc_driven_prefix([first, second], names) == ("lbc_qv", "lbc_qc", "lbc_qr")
+    # A held species after a missing one would put a pool row on the wrong species.
+    gap = _lbc_file(tmp_path / "gap.nc", ("qv", "qc", "qi"))
+    with pytest.raises(ValueError, match="leading block"):
+        usb.lbc_driven_prefix([gap], names)
+    # The held block may not change between boundary times.
+    more = _lbc_file(tmp_path / "more.nc", ("qv", "qc", "qr", "qi"))
+    with pytest.raises(ValueError, match="change"):
+        usb.lbc_driven_prefix([first, more], names)
+    with pytest.raises(ValueError, match="no boundary files"):
+        usb.lbc_driven_prefix([], names)
+
+
+def _registry_scalars():
+    """The MPAS-A v8.4.2 ``scalars`` block, in Registry order, from the packaged Registry.xml."""
+    import xml.etree.ElementTree as ET
+    from pathlib import Path
+
+    import woof.hex as hex_package
+
+    path = Path(hex_package.__file__).parent / "data/mpasphys-framework/src/core_atmosphere/Registry.xml"
+    for var_array in ET.parse(path).getroot().iter("var_array"):
+        if var_array.get("name") == "scalars" and var_array.find("var") is not None:
+            return [(v.get("name"), set(filter(None, (v.get("packages") or "").split(";"))))
+                    for v in var_array.iter("var")]
+    raise AssertionError("no scalars var_array")
+
+
+def test_the_suite_schemes_take_wrf_flow_dep_bdy_for_what_the_files_do_not_hold():
+    block = _registry_scalars()
+    # every Registry microphysics scalar has its WRF rule; tke (no mp package) does not
+    micro = {name for name, packages in block if any(p.startswith("mp_") for p in packages)}
+    assert micro == set(usb.SUITE_MICROPHYSICS)
+    for package in ("mp_wsm6_in", "mp_thompson_in", "mp_thompson_aers_in"):
+        names = tuple(name for name, packages in block if name == "qv" or package in packages)
+        rules = usb.suite_species_rules(names, (0, 1, 2))   # the qv/qc/qr stream init_atmosphere writes
+        assert [(r.name, r.rule, r.inflow) for r in rules] == [(n, usb.ZERO_INFLOW, 0.0) for n in names[3:]]
+    # A scalar with no WRF rule that the files do not drive is refused, not left without a boundary step.
+    with pytest.raises(ValueError, match="tke"):
+        usb.suite_species_rules(("qv", "qc", "qr", "tke"), (0, 1, 2))
+    assert usb.suite_species_rules(("qv", "qc", "qr", "tke"), (0, 1, 2, 3)) == ()
+
+
+def test_the_suite_route_attach_builds_nothing_for_free_and_refuses_a_global_mesh():
+    assert usb.attach_v842(None, ("qv",), "free") is None
+    assert usb.attach_v842(None, ("qv",), None) is None
+    with pytest.raises(ValueError, match="global"):
+        usb.attach_v842(SimpleNamespace(regional_v841=None), ("qv",), "wrf-flow-dependent")
+    with pytest.raises(ValueError, match="must be one of"):
+        usb.attach_v842(SimpleNamespace(regional_v841=None), ("qv",), "nearest")
+
+
+def test_the_suite_route_door_carries_the_rule_on_its_one_card_runtime(monkeypatch):
+    from woof.hex import forecast_door as door
+
+    for key in ("WOOF_HEX_HOSTS",):
+        monkeypatch.delenv(key, raising=False)
+    v842 = SimpleNamespace(table_key="mpasphys_v842")
+    rrfs = SimpleNamespace(table_key="mpasphys_rrfs")
+    # The flag alone turns it on: correct mode and --quirk-corrections all leave a suite run native.
+    assert door._resolve_undriven_species_boundary(SimpleNamespace(lbc_dir="x"), v842) is None
+    assert door._resolve_undriven_species_boundary(
+        SimpleNamespace(lbc_dir="x", quirk_corrections="all"), v842) is None
+    assert door._resolve_undriven_species_boundary(
+        SimpleNamespace(lbc_dir="x", physics_mode="exact"), v842) is None
+    assert door._resolve_undriven_species_boundary(
+        SimpleNamespace(lbc_dir="x", physics_mode="exact", undriven_species_boundary="wrf-flow-dependent"),
+        v842) == "wrf-flow-dependent"
+    assert door._resolve_undriven_species_boundary(SimpleNamespace(lbc_dir="x"), rrfs) is None
+    # An explicit flag where it cannot act is refused by name: a fork dycore, a global mesh, other seats.
+    with pytest.raises(Exception, match="no --lbc-dir"):
+        door._resolve_undriven_species_boundary(
+            SimpleNamespace(lbc_dir=None, undriven_species_boundary="wrf-flow-dependent"), v842)
+    with pytest.raises(Exception, match="fork dycore"):
+        door._resolve_undriven_species_boundary(
+            SimpleNamespace(lbc_dir="x", undriven_species_boundary="wrf-flow-dependent"), rrfs)
+    explicit = SimpleNamespace(lbc_dir="x", hosts="a,b", undriven_species_boundary="wrf-flow-dependent")
+    explicit.undriven_species_boundary_mode = door._resolve_undriven_species_boundary(explicit, v842)
+    assert "--undriven-species-boundary" in door.suite_route_seat_refusal(explicit, environ={})
+    one_card = SimpleNamespace(undriven_species_boundary_mode="wrf-flow-dependent")
+    assert door.suite_route_seat_refusal(one_card, environ={}) is None
