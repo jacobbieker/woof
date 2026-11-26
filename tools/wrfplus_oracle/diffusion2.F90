@@ -2,7 +2,10 @@
 ! (horizontal_diffusion_2: horizontal_diffusion_u_2, _v_2, _w_2 and
 ! horizontal_diffusion_s) with their metrics (compute_diff_metrics), the
 ! density rho = 1/alt (1 + qv) and, for the w row, defor13 and defor23
-! from cal_deform_and_div (docs/dev/P3A-WRF-DRYCORE-ADJOINT.md, item 2b).
+! from cal_deform_and_div (docs/dev/P3A-WRF-DRYCORE-ADJOINT.md, item 2b);
+! and vertical_diffusion_2 itself (its u, v, w, theta, moisture and
+! scalar rows with the isfflx surface fluxes), with defor13/23/33 from
+! cal_deform_and_div (item 2b-2).
 !
 ! WRFPLUS 4.7.1's own G_/A_ diff_opt 2 routines differentiate the older
 ! mu-coupled formulation (a finding), so this driver links the WRF
@@ -23,17 +26,26 @@
 !
 ! Input (stream, native binary64/int32): nx, ny, nz, flags (bit 0
 ! periodic_x, 1 periodic_y, 2 specified, 3 moist; bits 4-6 the row:
-! 1 u, 2 v, 3 w, 5 scalar), nrec; rdx, rdy, cf1, cf2, cf3; on (kms:kme)
+! 1 u, 2 v, 3 w, 5 scalar, 6 vertical_diffusion_2), nrec; rdx, rdy, cf1,
+! cf2, cf3; on (kms:kme)
 ! fnm, fnp, dn, dnw; on (ims:ime, jms:jme) msfu, msfv, msft; on
 ! (ims:ime, kms:kme, jms:jme) phb, then the active fields php, alt, qv,
 ! xk, defor11, defor22, defor12, u, v, w, field (ids 1-11) and the
 ! tendency.  Then nrec records: n, the step h, n field ids, n 1-based
 ! linear memory words.  Output (stream): nrec tendencies on the memory.
+!
+! Row 6 reads, after the tendency: vrow (1 ru_tendf, 2 rv_tendf,
+! 3 rw_tendf, 4 rt_tendf, 5 moist_tendf(P_QV), 6 scalar_tendf), isfflx,
+! mix_full_fields (0/1); cd0 and tke_heat_flux; ust, hfx, qfx on
+! (ims:ime, jms:jme) and thb on the 3-D memory.  The field (id 11) is
+! thp (plus thb when mix_full_fields, t_base = 0), moist(P_QV) for vrow 5
+! or scalar 2; moist(P_QV) is qv otherwise; xkmv = xkhv = xkmh = xk.
 program wrfplus_diffusion2
   use module_configure, only : grid_config_rec_type
   use module_diffusion_em, only : compute_diff_metrics, cal_deform_and_div, &
        horizontal_diffusion_u_2, horizontal_diffusion_v_2, horizontal_diffusion_w_2, &
-       horizontal_diffusion_s
+       horizontal_diffusion_s, vertical_diffusion_2
+  use module_state_description, only : P_qv, PARAM_FIRST_SCALAR
   implicit none
   integer, parameter :: nact = 11
   integer :: nx, ny, nz, iu, ou, hdr(5), flags, row, nrec, r, n, q
@@ -46,6 +58,11 @@ program wrfplus_diffusion2
   real, allocatable, dimension(:,:,:) :: phb, tend0, tend, rho, z, rdz, rdzw, zx, zy, &
        div, e11, e22, e33, e12, e13, e23, tke
   real, allocatable :: act(:,:,:,:), nba(:,:,:,:)
+  integer :: vhdr(3), vrow
+  real :: vsc(2)
+  real, allocatable, dimension(:,:) :: ust, hfx, qfx
+  real, allocatable, dimension(:,:,:) :: thb, ru, rv, rw, rt, tket, thp, theta
+  real, allocatable, dimension(:,:,:,:) :: mt, sct, mq, scal, chem, chemt, trac, tract
   integer, allocatable :: fid(:), word(:)
   character(len=512) :: fin, fout
 
@@ -82,6 +99,21 @@ program wrfplus_diffusion2
            mold=phb)
   allocate(nba(ims:ime, kms:kme, jms:jme, 1))
   read(iu) tend0
+  if (row == 6) then
+    P_qv = PARAM_FIRST_SCALAR
+    read(iu) vhdr, vsc
+    vrow = vhdr(1)
+    cf%isfflx = vhdr(2); cf%mix_full_fields = vhdr(3) == 1
+    cf%tke_drag_coefficient = vsc(1); cf%tke_heat_flux = vsc(2); cf%use_theta_m = 0
+    allocate(ust(ims:ime, jms:jme), hfx(ims:ime, jms:jme), qfx(ims:ime, jms:jme))
+    read(iu) ust, hfx, qfx
+    allocate(thb, ru, rv, rw, rt, tket, thp, theta, mold=phb)
+    read(iu) thb
+    allocate(mt(ims:ime, kms:kme, jms:jme, 2), sct(ims:ime, kms:kme, jms:jme, 2))
+    allocate(mq(ims:ime, kms:kme, jms:jme, 2), scal(ims:ime, kms:kme, jms:jme, 2))
+    allocate(chem(ims:ime, kms:kme, jms:jme, 1), chemt(ims:ime, kms:kme, jms:jme, 1))
+    allocate(trac(ims:ime, kms:kme, jms:jme, 1), tract(ims:ime, kms:kme, jms:jme, 1))
+  end if
 
   open(newunit=ou, file=trim(fout), access='stream', form='unformatted', status='replace')
   do r = 1, nrec
@@ -155,6 +187,15 @@ contains
            msft, msft, act(:,:,:,4), rdx, rdy, fnm, fnp, dn, zx, zy, rdz, rho, &
            ids, ide, jds, jde, kds, kde, ims, ime, jms, jme, kms, kme, &
            ids, ide, jds, jde, kds, kde)
+    case (6)
+      call cal_deform_and_div(cf, act(:,:,:,8), act(:,:,:,9), act(:,:,:,10), div, &
+           e11, e22, e33, e12, e13, e23, nba, 1, ubase, vbase, &
+           msfu, msfu, msfv, msfv, msft, msft, rdx, rdy, dn, dnw, rdz, rdzw, &
+           fnm, fnp, cf1, cf2, cf3, zx, zy, &
+           ids, ide, jds, jde, kds, kde, ims, ime, jms, jme, kms, kme, &
+           ids, ide, jds, jde, kds, kde)
+      call fill(e13, 1, 0); call fill(e23, 0, 1)
+      call vertical()
     case default
       call horizontal_diffusion_s(tend, cf, act(:,:,:,11), msft, msft, msfu, msfu, &
            msfv, msfv, act(:,:,:,4), rdx, rdy, fnm, fnp, cf1, cf2, cf3, &
@@ -163,6 +204,42 @@ contains
            ids, ide, jds, jde, kds, kde)
     end select
   end subroutine evaluate
+
+  subroutine vertical()
+    real :: zb(kms:kme)
+    ru = 0; rv = 0; rw = 0; rt = 0; tket = 0; mt = 0; sct = 0
+    chem = 0; chemt = 0; trac = 0; tract = 0; zb = 0
+    mq = 0; scal = 0
+    mq(:,:,:,P_qv) = act(:,:,:,3)
+    if (vrow == 5) mq(:,:,:,P_qv) = act(:,:,:,11)
+    if (vrow == 6) scal(:,:,:,2) = act(:,:,:,11)
+    thp = act(:,:,:,11)
+    if (cf%mix_full_fields) thp = act(:,:,:,11) + thb
+    theta = 0
+    select case (vrow)
+    case (1); ru = tend0
+    case (2); rv = tend0
+    case (3); rw = tend0
+    case (4); rt = tend0
+    case (5); mt(:,:,:,P_qv) = tend0
+    case default; sct(:,:,:,2) = tend0
+    end select
+    call vertical_diffusion_2(ru, rv, rw, rt, tket, mt, 2, chemt, 1, sct, 2, tract, 1, &
+         act(:,:,:,8), act(:,:,:,9), thp, zb, zb, zb, zb, tket, theta, &
+         cf, e13, e23, e33, nba, 1, div, mq, chem, scal, trac, &
+         act(:,:,:,4), act(:,:,:,4), act(:,:,:,4), 4, &
+         fnm, fnp, dn, dnw, rdz, rdzw, hfx, qfx, ust, rho, &
+         ids, ide, jds, jde, kds, kde, ims, ime, jms, jme, kms, kme, &
+         ids, ide, jds, jde, kds, kde)
+    select case (vrow)
+    case (1); tend = ru
+    case (2); tend = rv
+    case (3); tend = rw
+    case (4); tend = rt
+    case (5); tend = mt(:,:,:,P_qv)
+    case default; tend = sct(:,:,:,2)
+    end select
+  end subroutine vertical
 
   ! zx/zy on the end faces of the top w level (compute_diff_metrics's
   ! face loops stop at kde-2).
