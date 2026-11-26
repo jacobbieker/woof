@@ -173,6 +173,14 @@ def lamc_updated_rc_scope(enabled: bool):
         _LAMC_UPDATED_RC.reset(token)
 
 
+def hail_variant_tag(rain_snow_closure: bool, lamc_updated_rc: bool) -> str:
+    """The bracketed define list that names a hail image (its module key and
+    its pre-warm label)."""
+    return ("[THOMPSON_AA_HAIL=1"
+            + ",THOMPSON_RAIN_SNOW_CLOSURE=1" * bool(rain_snow_closure)
+            + ",THOMPSON_LAMC_UPDATED_RC=1" * bool(lamc_updated_rc) + "]")
+
+
 @lru_cache(maxsize=None)
 def _hail_module(name: str, rain_snow_closure: bool = False,
                  lamc_updated_rc: bool = False):
@@ -190,11 +198,7 @@ def _hail_module(name: str, rain_snow_closure: bool = False,
                + (LAMC_UPDATED_RC_DEFINES if lamc_updated_rc else ()))
     source = module_source_int_defines(name, defines)
     options = ("-std=c++17", "--ftz=false", "--fmad=false")
-    key = f"{MODULE_KEY_ROOT}:{name}[THOMPSON_AA_HAIL=1]"
-    if rain_snow_closure:
-        key = f"{MODULE_KEY_ROOT}:{name}[THOMPSON_AA_HAIL=1,THOMPSON_RAIN_SNOW_CLOSURE=1]"
-    if lamc_updated_rc:
-        key = key[:-1] + ",THOMPSON_LAMC_UPDATED_RC=1]"
+    key = f"{MODULE_KEY_ROOT}:{name}{hail_variant_tag(rain_snow_closure, lamc_updated_rc)}"
     with observe_module_compile(key):
         image, _ = nvrtc_ptx_cache.compile_using_nvrtc(source, options, None, name + ".cu")
         module = cp.cuda.function.Module()

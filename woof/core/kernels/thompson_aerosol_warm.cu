@@ -2476,7 +2476,9 @@ extern "C" __global__ void thompson_aa_ncten_balance(
         // mode keeps; this block is the one place the correction departs.
         // qcten holds only sinks, so xrc <= rc: the entry mass gives a mean
         // size xDc that is too large, never too small, so the stale form
-        // clamps spuriously at 2*D0r or misses the D0c clamp.
+        // clamps spuriously at 2*D0r or misses the D0c clamp.  (The
+        // condensation rate prw_vcd joins qcten only after this balance, at
+        // WRF :3480; the balance sees the sinks alone.)
         lamc = (double)thompson_aa_powf(
             thompson_aa_div(
                 thompson_aa_mul(

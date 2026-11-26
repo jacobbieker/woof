@@ -191,12 +191,12 @@ class Correction:
         return self.keys[0]
 
 
-#: Every correction this engine carries.  Order is the receipt order.
 #: The Thompson schemes whose cloud number leaves the call (aerosol-aware 28
 #: and hail-aware 38); RCON (29) is in THOMPSON_AEROSOL_FAMILY but not here.
 #: RunConfig.thompson_lamc_updated_rc (FQ7) is read under these.
 THOMPSON_CLOUD_BALANCE_MP = (28, 38)
 
+#: Every correction this engine carries.  Order is the receipt order.
 CORRECTIONS: tuple[Correction, ...] = (
     Correction(
         finding="WB1",

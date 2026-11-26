@@ -674,12 +674,12 @@ def test_the_thompson_closure_variants_the_run_launches_are_warmed(mode):
     assert not any("THOMPSON_LAMC_UPDATED_RC" in label for label in labels)
 
 
-def _thompson_run(mp, mode):
+def _thompson_run(mp, mode, **extra):
     from woof import correct_mode
     from woof.config import RunConfig, validate_run_config
     return validate_run_config(RunConfig(
         nx=8, ny=8, nz=12, dx=3000.0, dy=3000.0, ztop=12000.0, dt=10.0, run_seconds=60.0, moist=True,
-        mp_physics=mp, **correct_mode.resolve(mode).settings))
+        mp_physics=mp, **extra, **correct_mode.resolve(mode).settings))
 
 
 @pytest.mark.parametrize("mode", ["correct", "exact"])
@@ -721,7 +721,10 @@ def test_the_hail_aware_thompson_warms_the_hail_images_the_run_launches(mode):
 def test_the_thompson_fork_column_variants_the_run_launches_are_warmed(monkeypatch, mode):
     monkeypatch.setattr(kernel_prewarm, "static_modules", lambda experiment: ("thompson_fork_unit",))
     monkeypatch.setattr(kernel_prewarm, "_inline_jobs", lambda modules: [])
-    experiment = SimpleNamespace(domains=(SimpleNamespace(run=_thompson_run(28, mode)),))
+    run = _thompson_run(28, mode, thompson_version="wrf_39_noaa")
+    # a wrf_461 domain never launches the fork column: it adds no variant
+    other = _thompson_run(28, mode)
+    experiment = SimpleNamespace(domains=(SimpleNamespace(run=run), SimpleNamespace(run=other)))
     jobs = [job for job in kernel_prewarm.static_jobs(experiment)
             if job[0].startswith("thompson_fork_unit")]
     on = mode == "correct"

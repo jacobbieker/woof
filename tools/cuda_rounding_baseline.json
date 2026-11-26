@@ -1793,7 +1793,7 @@
     "call_sha256": "90ee68ec1190f87be3c520f8762df32418ca5be8e0eb5925f78a8a265b1c59b5",
     "constructor": "compile_using_nvrtc",
     "factory": "_hail_module",
-    "factory_sha256": "3f3a3acce900b90550984886053344a28a172bc843b27e559f4ae613203fcb90",
+    "factory_sha256": "b179f05af75c599d21eb2a01d4800de308064ecb71d6a7d92758d8da00fb5c5d",
     "file": "woof/core/thompson_aerosol_launch.py",
     "status": "unresolved"
    },
@@ -2289,7 +2289,7 @@
     "call_sha256": "c3ef8579eec398570a5cee984638c5edd27c68110e177018a0cac487166e3664",
     "constructor": "compile_using_nvrtc",
     "factory": "_module",
-    "factory_sha256": "b0108ce0c468d687808f4fc87b5fddf698046cf5b8ce340d7154ebe4bac6e1d3",
+    "factory_sha256": "98bd507dec3e076a8105fbca9d7b643794c3955dd22eb43c9a67623bb37dcf86",
     "file": "woof/core/thompson_fork.py",
     "status": "unresolved"
    },
@@ -4797,7 +4797,7 @@
    },
    {
     "file": "woof/core/kernels/thompson_aerosol_warm.cu",
-    "sha256": "900e26aa8314c8687173078353ef413052c2f888c2638234600bb9c10e70e765"
+    "sha256": "6339fdd602cdf97b86ac2219e90c7d8ef7880872bf11d69c672633ff8767b467"
    },
    {
     "file": "woof/core/kernels/thompson_classic.cu",
@@ -4837,7 +4837,7 @@
    },
    {
     "file": "woof/core/kernels/thompson_fork.cu",
-    "sha256": "a916ede73fd7cf39ff585b6889e7e90f04338f6c2b097b638d63a09a11cd9ef4"
+    "sha256": "3f3c7f12faa3f42d125b442c6ee72906c70baf642e55c66ca9a7c1f3f2fed4be"
    },
    {
     "file": "woof/core/kernels/thompson_fork_constants.cuh",
@@ -5999,11 +5999,11 @@
    },
    {
     "file": "woof/core/thompson_aerosol_launch.py",
-    "sha256": "fd5a9f98d88db35ab27ab07bef6a0f77bef2864759ff05c9a11afcc40882e010"
+    "sha256": "8648031cf55a6451b86235ae452b7d3886917e34dd8521b07f50542757fed69d"
    },
    {
     "file": "woof/core/thompson_fork.py",
-    "sha256": "ef2e77071a909f41abb1d48740b2bb387c51e9ebd77b492ded2f92a81ac92454"
+    "sha256": "cd01836b2647c07ee9e4a310e699c9d50e34c5cdc5dedc48c31b581352498fd5"
    },
    {
     "file": "woof/core/urban_bem.py",
@@ -15667,20 +15667,25 @@
    "source_sha256": "5524940f27ad7451d813c958fdd8bdb82764c4004dfe8074b95e91d83f2a89e0"
   },
   "kernels:gfdleta_co2_init_l256": {
-   "source_sha256": "14f0f2e2433b5d442a83fbc9655e1cdabd36232ac1f52e80a449f7f6e732724c",
-   "errors": {},
-   "native_errors": {},
    "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
    "differences": {
     "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
     "sites": {
      "100": 0
     }
    },
-   "dataflow_differences": {
-    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "41c087a4ae0944422b083650313a22d907ef41def0fcd2317ea2956c52503769",
     "sites": {
-     "100": 0
+     "100": 622
     }
    },
    "native_differences": {
@@ -15689,29 +15694,24 @@
      "100": 746
     }
    },
-   "native_dataflow_differences": {
-    "sha256": "41c087a4ae0944422b083650313a22d907ef41def0fcd2317ea2956c52503769",
-    "sites": {
-     "100": 622
-    }
-   },
+   "native_errors": {},
    "options": {
-    "120": [
-     "-std=c++17",
-     "--ftz=false",
-     "--device-as-default-execution-space",
-     "-lineinfo",
-     "-arch=compute_120"
-    ],
     "100": [
      "-std=c++17",
      "--ftz=false",
      "--device-as-default-execution-space",
      "-lineinfo",
      "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
     ]
    },
-   "coverage": "compiled"
+   "source_sha256": "14f0f2e2433b5d442a83fbc9655e1cdabd36232ac1f52e80a449f7f6e732724c"
   },
   "kernels:gfdleta_column": {
    "assessment": "static_diagnostic_only",
@@ -15761,20 +15761,25 @@
    "source_sha256": "954b4283f84f00e22d3641b473142887654d02161f30cb53d631147799001b42"
   },
   "kernels:gfdleta_column_l256": {
-   "source_sha256": "ad1448290edf5befdb32f892ccd36a2149b31db21eb32da5971a0114a0fd231d",
-   "errors": {},
-   "native_errors": {},
    "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
    "differences": {
     "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
     "sites": {
      "100": 0
     }
    },
-   "dataflow_differences": {
-    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "5767c6412a495db97aa242241005bca8ad3cebb488c93e2093e5c418395a29f0",
     "sites": {
-     "100": 0
+     "100": 2671
     }
    },
    "native_differences": {
@@ -15783,29 +15788,24 @@
      "100": 111
     }
    },
-   "native_dataflow_differences": {
-    "sha256": "5767c6412a495db97aa242241005bca8ad3cebb488c93e2093e5c418395a29f0",
-    "sites": {
-     "100": 2671
-    }
-   },
+   "native_errors": {},
    "options": {
-    "120": [
-     "-std=c++17",
-     "--ftz=false",
-     "--device-as-default-execution-space",
-     "-lineinfo",
-     "-arch=compute_120"
-    ],
     "100": [
      "-std=c++17",
      "--ftz=false",
      "--device-as-default-execution-space",
      "-lineinfo",
      "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
     ]
    },
-   "coverage": "compiled"
+   "source_sha256": "ad1448290edf5befdb32f892ccd36a2149b31db21eb32da5971a0114a0fd231d"
   },
   "kernels:gfdleta_init": {
    "assessment": "static_diagnostic_only",

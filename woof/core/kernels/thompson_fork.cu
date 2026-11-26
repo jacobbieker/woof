@@ -1582,7 +1582,8 @@ __device__ bool tf_mp_thompson(
                 // lamc from the entry cloud mass rc(k) (:2839) although the
                 // balance's mass is the updated xrc (:2830); this divides by
                 // xrc.  xrc <= rc(k) (qcten holds only sinks), so the entry
-                // mass gives xDc too large, never too small.
+                // mass gives xDc too large, never too small (prw_vcd joins
+                // qcten only at :3237, after this balance).
                 lamc = (double)tf_powf(xnc * TF_am_r * CCG(2, nu_c)
                                        * OCG1(nu_c) / xrc, TF_obmr);
 #endif

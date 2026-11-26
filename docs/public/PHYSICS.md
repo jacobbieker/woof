@@ -584,8 +584,11 @@ schemes, so it is per domain, read only where `mp_physics = 28` or `38`
 (every `thompson_version`); the classic Thompson's fixed droplet number never
 leaves the call. It is compiled in by a define in the two units that hold the
 balance (`thompson_aerosol_warm.cu` and the WRF 3.9 fork's
-`thompson_fork.cu`), so exact mode runs WRF's program unchanged
-(`tests/test_thompson_lamc_updated_rc.py`).
+`thompson_fork.cu`, WRF 3.9 `module_mp_thompson.F:2839`), so exact mode runs
+WRF's program unchanged (`tests/test_thompson_lamc_updated_rc.py`). The fork
+column itself runs only in a strict `GPUWM_WRF_EXACT=1` process, where the
+correct-mode keys default off, so its block takes effect there only when the
+key is set `true` by hand; a default `wrf_39_noaa` run uses the aerosol units.
 
 ### Ferrier-Aligo with advected rime (`mp_physics = 15`)
 

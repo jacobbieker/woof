@@ -636,7 +636,10 @@ every `thompson_version`), per domain on the same terms. WRF's
 cloud mass `rc(k)` after the sources have updated it to `xrc`. The sources
 only remove cloud water, so `xrc <= rc(k)` and the mean size comes out too
 large: the clamp, and the cloud number it rediagnoses, answer a mass the
-cloud no longer holds (a spurious clamp at `2*D0r`, or a missed one at `D0c`). With `true`, `lamc` is formed from `xrc`. The classic Thompson
+cloud no longer holds (a spurious clamp at `2*D0r`, or a missed one at
+`D0c`). With `true`, `lamc` is formed from `xrc`; the WRF 3.9 fork's column
+(strict `GPUWM_WRF_EXACT=1` only) carries the same correction, in effect there
+only when the key is set `true` by hand. The classic Thompson
 (`mp_physics = 8`) holds a fixed droplet number that no output carries and
 does not read it. Off, and in exact mode, the arithmetic is WRF's word for
 word. It is not a WRF namelist key; set it in the TOML.

@@ -285,7 +285,8 @@ def static_jobs(experiment, *, columns: bool = False, hydro: bool = False) -> li
                      bool(_reads(dc.run, "thompson_lamc_updated_rc")))
                     for dc in getattr(experiment, "domains", ())
                     if hasattr(dc, "run")
-                    and int(getattr(dc.run, "mp_physics", 0) or 0) == 28}
+                    and int(getattr(dc.run, "mp_physics", 0) or 0) == 28
+                    and getattr(dc.run, "thompson_version", "") == "wrf_39_noaa"}
                 for flags in sorted(variants):
                     jobs.append((name if flags == (False, False) else
                                  f"{name}[closure={int(flags[0])},lamc={int(flags[1])}]",
@@ -458,14 +459,12 @@ def _variant_jobs(experiment, modules):
                 # _hail_module), never the plain unit: warm that one, with the
                 # FQ5 / FQ7 defines the run's launch composes on its units.
                 from woof.core.thompson_aerosol_launch import (
-                    CLOSURE_MODULES, _hail_module)
+                    CLOSURE_MODULES, _hail_module, hail_variant_tag)
                 flags = (bool(closure and name in CLOSURE_MODULES),
                          bool(lamc and name in LAMC_MODULES))
                 if (name, "hail", flags) not in seen:
                     seen.add((name, "hail", flags))
-                    jobs.append((name + "[THOMPSON_AA_HAIL=1"
-                                 + ",THOMPSON_RAIN_SNOW_CLOSURE=1" * flags[0]
-                                 + ",THOMPSON_LAMC_UPDATED_RC=1" * flags[1] + "]",
+                    jobs.append((name + hail_variant_tag(*flags),
                                  _hail_module.__wrapped__, (name,) + flags))
             elif name in _THOMPSON_CLOSURE_UNITS and (closure or lamc):
                 # FQ5 (on in correct mode): the unit with the rain-snow
