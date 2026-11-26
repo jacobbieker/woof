@@ -167,14 +167,32 @@ fn read_array(file: &NcFile, v: &netcdf_reader::NcVariable, frame: usize) -> Res
         NcType::UInt64 => numeric!(u64, "uint64"),
         NcType::Byte => numeric!(i8, "int8"),
         NcType::UByte => numeric!(u8, "uint8"),
-        NcType::Char => {
-            let all = file.read_variable_char_bytes(&v.name)?;
+        // NetCDF-4 stores NC_CHAR as a one-byte fixed-length HDF5 string,
+        // which the reader types as String (WRF's `Times` in a NETCDF4 or
+        // NETCDF4_CLASSIC wrfout). read_variable_char_bytes takes exactly
+        // that storage and refuses a variable-length NC_STRING.
+        NcType::Char | NcType::String => {
+            let all = file.read_variable_char_bytes(&v.name).with_context(|| {
+                format!(
+                    "{} ({:?}) cannot be read as NC_CHAR bytes; refusing to omit a history field",
+                    v.name, v.dtype
+                )
+            })?;
             let n: usize = shape.iter().product();
             let offset = if v.dimensions.first().is_some_and(|d| is_time(&d.name)) {
                 frame * n
             } else {
                 0
             };
+            ensure!(
+                offset + n <= all.len(),
+                "{} holds {} bytes; frame {} needs bytes {}..{}",
+                v.name,
+                all.len(),
+                frame,
+                offset,
+                offset + n
+            );
             ("uint8".into(), 1, all[offset..offset + n].to_vec())
         }
         _ => bail!(
