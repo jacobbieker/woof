@@ -320,6 +320,9 @@ struct WrfSmagGrid {
     real cf1, cf2, cf3;
     int nz, ny, nx;
     int phb3d, boundary_x, boundary_y, moist;
+    // RunConfig.diff_metrics_seam_slope off (WRF's arithmetic): a periodic
+    // axis's seam slope keeps its cold zero at the top w level (wrf_zx).
+    int seam_cold_x, seam_cold_y;
 };
 
 __device__ __forceinline__
@@ -345,7 +348,10 @@ WrfSmagGrid wrf_grid(const real* u, const real* v, const real* w,
     q.rdx = rdx; q.rdy = rdy; q.dx = dx; q.dy = dy;
     q.cf1 = cf1; q.cf2 = cf2; q.cf3 = cf3;
     q.nz = nz; q.ny = ny; q.nx = nx; q.phb3d = phb3d;
-    q.boundary_x = boundary_x; q.boundary_y = boundary_y; q.moist = moist;
+    // A boundary flag of 2 is a periodic axis whose seam slope keeps WRF's
+    // cold zero at the top w level (woof.core.dycore.smag_boundary_flags).
+    q.boundary_x = boundary_x & 1; q.boundary_y = boundary_y & 1; q.moist = moist;
+    q.seam_cold_x = boundary_x == 2; q.seam_cold_y = boundary_y == 2;
     return q;
 }
 
@@ -430,6 +436,11 @@ real wrf_zx(const WrfSmagGrid& q, int kw, int j, int iface)
     // set_physical_bc3d('e') copies the last interior slope to the east face.
     if (q.boundary_x && iface <= 0) return 0.0f;
     if (q.boundary_x && iface >= q.nx) iface = q.nx - 1;
+    // On a periodic x axis it fills the seam (zx at ids and ide) for
+    // levels 1..ktf only (module_diffusion_em.F:7037-7067): at the top w
+    // level the seam keeps its cold zero.  woof takes the true slope there
+    // unless RunConfig.diff_metrics_seam_slope is off.
+    if (q.seam_cold_x && kw >= q.nz && PERIODIC(iface, q.nx) == 0) return 0.0f;
 #ifdef GPUWM_WRF_EXACT_C_DIFFUSION
     int jc = wrf_iy(q, j), ip = wrf_ix(q, iface), im = wrf_ix(q, iface - 1);
     kw = kw < 0 ? 0 : (kw > q.nz ? q.nz : kw);
@@ -451,6 +462,9 @@ real wrf_zy(const WrfSmagGrid& q, int kw, int jface, int i)
     // The 'f' metric boundary extension uses the last interior north slope.
     if (q.boundary_y && jface <= 0) return 0.0f;
     if (q.boundary_y && jface >= q.ny) jface = q.ny - 1;
+    // The same cold seam for zy at jds and jde on a periodic y axis
+    // (module_diffusion_em.F:7087-7117).
+    if (q.seam_cold_y && kw >= q.nz && PERIODIC(jface, q.ny) == 0) return 0.0f;
 #ifdef GPUWM_WRF_EXACT_C_DIFFUSION
     int ic = wrf_ix(q, i), jp = wrf_iy(q, jface), jm = wrf_iy(q, jface - 1);
     kw = kw < 0 ? 0 : (kw > q.nz ? q.nz : kw);
@@ -855,8 +869,8 @@ void wrf_smag_km_bc(real* xkmh, real* xkhh, int nz, int ny, int nx,
     // into that boundary.  xkmh/xkhh are cold-zeroed WRF state arrays (and
     // real74's damp_opt=3 never writes the omitted row), so the logical
     // outer active row remains exactly zero for the life of the domain.
-    if ((boundary_x && (i == 0 || i == nx - 1))
-            || (boundary_y && (j == 0 || j == ny - 1))) {
+    if (((boundary_x & 1) && (i == 0 || i == nx - 1))
+            || ((boundary_y & 1) && (j == 0 || j == ny - 1))) {
         xkmh[IDX3(k, j, i)] = 0.0f;
         xkhh[IDX3(k, j, i)] = 0.0f;
     }
@@ -2539,8 +2553,8 @@ void wrf_calc_n2(WRF_SMAG_GRID_ARGS,
     int k = blockIdx.z * blockDim.z + threadIdx.z;
     if (i >= nx || j >= ny || k >= nz) return;
     // calculate_N2 excludes the cold-zeroed physical outer mass row.
-    if ((boundary_x && (i == 0 || i == nx - 1))
-            || (boundary_y && (j == 0 || j == ny - 1))) {
+    if (((boundary_x & 1) && (i == 0 || i == nx - 1))
+            || ((boundary_y & 1) && (j == 0 || j == ny - 1))) {
         bn2[IDX3(k, j, i)] = 0.0f;
         return;
     }
@@ -3103,8 +3117,8 @@ void wrf_tke_rhs(WRF_SMAG_GRID_ARGS,
     if (i >= nx || j >= ny || k >= nz) return;
     // WRF tke_rhs excludes the outer mass rows for open lateral boundaries.
     // A nonzero source there advances TKE in cells WRF leaves untouched.
-    if ((boundary_x && (i == 0 || i == nx - 1))
-        || (boundary_y && (j == 0 || j == ny - 1))) return;
+    if (((boundary_x & 1) && (i == 0 || i == nx - 1))
+        || ((boundary_y & 1) && (j == 0 || j == ny - 1))) return;
     WRF_SMAG_MAKE_GRID;
     SmagIndex idx = IDX3(k, j, i);
     real chm = c1[k] * mut[(SmagIndex)j * nx + i] + c2[k];

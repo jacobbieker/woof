@@ -68,7 +68,11 @@ DF_PASSIVE = ("phb", "msft", "msfu", "msfv", "fnm", "fnp", "dn", "dnw")
 class DFGeometry:
     """wrf_smag_deform's scalars: ``rdx = 1/dx`` and ``rdy = 1/dy`` as the
     primal rounds them, the bottom extrapolation weights cf1-cf3 and the
-    bounded (open or specified) axes."""
+    bounded (open or specified) axes.  ``seam_cold`` = 1 is WRF's
+    compute_diff_metrics at a periodic axis's seam: the slope at the top w
+    level keeps its cold zero there (RunConfig.diff_metrics_seam_slope off,
+    the primal's boundary flag 2, woof.core.dycore.smag_boundary_flags);
+    0 takes the true slope."""
     nz: int
     ny: int
     nx: int
@@ -79,14 +83,21 @@ class DFGeometry:
     cf3: float
     boundary_x: int = 0
     boundary_y: int = 0
+    seam_cold: int = 0
 
     def args(self, dtype) -> tuple:
         i, r = np.int32, np.dtype(dtype).type
+        # the primal's flags: 1 bounded, 0 periodic, 2 periodic with WRF's
+        # cold seam slope at the top w level
+        bx, by = ((1 if b else 2 * int(self.seam_cold))
+                  for b in (self.boundary_x, self.boundary_y))
         return (r(self.rdx), r(self.rdy), r(self.cf1), r(self.cf2), r(self.cf3),
-                i(self.boundary_x), i(self.boundary_y), i(self.nz), i(self.ny), i(self.nx))
+                i(bx), i(by), i(self.nz), i(self.ny), i(self.nx))
 
     def validate(self) -> None:
         _axes(self)
+        if self.seam_cold not in (0, 1):
+            raise ValueError(f"seam_cold is 0 or 1, got {self.seam_cold}")
         if self.nz < 3:
             raise ValueError(f"the deformation needs nz >= 3 (the bottom "
                              f"extrapolation reads levels 0-2), got {self.nz}")

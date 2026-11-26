@@ -338,6 +338,9 @@ _DOMAIN_RUN_OVERRIDES = (
     # The RRTMG longwave model-top correction (FQ6), on the same terms: a
     # [shared] value reaches the legacy-RRTMG longwave domains only.
     "rrtmg_lw_model_top",
+    # The diffusion-metrics periodic seam correction (FQ12), on the same
+    # terms: a [shared] value reaches the diff_opt = 1, 2 domains only.
+    "diff_metrics_seam_slope",
     # The umbrella over the opt-in quirk corrections (woof.quirk_corrections):
     # per domain like the corrections it turns on, each where its scheme runs.
     "woof_quirk_corrections",
@@ -4485,6 +4488,13 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
         _runs_rrtmg_lw_legacy(lambda name, default, dom=dom: physics_mode.settings.get(
             name, dom.get(name, shared.get(name, default))))
         for dom in domain_tables)
+    # The diffusion-metrics periodic seam correction is read only where
+    # compute_diff_metrics runs (diff_opt = 1 or 2), on the same terms.
+    tree_runs_diff_metrics = any(
+        physics_mode.settings.get(
+            "diff_opt",
+            dom.get("diff_opt", shared.get("diff_opt", RunConfig.diff_opt))) in (1, 2)
+        for dom in domain_tables)
     # The same rule for the Grell-family keys.  clos_choice and ishallow
     # are read only where cu_physics = 3, and the wizard writes them in
     # [shared]; on a tree whose cumulus-off child sits under a
@@ -5117,6 +5127,10 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
                     lambda name, default: kw.get(name, default))
                 and "rrtmg_lw_model_top" not in dom):
             kw["rrtmg_lw_model_top"] = False
+        if (tree_runs_diff_metrics
+                and kw.get("diff_opt", RunConfig.diff_opt) not in (1, 2)
+                and "diff_metrics_seam_slope" not in dom):
+            kw["diff_metrics_seam_slope"] = False
         # an explicit woof_quirk_corrections ('all' / 'none') sets every
         # correction key the domain does not set itself (quirk_corrections).
         from woof.quirk_corrections import apply_run_corrections
@@ -6534,6 +6548,7 @@ def _public_config_value(value):
                                   ("noah_smc_floor_booking", False),
                                   ("thompson_rain_snow_closure", False),
                                   ("rrtmg_lw_model_top", False),
+                                  ("diff_metrics_seam_slope", False),
                                   *OBSTACLE_RUN_DEFAULTS.items()):
                 value = run_document.get(name, default)
                 if isinstance(value, list):

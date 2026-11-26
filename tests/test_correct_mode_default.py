@@ -28,11 +28,12 @@ from woof import correct_mode
 from woof.config import RunConfig, validate_run_config
 
 ROOT = Path(__file__).resolve().parents[1]
-#: the fork's quirk ledger on the WRF route (woof.quirk_corrections), FQ1-FQ6
-_FQ = ("FQ1", "FQ2", "FQ3", "FQ4", "FQ5", "FQ6")
+#: the fork's quirk ledger on the WRF route (woof.quirk_corrections), FQ1-FQ6, FQ12
+_FQ = ("FQ1", "FQ2", "FQ3", "FQ4", "FQ5", "FQ6", "FQ12")
 _FQ_KEYS = ("gf_deep_rain_evaporation_booking", "ysu_surface_heat_exner",
             "mynn_sfclay_psih_zolzt", "noah_smc_floor_booking",
-            "thompson_rain_snow_closure", "rrtmg_lw_model_top")
+            "thompson_rain_snow_closure", "rrtmg_lw_model_top",
+            "diff_metrics_seam_slope")
 
 # -------------------------------------------------------------- the switch --
 def test_exact_mode_authors_every_key_off():
@@ -443,7 +444,9 @@ def test_every_carrier_scheme_is_a_shipped_scheme():
                "bl_pbl_physics": set(_shipped("pbl")),
                "sf_sfclay_physics": set(_shipped("surface_layer")),
                # radiation selects on a (LW, SW) pair: the LW values
-               "ra_lw_physics": _shipped_lw()}
+               "ra_lw_physics": _shipped_lw(),
+               # FQ12: the diffusion options with compute_diff_metrics
+               "diff_opt": {1, 2}}
     for c in correct_mode.CORRECTIONS:
         assert c.carriers, c.finding
         for selector, schemes in c.carriers:

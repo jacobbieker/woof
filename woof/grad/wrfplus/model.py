@@ -541,7 +541,9 @@ def step_geometry(state, cfg, *, reuse_first: bool | None = None,
             prp=stages[0].diagnose,   # _step_body's cold diagnosis before the mixing
             df=DFGeometry(nz, ny, nx, rdx, rdy, cf1=float(f32(state.cf1)),
                           cf2=float(f32(state.cf2)), cf3=float(f32(state.cf3)),
-                          boundary_x=bx, boundary_y=by),
+                          boundary_x=bx, boundary_y=by,
+                          # the primal's flag 2 (smag_boundary_flags)
+                          seam_cold=int(cfg.diff_metrics_seam_slope is False)),
             km=KMGeometry(nz, ny, nx, dx=float(f32(dx)), dy=float(f32(dy)),
                           c_s=float(f32(cfg.c_s)), prandtl=float(f32(D._PRANDTL)),
                           boundary_x=bx, boundary_y=by),
