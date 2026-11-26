@@ -16,7 +16,8 @@ interface with ``fzm``/``fzp`` as the dynamics does.  ``w_alpha`` = 0.3,
 ``w_beta`` = 1 (the onset, WRF's value when zadvect_implicit is off) and the
 operation order are WRF's (woof/core/kernels/openbc.cu ``w_damp``, the kernel
 the WRF path runs), each operation a single rounding.  Interior w levels only.
-Off by default: nothing here runs unless ``--w-damping`` is given.
+Off by default: nothing here runs unless ``--w-damping`` is given.  Both routes carry it
+through :func:`attach`: the WOOF-physics route's driver and the MPAS suite route's resident dycore.
 """
 from __future__ import annotations
 
@@ -94,3 +95,21 @@ def apply_w_damping(tend_rw, w, rho, vertical, *, dt, damping: WDamping, cache):
             np.float32(W_ALPHA), w, rho, vertical.fzm, vertical.fzp,
             vertical.rdzw, tend_rw))
     return tend_rw
+
+
+def attach(dycore, w_crit_cfl: float | None) -> dict | None:
+    """Put the limiter on a run's resident dycore; the receipt, or None (nothing built) when off.
+
+    Both routes step the same resident dycore (cuda_driver.CudaDryDycoreDriver, or a fork variant
+    built on it), so the term lands at the same point of the RK step (``_w_tendency``), before the
+    vertical-momentum tendency becomes omega's.
+    A dycore that is not that driver would accept the switch and never apply it: refused by name.
+    """
+    if w_crit_cfl is None:
+        return None
+    from .cuda_driver import CudaDryDycoreDriver
+    if not isinstance(dycore, CudaDryDycoreDriver):
+        raise ValueError(f"--w-damping acts in the resident dycore driver's w tendency; this run's dycore "
+                         f"({type(dycore).__name__}) does not carry it, so it would be accepted and never applied")
+    dycore.w_damping = WDamping(w_crit_cfl=float(w_crit_cfl))
+    return {"w_crit_cfl": float(w_crit_cfl), "w_damp_on": dycore.w_damping.w_damp_on, "w_alpha": W_ALPHA}

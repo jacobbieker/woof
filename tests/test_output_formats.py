@@ -93,10 +93,10 @@ def test_publication_scan_ignores_retired_column_spool(tmp_path):
     assert worker._published() == [retained/name]
 
 
-def write_history(path, hour, *, cells=False):
+def write_history(path, hour, *, cells=False, fmt='NETCDF3_64BIT_OFFSET'):
     nc = pytest.importorskip('netCDF4')
     np = pytest.importorskip('numpy')
-    with nc.Dataset(path, 'w', format='NETCDF3_64BIT_OFFSET') as f:
+    with nc.Dataset(path, 'w', format=fmt) as f:
         dimensions = [('Time', None), ('StrLen', 19), ('nCells', 7), ('nVertLevels', 3)] if cells else [
             ('Time', None), ('StrLen', 19), ('bottom_top', 3), ('south_north', 5), ('west_east', 7)]
         for name, size in dimensions:
@@ -116,7 +116,7 @@ def write_history(path, hour, *, cells=False):
         f.frame_number = hour
 
 
-def exercise_writer(tmp_path, *, cells=False):
+def exercise_writer(tmp_path, *, cells=False, fmt='NETCDF3_64BIT_OFFSET'):
     np = pytest.importorskip('numpy')
     icechunk = pytest.importorskip('icechunk')
     xr = pytest.importorskip('xarray')
@@ -126,7 +126,7 @@ def exercise_writer(tmp_path, *, cells=False):
         pytest.skip('build rw_icechunk or install a platform wheel')
     files = [tmp_path/f'frame-{i}.nc' for i in range(2)]
     for i, path in enumerate(files):
-        write_history(path, i, cells=cells)
+        write_history(path, i, cells=cells, fmt=fmt)
     store = tmp_path/'store'
     def invoke(inputs, mode='append'):
         path = tmp_path/'request.json'
@@ -171,6 +171,32 @@ def exercise_writer(tmp_path, *, cells=False):
 
 def test_native_roundtrip_atomic_resume(tmp_path):
     exercise_writer(tmp_path)
+
+
+@pytest.mark.parametrize('fmt', ['NETCDF4_CLASSIC', 'NETCDF4'])
+@pytest.mark.parametrize('cells', [False, True], ids=['wrf', 'mpas'])
+def test_native_roundtrip_netcdf4_char_times(tmp_path, fmt, cells):
+    # NetCDF-4 stores NC_CHAR (WRF's Times, MPAS's xtime) as a one-byte fixed HDF5 string.
+    exercise_writer(tmp_path, cells=cells, fmt=fmt)
+
+
+def test_netcdf4_vlen_string_is_refused_not_omitted(tmp_path):
+    nc = pytest.importorskip('netCDF4')
+    np = pytest.importorskip('numpy')
+    row, = formats.selected('icechunk')
+    binary = formats.find_binary(row)
+    if binary is None:
+        pytest.skip('build rw_icechunk or install a platform wheel')
+    path = tmp_path/'frame.nc'
+    write_history(path, 0, fmt='NETCDF4')
+    with nc.Dataset(path, 'a') as f:
+        f.createVariable('label', str, ('Time',))[0] = 'not a char array'
+    request = tmp_path/'request.json'
+    request.write_text(json.dumps(dict(schema=row['request_schema'], mode='append',
+        inputs=[str(path)], store=str(tmp_path/'store'), chunks=row['chunks'])))
+    result = subprocess.run([str(binary), '--request', str(request)], capture_output=True, text=True)
+    assert result.returncode != 0
+    assert 'label' in result.stderr and 'refusing to omit a history field' in result.stderr
 
 
 def test_failed_model_does_not_finalize(tmp_path, monkeypatch):
