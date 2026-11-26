@@ -159,3 +159,7 @@ both fixed-nest feedback modes and independent ensemble members; complete
 real nested or ensemble forecasts were not added to this one-case proof.
 
 `kfeta_trigger=2/3` is refused with MSKF. WRF 4.7.1 executes these alternative triggers only in KF-eta (`cu_physics=1`); the MSKF path does not consume them.
+
+## Vertical levels
+
+MSKF accepts 8 to 256 levels (`MSKF_KMAX` in `kernels/mskf.cu`, `VERTICAL_LEVEL_BOUNDS` in `woof/core/mskf.py`). The bound is a refusal guard (status bit 64): every column array lives in the runtime-`nz` lane-interleaved workspace (`MSKF_FSLOTS`, `MSKF_DSLOTS`, `MSKF_ASLOTS` slots of `nz + 2` words, size_t indexing), so nothing is compiled per level count. It was 160 before the 256-level work; words at 49 and 160 levels are bit-identical to the old image (`tests/test_cu_kfcup_mskf_256_levels_gpu.py`). KF-CuP (cu_physics=10) has the same shape of limit, 8 to 256 (`KFCUP_VERTICAL_LEVEL_BOUNDS`).

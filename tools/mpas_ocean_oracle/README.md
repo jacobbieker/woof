@@ -69,13 +69,16 @@ level 2 as the pool entry `NAME@2` and make a halo exchange the identity.
 verbatim) over every module it reaches, compiled verbatim:
 `mpas_ocn_time_average_coupled.F`, `mpas_ocn_effective_density_in_land_ice.F`,
 and the two `mpas_reconstruct` routines cut out of
-`mpas_vector_reconstruction.F` (`vector_reconstruction_cut_head.F90`). GM is
-replaced by stand-ins (`stubs_split.F90`). The driver computes the starting
+`mpas_vector_reconstruction.F` (`vector_reconstruction_cut_head.F90`), GM
+(`mpas_ocn_gm.F`, at RKIND 4 with `-fno-range-check`) and
+`ocn_reconstruct_gm_vectors` cut out of `mpas_ocn_diagnostics.F`
+(`gm_vectors_cut_head.F90`). The driver computes the starting
 diagnostics first, as MPAS's init does.
 `run_forward.F90` drives the forward mode over N steps: `ocn_timestep` and
 `ocn_timestep_init` cut verbatim out of `mpas_ocn_time_integration.F`
 (`timestep_cut_head.F90`), `ocn_time_integration_split_init` with the step's
-cut, the state part of `ocn_init_routines_block` transcribed, the absorbed
+cut, the state part of `ocn_init_routines_block` transcribed (with GM's
+bolus velocity, its transport and its vectors under `config_use_standardGM`), the absorbed
 fractions and the time-level shift. stubs.F90 carries the time manager on
 whole seconds, the two-level shift and initialisation (`NAME`/`NAME@2`), and
 character and real scalar fields.
@@ -104,6 +107,8 @@ pixi run -e default python tools/mpas_ocean_oracle/make_fixture.py "$BUILD_DIR" 
 pixi run -e default python tools/mpas_ocean_oracle/make_fixture.py "$BUILD_DIR" --piece btr_subcycle
 pixi run -e default python tools/mpas_ocean_oracle/make_fixture.py "$BUILD_DIR" --piece split_step
 pixi run -e default python tools/mpas_ocean_oracle/make_fixture.py "$BUILD_DIR" --piece forward
+pixi run -e default python tools/mpas_ocean_oracle/make_fixture.py "$BUILD_DIR" --piece split_step_gm
+pixi run -e default python tools/mpas_ocean_oracle/make_fixture.py "$BUILD_DIR" --piece forward_gm
 ```
 
 build.sh checks `SOURCES.sha256` and builds `run_oracle_r4` and
@@ -120,6 +125,7 @@ pixi run -e default python -m pytest tests/test_mpas_ocean_tend_parity.py tests/
     tests/test_mpas_ocean_tracer_hmix_parity.py tests/test_mpas_ocean_tend_tracer_parity.py \
     tests/test_mpas_ocean_vmix_parity.py tests/test_mpas_ocean_vert_transport_parity.py \
     tests/test_mpas_ocean_btr_subcycle_parity.py tests/test_mpas_ocean_split_step_parity.py \
-    tests/test_mpas_ocean_forward_parity.py
+    tests/test_mpas_ocean_forward_parity.py tests/test_mpas_ocean_split_step_gm_parity.py \
+    tests/test_mpas_ocean_forward_gm_parity.py
 pixi run -e default woof hex ocean verify
 ```

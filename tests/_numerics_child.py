@@ -39,6 +39,9 @@ import pytest
 import conftest  # the battery's setup: backend install (WOOF_BACKEND) before any cupy import
 import woof  # the automatic facade, before the module's importorskip("cupy")
 import {module} as t
+if conftest._MPAS_PARITY_MODULE.search({module!r}):  # the MPAS oracle parity modules run in exact mode
+    from woof import correct_mode
+    correct_mode.PHYSICS_MODE_DEFAULT = correct_mode.PHYSICS_MODE_EXACT
 os.environ["GPUWM_NUMERICS"] = os.environ["WOOF_NUMERICS"] = {numerics!r}
 from woof import numerics
 assert numerics.mode() == {numerics!r}, numerics.mode()

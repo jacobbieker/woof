@@ -92,7 +92,7 @@ module mpas_pool_routines
   public :: mpas_log_write, MPAS_LOG_WARN, MPAS_LOG_ERR, MPAS_LOG_CRIT
   public :: MPAS_pool_type, mpas_pool_get_subpool, mpas_pool_get_array, &
             mpas_pool_get_dimension, mpas_pool_get_config, &
-            stub_pool_put_subpool, stub_pool_put_array, stub_pool_mark_absent, &
+            stub_pool_put_subpool, stub_pool_put_array, stub_pool_mark_absent, stub_pool_has, &
             stub_pool_put_dimension, stub_pool_put_config, &
             field1DReal, field2DReal, field3DReal, mpas_pool_get_field, stub_pool_put_field, &
             mpas_allocate_scratch_field, mpas_deallocate_scratch_field, &
@@ -245,6 +245,18 @@ contains
     print *, 'oracle stub: no pool entry named ', trim(name)
     stop 4
   end function find
+
+  ! Whether the pool holds an entry of that name (a driver's optional switch;
+  ! find stops on a missing one).
+  logical function stub_pool_has(pool, name)
+    type(MPAS_pool_type), intent(in) :: pool
+    character(len=*), intent(in) :: name
+    integer :: i
+    stub_pool_has = .false.
+    do i = 1, pool % n
+      if (trim(pool % e(i) % name) == trim(name)) stub_pool_has = .true.
+    end do
+  end function stub_pool_has
 
   integer function slot(pool, name)
     type(MPAS_pool_type), intent(inout) :: pool

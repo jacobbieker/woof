@@ -1,4 +1,4 @@
-"""One dry model step's tangent-linear and adjoint (P3a item 8), chained
+"""One model step's tangent-linear and adjoint (P3a item 8), chained
 from the ported operators in woof's strict order (GPUWM_WRF_EXACT=1,
 woof/core/dycore.py ``_step_body`` and ``_wrf_step_epilogue``).
 
@@ -15,7 +15,14 @@ Covered: periodic axes or specified lateral boundaries (WRF's
 relax_bdy_dry folded into rk_addtend_dry, spec_bdy_dry, spec_bdyupdate_ph
 with zero_grad_bdy, spec_bdy_final and the carried mu halo, with the
 boundary tables as active inputs), map factors, Coriolis and curvature,
-dry, no physics or mixing, ``rk_ord = 3``, ``h_*_adv_order`` 3-6, a 3-D
+dry or moist without microphysics (qv, qc and qr: calc_cq, the moist
+pressure gradient, buoyancy, diagnosis and acoustic cq, sumflux and the
+non-positive-definite scalar update, and on a specified domain qv's
+held boundary tendency and spec_bdy_final with flow_dep_bdy for qc and
+qr), on a dry state WRF's diff_opt 1 / km_opt 4 horizontal mixing (the
+deformation, smag2d_km and the u, v, w and theta rows of the time-t
+fields into the held tendencies, coupled to the map factors and added on
+every stage), no physics, ``rk_ord = 3``, ``h_*_adv_order`` 3-6, a 3-D
 base state (terrain) and the w_damp limiter.
 Everything else is refused by :func:`step_geometry`.
 """
@@ -37,14 +44,22 @@ from .acoustic import (CW_ACTIVE, CW_PASSIVE, CW_STATE, MT_ALIAS, MT_ACTIVE,
                        small_step_init_ad, small_step_init_tl)
 from .advect import ADV_ACTIVE, ADV_PASSIVE, ADV_STATE, AdvGeometry, adv_ad, adv_tl
 from .lbc import (LB_PASSIVE, LB_TABLES, LF_PASSIVE, SP_ACTIVE, SP_PASSIVE,
-                  SP_STATE, FinalGeometry, LBCGeometry, SpecPhiGeometry, lbc_ad,
-                  lbc_tl, lbf_ad, lbf_tl, sph_ad, sph_tl)
+                  SP_STATE, FinalGeometry, FlowGeometry, LBCGeometry,
+                  SpecPhiGeometry, flow_ad, flow_tl, lbc_ad, lbc_tl, lbf_ad,
+                  lbf_tl, sph_ad, sph_tl)
 from .bigstep import (BUOY_ACTIVE, BUOY_PASSIVE, BUOY_STATE, CC_ACTIVE,
-                      CC_PASSIVE, CC_STATE, GEO_ACTIVE, GEO_PASSIVE, GEO_STATE,
-                      PGF_ACTIVE, PGF_PASSIVE, PGF_STATE, WD_ACTIVE, WD_PASSIVE,
-                      WD_STATE, BuoyGeometry, CCGeometry, GeoGeometry,
-                      PGFGeometry, WDampGeometry, buoy_ad, buoy_tl, cc_ad, cc_tl,
-                      geo_ad, geo_tl, pgf_ad, pgf_tl, wd_ad, wd_tl)
+                      CC_PASSIVE, CC_STATE, CQ_STATE, GEO_ACTIVE, GEO_PASSIVE,
+                      GEO_STATE, PGF_ACTIVE, PGF_PASSIVE, PGF_STATE, WD_ACTIVE,
+                      WD_PASSIVE, WD_STATE, BuoyGeometry, CCGeometry, CQGeometry,
+                      GeoGeometry, PGFGeometry, WDampGeometry, buoy_ad, buoy_tl,
+                      cc_ad, cc_tl, cq_ad, cq_tl, geo_ad, geo_tl, pgf_ad, pgf_tl,
+                      wd_ad, wd_tl)
+from .diffusion import (DF_PASSIVE, DF_STATE, DFGeometry, HDGeometry, KMGeometry,
+                        df_ad, df_tl, hd_ad, hd_tl, km_ad, km_tl)
+from .scalar import (SUMFLUX, ScalarGeometry, SumfluxGeometry, su_ad, su_tl,
+                     sumflux_accumulate_ad, sumflux_accumulate_tl,
+                     sumflux_finish_ad, sumflux_finish_tl, sumflux_zero_ad,
+                     sumflux_zero_tl)
 from .stage import (PRP_ACTIVE, PRP_ALIAS, PRP_PASSIVE, PRP_STATE,
                     RSP_ACTIVE, RSP_ALIAS, RSP_HALO, RSP_PASSIVE, RSP_STATE,
                     SW_ACTIVE, SW_PASSIVE, PRPGeometry, RSPGeometry,
@@ -62,6 +77,11 @@ TENDENCIES = ("ru_t", "rv_t", "rw_t", "rth_t", "rph_t", "rmu_t")
 #: WRF's carried muts, which rk_step 1 reads as they are.
 STEP_INPUTS = PROGNOSTICS + ("p", "al", "alt", "p_pert", "muts")
 
+#: A moist state's species (moist.SPECIES with mp_physics 0): prognostics
+#: a moist step also saves at time t, transports and reads from its
+#: predecessor.
+SPECIES = ("qv", "qc", "qr")
+
 #: Specified lateral boundaries.  The step also carries WRF's mu halo
 #: (dycore.WRF_MU_HALO_SLOT: the ring mass before spec_bdy_final, which
 #: the next step's rk_step 1 calc_ww_cp reads), and takes the boundary
@@ -73,31 +93,58 @@ STEP_INPUTS = PROGNOSTICS + ("p", "al", "alt", "p_pert", "muts")
 HALO = RSP_HALO
 LBC_FIELDS = ("u", "v", "theta", "phi", "mu")
 LBC_INPUTS = tuple(f"lbc_{f}_{t}" for f in LBC_FIELDS for t in LB_TABLES)
+#: qv's tables, on a moist specified domain whose boundary supplies qv.
+QV_INPUTS = tuple(f"lbc_qv_{t}" for t in LB_TABLES)
 
-#: Each LBC field's tendency, state array and held buffer on the step dict.
-_LBC_TEND = {"u": "ru_t", "v": "rv_t", "theta": "rth_t", "phi": "rph_t", "mu": "rmu_t"}
-_LBC_SRC = {"u": "u", "v": "v", "theta": "thp", "phi": "php", "mu": "lbc_mu_src"}
-_LBC_FINAL = {"u": "u", "v": "v", "theta": "thp", "phi": "php", "mu": "mup"}
+#: Each LBC field's tendency, state array and held buffer on the step
+#: dict, and the mass its row couples with.  qv's row is the held capture
+#: of moist.advance_scalars_stage on rk_step 1: the held tendency zeroed,
+#: then the relaxation and specified rows from the time-t qv0 at the
+#: time-t mass mup0 (apply_state_scalar_lateral_boundary's source_mup).
+_LBC_TEND = {"u": "ru_t", "v": "rv_t", "theta": "rth_t", "phi": "rph_t", "mu": "rmu_t",
+             "qv": "lbc_qv_held"}
+_LBC_SRC = {"u": "u", "v": "v", "theta": "thp", "phi": "php", "mu": "lbc_mu_src",
+            "qv": "qv0"}
+_LBC_MU = {"qv": "mup0"}
+_LBC_FINAL = {"u": "u", "v": "v", "theta": "thp", "phi": "php", "mu": "mup", "qv": "qv"}
 #: The relaxation rows' passive names (state_relaxation_multi's header:
 #: msfv is MSFV_INV in the strict build).
 _LB_PASS = {"mub": "mub2d", "msfv": "msfv_inv", "fcx": "lbc_fcx", "gcx": "lbc_gcx"}
-#: fold_lateral_relaxation's held slot per folded row, the map factor the
-#: relaxation is scaled by and the one it is then divided by ("inv": times
-#: msfv_inv, as _couple_dry_mixing_map_factor does under BIGSTEP).
-_FOLD = {"u": ("fold_u", "msfu", "msfu"), "v": ("fold_v", "msfv", "inv"),
-         "theta": ("fold_theta", None, "msft")}
+#: The held dry tendencies (prepare_fixed_tendencies' smag_r* slots, WRF's
+#: *_tendf): zeroed at the step start, filled by the mixing rows and on a
+#: specified domain the folded stage-1 relaxation, coupled to the map
+#: factor once and added to the stage tendency on every stage
+#: (add_fixed_dry_tendencies).
+_HELD = {"u": "smag_ru", "v": "smag_rv", "w": "smag_rw", "theta": "smag_rth"}
+_HELD_TEND = {"u": "ru_t", "v": "rv_t", "w": "rw_t", "theta": "rth_t"}
+#: _couple_dry_mixing_map_factor's divisor per held row (v: times msfv_inv
+#: under BIGSTEP, else divided by msfv).
+_COUPLE = {"u": "msfu", "v": "msfv", "w": "msft", "theta": "msft"}
+#: The map factor fold_lateral_relaxation scales each folded row by.
+_FOLD_SCALE = {"u": "msfu", "v": "msfv", "theta": None}
+#: _compute_coordinate_tendencies' rows at the step start (_smag2d_specs'
+#: order): held kind, wrf_diff_opt1_horizontal row, the time-t field, the
+#: coefficient and the hybrid mass weights.  Theta mixes thp0 (the strict
+#: basis) as its departure from diff1_theta_initial.
+_MIX_ROWS = (("u", "u", "u0", "smag_km", "c1h", "c2h"),
+             ("v", "v", "v0", "smag_km", "c1h", "c2h"),
+             ("w", "w", "w0", "smag_km", "c1f", "c2f"),
+             ("theta", "t", "thp0", "smag_kh", "c1h", "c2h"))
 
 
 def step_inputs(geom) -> tuple:
     """What a step of ``geom`` reads from the previous one: STEP_INPUTS,
-    and the mu halo on a specified domain."""
-    return STEP_INPUTS + ((HALO,) if geom.specified else ())
+    the species on a moist state and the mu halo on a specified domain."""
+    return (STEP_INPUTS + (SPECIES if geom.moist else ())
+            + ((HALO,) if geom.specified else ()))
 
 
 def step_parameters(geom) -> tuple:
     """The inputs a step of ``geom`` reads and never writes, whose
     perturbation and adjoint are the window's: the boundary tables."""
-    return LBC_INPUTS if geom.specified else ()
+    if not geom.specified:
+        return ()
+    return LBC_INPUTS + (QV_INPUTS if geom.qv_table else ())
 
 #: Each slow operator's names on the step dict.
 _ADV_ALIAS = {
@@ -114,7 +161,7 @@ _PGF_ALIAS = {"p": "p_pert", "mub": "mub2d"}
 #: msfv itself.
 _INV = {"msfv": "msfv_inv"}
 _RSP_ALIAS = {**RSP_ALIAS, **_INV}
-_BUOY_ALIAS = {"p": "p_pert"}
+_BUOY_ALIAS = {"p": "p_pert", "mub": "mub2d"}   # mub: the moist buoyancy's base mass
 _GEO_ALIAS = {"ww": "ww_ref", "mub": "mub2d"}
 _WD_ALIAS = {"ww": "ww_ref", "mub": "mub2d"}
 
@@ -143,6 +190,22 @@ class StageSpec:
     later: tuple
     lbc: tuple = ()           # specified: (kind, LBCGeometry) rows after the held add
     sph: object = None        # specified: SpecPhiGeometry after each substep
+    cq: object = None         # moist: CQGeometry before the slow tendencies
+    sf: object = None         # moist: SumfluxGeometry
+    su: tuple = ()            # moist: (species, ScalarGeometry) after the stage
+    qv_capture: object = None  # moist, rk_step 1, qv tables: qv's held LBCGeometry
+    flow: object = None       # moist, specified: FlowGeometry for qc and qr
+
+
+@dataclass(frozen=True)
+class MixSpec:
+    """diff_opt 1 / km_opt 4 at the step start (prepare_fixed_tendencies):
+    the cold step's diagnosis before it (None when rk_step 1 reuses the
+    carried one), the deformation, the coefficients and the rows."""
+    prp: object
+    df: DFGeometry
+    km: KMGeometry
+    rows: tuple               # (_MIX_ROWS entry, HDGeometry)
 
 
 @dataclass(frozen=True)
@@ -157,7 +220,13 @@ class StepGeometry:
     capture: tuple = ()       # stage 1's held relaxation: (kind, LBCGeometry)
     fold: tuple = ()          # the folded kinds (u, v, theta)
     fold_msf: bool = False    # the fold's map-factor scaling (state.has_msf)
+    mix: object = None        # MixSpec: diff_opt 1 / km_opt 4
+    held: tuple = ()          # the held rows added on every stage (_HELD)
+    couple: tuple = ()        # the held rows divided by their map factor
+    v_inv: bool = True        # v's coupling times msfv_inv (BIGSTEP)
     final: tuple = ()         # spec_bdy_final: (kind, FinalGeometry), mu first
+    moist: bool = False       # qv, qc and qr (SPECIES)
+    qv_table: bool = False    # specified, with qv's tables (held capture, final)
 
 
 def _refuse(cfg, state) -> None:
@@ -165,7 +234,6 @@ def _refuse(cfg, state) -> None:
     checks = {
         "nested lateral boundaries": bool(getattr(cfg, "nested", False)),
         "open lateral boundaries": bool((cfg.open_x or cfg.open_y) and not cfg.specified),
-        "moisture": state.qv is not None,   # the primal's test (dycore._step_body)
         "microphysics": bool(cfg.mp_physics),
         "rk_ord 2": getattr(cfg, "rk_ord", 3) != 3,
         "emdiv": float(cfg.emdiv) > 0.0,
@@ -179,11 +247,12 @@ def _refuse(cfg, state) -> None:
         # the float step would not reproduce its words.
         "1-D base state (no terrain)": np.ndim(state.phb) != 3,
     }
-    from woof.config import radiation_scheme_ids
-    from woof.core.dycore import wrf_mixing_package_active
+    from woof.config import radiation_scheme_ids, wrf_mixing_package_active
+    from woof.core.passive_tracer_contract import active_tracers
     from woof.core.physics_inventory import physics_enabled
     checks.update({
-        "mixing package": bool(wrf_mixing_package_active(cfg)),
+        "mixing package other than diff_opt 1 with km_opt 4": bool(
+            wrf_mixing_package_active(cfg) and not _mixes(cfg)),
         # what else _step_body runs that the chain does not
         "physics": bool(physics_enabled(cfg)),
         "radiation selector 31 (idealized Rayleigh friction)":
@@ -198,12 +267,75 @@ def _refuse(cfg, state) -> None:
         "IAU forcing": getattr(state, "_iau_forcing", None) is not None,
         "spectral nudging": getattr(state, "_spectral_nudging_graph", None) is not None,
         "odd time_step_sound": int(cfg.time_step_sound) % 2 != 0,
+        # _step_body advances these after the species; the chain does not
+        "TKE scalar": getattr(state, "tke", None) is not None,
+        "chem scalars": getattr(state, "chem", None) is not None,
+        # their transport (and, with the mixing, their smag rows)
+        "passive tracers": bool(active_tracers(cfg)),
     })
+    if state.qv is not None:   # the primal's test (dycore._step_body)
+        checks.update(_refuse_moist(cfg, state))
+    if _mixes(cfg):
+        checks.update(_refuse_mixing(cfg, state))
     if cfg.specified:
         checks.update(_refuse_specified(cfg, state))
     bad = [k for k, v in checks.items() if v]
     if bad:
         raise NotImplementedError("the P3a step TL/AD does not cover: " + ", ".join(bad))
+
+
+def _refuse_moist(cfg, state) -> dict:
+    """What the moist binding does not cover: it takes qv, qc and qr
+    (moist.SPECIES) through the non-positive-definite update, with
+    calc_cq's n_mass 1 and the buoyancy's moist_mode 1 (mp_physics 0)."""
+    from woof.core.moist import extra_moist_species
+    species = tuple(getattr(state, "_scheme_base_fields", SPECIES))
+    return {
+        "moist_adv_opt (the positive-definite final stage)": int(cfg.moist_adv_opt) != 0,
+        "moist species other than qv, qc and qr": bool(
+            species != SPECIES or extra_moist_species(state)
+            or getattr(state, "_registered_mass_slots", ())
+            or any(getattr(state, n, None) is not None for n in ("qi", "qs", "qg", "qh"))
+            or getattr(state, "etanew_restart_state", None) is not None
+            or any(getattr(state, n, None) is None for n in SPECIES)),
+        "moist_cq off": not bool(getattr(cfg, "moist_cq", True)),
+    }
+
+
+def _mixes(cfg) -> bool:
+    """Whether the step runs WRF's diff_opt 1 / km_opt 4 mixing (the
+    package dycore.prepare_fixed_tendencies builds, on the coordinate
+    branch with smag2d_km's coefficients)."""
+    # km_opt 4 runs the package on its own (wrf_mixing_package_active)
+    return int(cfg.diff_opt) == 1 and int(cfg.km_opt) == 4
+
+
+def _refuse_mixing(cfg, state) -> dict:
+    """What the diff_opt 1 / km_opt 4 binding does not cover."""
+    from woof.core.dycore import coordinate_reference_missing
+    return {
+        # dycore.initialize_coordinate_reference would raise: a resumed
+        # state cannot rebuild WRF's t_init from evolved theta
+        "a resumed diff_opt 1 state without diff1_theta_initial": bool(
+            coordinate_reference_missing(state, cfg)),
+        # the moist rows run after stage 1's acoustic loop with its muts
+        # (add_scalar_coordinate_wrf): P3a item 5 step (e)
+        "moist mixing rows (diff_opt 1 on a moist state)": state.qv is not None,
+        "tc_horizontal_length_m": bool(getattr(cfg, "tc_horizontal_length_m", 0)),
+        "m_opt (the SFS output capture)": bool(getattr(cfg, "m_opt", 0)),
+    }
+
+
+def _qv_table(state, cfg) -> bool:
+    """Whether the boundary supplies qv on a moist specified domain:
+    moist.advance_scalars_stage holds its tendency and
+    apply_state_boundary_values forces it back."""
+    from woof.boundary_fields import potential_external_scalar_fields
+    from woof.ingest import lateral_bc as L
+    if not (cfg.specified and state.qv is not None):
+        return False
+    supplied = L._active_device_interval(state, cfg)[0].fields
+    return "qv" in supplied and "qv" in potential_external_scalar_fields(cfg)
 
 
 def _refuse_specified(cfg, state) -> dict:
@@ -231,6 +363,18 @@ def _refuse_specified(cfg, state) -> dict:
         "a specified domain with a periodic axis": not (
             _dycore_boundary(cfg, "x") and _dycore_boundary(cfg, "y")),
     })
+    if state.qv is not None:
+        from woof.boundary_fields import scalar_array_boundary_fields
+        supplied = L._active_device_interval(state, cfg)[0].fields
+        qv = _qv_table(state, cfg)
+        out.update({
+            # a supplied hydrometeor takes the held path instead of flow_dep_bdy
+            "boundary tables for scalars other than qv": any(
+                n in L.COUPLED_SCALAR_STATE_FIELDS and n != "qv" for n in supplied),
+            "a qv table spec_bdy_final does not force back": qv and (
+                "qv" not in L.COUPLED_SCALAR_STATE_FIELDS
+                or "qv" in scalar_array_boundary_fields(cfg)),
+        })
     return out
 
 
@@ -340,54 +484,102 @@ def step_geometry(state, cfg, *, reuse_first: bool | None = None,
                       has_msf=msf, boundary_x=bx, boundary_y=by)
     cc = (CCGeometry(nz, ny, nx, rdx=rdx, rdy=rdy, boundary_x=bx, boundary_y=by)
           if state.rotational else None)
-    lb = _lbc_geometries(state, cfg, step, msf) if spec else None
+    moist = state.qv is not None
+    qvt = _qv_table(state, cfg)
+    if moist:   # calc_cq n_mass 1 (mp_physics 0), the moist pgf and buoyancy
+        pgf = dataclasses.replace(pgf, moist_cq=1)
+        buoy = dataclasses.replace(buoy, moist=1)
+    lb = _lbc_geometries(state, cfg, step, msf, qvt) if spec else None
     stages = []
-    for istage, (nsub, dtau) in enumerate(D._rk_acoustic_stages(cfg)):
-        dtau = float(f32(dtau))
+    for istage, (nsub, dtau_stage) in enumerate(D._rk_acoustic_stages(cfg)):
+        dtau = float(f32(dtau_stage))
         prp = None
         if not (istage == 0 and reuse_first):
             prp = PRPGeometry(nz, ny, nx, hypso=hypso, carried=int(carried or istage > 0),
-                              p_top=p_top)
+                              p_top=p_top, moist=int(moist))
 
         def sub(smdiv):
             return (UVGeometry(nz, ny, nx, rdx, rdy, dtau, smdiv=smdiv, top_lid=top_lid,
-                               has_msf=msf, spec_zone=szone, **cf),
+                               has_msf=msf, spec_zone=szone, moist_cq=int(moist), **cf),
                     MTGeometry(nz, ny, nx, rdx, rdy, dtau, write_mudf=0, mapped=msf,
                                spec_zone=mzone, open_x=bx, open_y=by),
                     WGeometry(nz, ny, nx, rdx, rdy, dtau, epssm=float(f32(cfg.epssm)),
                               top_lid=top_lid, dampmag=float(damp_magnitude(cfg, dtau)),
                               has_msf=msf, spec_zone=mzone, boundary_x=bx, boundary_y=by,
-                              **cf))
+                              moist_cq=int(moist), **cf))
+        moist_parts = {}
+        if moist:
+            # advance_scalars_stage's dt_eff = nsub*dtau, DTYPE-rounded by
+            # the update; the advection's scalars are flux_div_scalar's
+            sdt = float(f32(nsub * dtau_stage))
+            moist_parts = dict(
+                cq=CQGeometry(nz, ny, nx, n_mass=1),
+                sf=SumfluxGeometry(nz, ny, nx, int(nsub)),
+                su=tuple((n, ScalarGeometry(nz, ny, nx, rdx, rdy, sdt, vorder=vsca,
+                                            horder=hsca, open_x=bx, open_y=by,
+                                            spec=int(spec), spec_zone=szone,
+                                            has_msf=msf, held=int(n == "qv" and qvt)))
+                         for n in SPECIES),
+                qv_capture=lb["qv_capture"] if (qvt and istage == 0) else None,
+                flow=FlowGeometry(nz, ny, nx, spec_zone=szone) if spec else None)
         stages.append(StageSpec(
             rk_step=istage + 1, nsub=int(nsub), diagnose=prp,
             rsp=dataclasses.replace(rsp, halo=halo) if istage == 0 else rsp,
             adv=adv, pgf=pgf, buoy=buoy, geo=geo, wd=wd, cc=cc,
             ss=SSGeometry(nz, ny, nx, has_msf=msf, boundary_x=bx, boundary_y=by,
                           rk_step=istage + 1),
-            cw=CWGeometry(nz, ny, nx, dtau, epssm=float(f32(cfg.epssm)), top_lid=top_lid),
+            cw=CWGeometry(nz, ny, nx, dtau, epssm=float(f32(cfg.epssm)), top_lid=top_lid,
+                          moist_cq=int(moist)),
             first=sub(0.0), later=sub(float(f32(cfg.smdiv))),
             lbc=lb["rows"][istage] if spec else (),
-            sph=SpecPhiGeometry(nz, ny, nx, dtau, spec_zone=szone) if spec else None))
+            sph=SpecPhiGeometry(nz, ny, nx, dtau, spec_zone=szone) if spec else None,
+            **moist_parts))
+    mix = None
+    if _mixes(cfg):
+        # launch_wrf_smag2d_km's and launch_coordinate_horizontal's scalars
+        mix = MixSpec(
+            prp=stages[0].diagnose,   # _step_body's cold diagnosis before the mixing
+            df=DFGeometry(nz, ny, nx, rdx, rdy, cf1=float(f32(state.cf1)),
+                          cf2=float(f32(state.cf2)), cf3=float(f32(state.cf3)),
+                          boundary_x=bx, boundary_y=by),
+            km=KMGeometry(nz, ny, nx, dx=float(f32(dx)), dy=float(f32(dy)),
+                          c_s=float(f32(cfg.c_s)), prandtl=float(f32(D._PRANDTL)),
+                          boundary_x=bx, boundary_y=by),
+            rows=tuple((r, HDGeometry(nz, ny, nx, rdx, rdy, row=r[1], boundary_x=bx,
+                                      boundary_y=by))
+                       for r in _MIX_ROWS))
+        held = tuple(_HELD)
+    else:
+        held = tuple(lb["fold"]) if spec else ()
     return StepGeometry(
         nz, ny, nx, tuple(stages),
-        end_prp=PRPGeometry(nz, ny, nx, hypso=hypso, carried=1, p_top=p_top),
+        end_prp=PRPGeometry(nz, ny, nx, hypso=hypso, carried=1, p_top=p_top,
+                            moist=int(moist)),
         sw=SWGeometry(nz, ny, nx, half_rdx=float(f32(0.5 / dx)),
                       half_rdy=float(f32(0.5 / dy)), mapped=msf, boundary_x=bx,
                       boundary_y=by, **cf),
-        specified=spec, **({} if not spec else dict(
+        specified=spec, moist=moist, qv_table=qvt, mix=mix, held=held,
+        couple=held if msf else (), v_inv=bool(D.BIGSTEP_ENABLED),
+        **({} if not spec else dict(
             capture=lb["capture"], fold=lb["fold"], fold_msf=bool(msf),
             final=lb["final"])))
 
 
-def _lbc_geometries(state, cfg, step: int, msf: int) -> dict:
+def _lbc_geometries(state, cfg, step: int, msf: int, qvt: bool = False) -> dict:
     """The specified binding's rows (lateral_bc's strict
     capture_folded_relaxation, _apply_state_lateral_boundaries_wrf and
-    apply_state_boundary_values) for step ``step``."""
+    apply_state_boundary_values) for step ``step``; with ``qvt`` qv's
+    held capture (moist.advance_scalars_stage on rk_step 1) and its
+    spec_bdy_final after phi's."""
     from woof.ingest import lateral_bc as L
     nz, ny, nx = int(cfg.nz), int(cfg.ny), int(cfg.nx)
     dtbc, dtbc_end = _boundary_times(state, cfg, step)
     device, _common, _weights = L._relaxation_context(state, cfg)
-    width = {f: int(device.fields[f].west.value.shape[-1]) for f in LBC_FIELDS}
+    width = {f: int(device.fields[f].west.value.shape[-1])
+             for f in LBC_FIELDS + (("qv",) if qvt else ())}
+    if qvt and width["qv"] != width["theta"]:   # qv's row takes theta's Davies weights
+        raise NotImplementedError("the P3a step TL/AD does not cover: a qv boundary table "
+                                  f"{width['qv']} wide beside theta's {width['theta']}")
     zones = dict(spec_zone=int(cfg.spec_zone), relax_zone=int(cfg.relax_zone))
 
     def row(kind, **flags):
@@ -406,8 +598,9 @@ def _lbc_geometries(state, cfg, step: int, msf: int) -> dict:
         rows.append(tuple(r))
     final = tuple((k, FinalGeometry(nz, ny, nx, k, width=width[k], spec_zone=int(cfg.spec_zone),
                                     dtbc=dtbc_end, has_msf=msf))
-                  for k in ("mu", "u", "v", "theta", "phi"))
-    return {"rows": tuple(rows), "capture": capture, "fold": tuple(folded), "final": final}
+                  for k in ("mu", "u", "v", "theta", "phi") + (("qv",) if qvt else ()))
+    return {"rows": tuple(rows), "capture": capture, "fold": tuple(folded), "final": final,
+            "qv_capture": row("qv", apply_relax=1)[1] if qvt else None}
 
 
 def _names() -> tuple:
@@ -444,7 +637,10 @@ def run_state(state, cfg, dtype=np.float64) -> dict:
     array the step's operators name, the base state 3-D, the strict
     scratch carriers under their operator names (Omega ww_ref, muts, the
     acoustic coefficients and old mass and theta), and zeros for the
-    moist cq and mudf slots the dry step does not read."""
+    cq slots (written each stage on a moist state, unread on a dry one)
+    and mudf.  A moist state adds its species, their time-t copies, the
+    sumflux accumulators (the primal's, which the step zeroes first) and
+    the update's tendency scratch."""
     import cupy as cp
     from woof.core import dycore as D
     nz, ny, nx = int(cfg.nz), int(cfg.ny), int(cfg.nx)
@@ -473,8 +669,40 @@ def run_state(state, cfg, dtype=np.float64) -> dict:
         out[n] = cp.ascontiguousarray(a.astype(dtype, copy=True))
     for n in ("fnm", "fnp"):  # the acoustic operators take nz + 1 levels
         out[n + "_w"] = cp.concatenate([out[n], cp.zeros(1, dtype=dtype)])
+    if state.qv is not None:
+        for n in SPECIES + tuple(n + "0" for n in SPECIES):
+            out[n] = cp.ascontiguousarray(cp.asarray(getattr(state, n)).astype(dtype, copy=True))
+        for n, shape, slot in zip(SUMFLUX, (sh["ru"], sh["rv"], sh["ww_ref"]),
+                                  ("rk_ru_m", "rk_rv_m", "rk_ww_m")):
+            out[n] = cp.ascontiguousarray(
+                cp.asarray(state.scratch(shape, slot)).astype(dtype, copy=True))
+        out["moist_tend"] = cp.zeros((nz, ny, nx), dtype=dtype)
+    if cfg.specified or _mixes(cfg):   # the held tendencies (_HELD)
+        for n, shape in zip(_HELD.values(), (sh["ru"], sh["rv"], sh["ww_ref"], sh["p_pert"])):
+            out[n] = cp.zeros(shape, dtype=dtype)
+    if _mixes(cfg):
+        out.update(_mix_state(state, cfg, dtype))
     if cfg.specified:
         out.update(_lbc_state(state, cfg, dtype))
+    return out
+
+
+def _mix_state(state, cfg, dtype) -> dict:
+    """The mixing's arrays: the deformation, the coefficients and the row
+    mass (written each step), the vertical metrics the deformation reads
+    and WRF's initial theta (dycore.initialize_coordinate_reference, which
+    the primal's first step would take the same way, storing it on the
+    state), passive as in WRFPLUS."""
+    import cupy as cp
+    from woof.core import dycore as D
+    nz, ny, nx = int(cfg.nz), int(cfg.ny), int(cfg.nx)
+    D.initialize_coordinate_reference(state, cfg)
+    out = {n: cp.zeros((nz, ny, nx), dtype=dtype)
+           for n in DF_STATE + ("smag_km", "smag_kh")}
+    out["smag_mut"] = cp.zeros((ny, nx), dtype=dtype)
+    for n, a in (("dn", state.dn), ("dnw", state.dnw),
+                 ("diff1_theta_initial", state._scratch["diff1_theta_initial"])):
+        out[n] = cp.ascontiguousarray(cp.asarray(a).astype(dtype, copy=True))
     return out
 
 
@@ -482,14 +710,17 @@ def _lbc_state(state, cfg, dtype) -> dict:
     """The specified binding's arrays: the interval's tables and Davies
     weights (lateral_bc._relaxation_context), the carried mu halo (mup
     where none is carried: the first step does not read it), the held
-    relaxation rows, the folded slots and the mu row's unread source."""
+    relaxation rows and the mu row's unread source;
+    with qv's tables, those and qv's held tendency (and its row's unread
+    held slot)."""
     import cupy as cp
     from woof.ingest import lateral_bc as L
     from woof.state_serialization_contract import carried_wrf_mu_halo
     nz, ny, nx = int(cfg.nz), int(cfg.ny), int(cfg.nx)
     device, _common, (fcx, gcx) = L._relaxation_context(state, cfg)
+    qvt = _qv_table(state, cfg)
     out = {}
-    for f in LBC_FIELDS:
+    for f in LBC_FIELDS + (("qv",) if qvt else ()):
         b = device.fields[f]
         for side in ("west", "east", "south", "north"):
             sd = getattr(b, side)
@@ -503,8 +734,8 @@ def _lbc_state(state, cfg, dtype) -> dict:
     u, v, m, w = (nz, ny, nx + 1), (nz, ny + 1, nx), (nz, ny, nx), (nz + 1, ny, nx)
     for n, sh in (("lbc_held_u", u), ("lbc_held_v", v), ("lbc_held_theta", m),
                   ("lbc_held_phi", w), ("lbc_held_mu", (1, ny, nx)),
-                  ("fold_u", u), ("fold_v", v), ("fold_theta", m),
-                  ("lbc_mu_src", (1, ny, nx))):
+                  ("lbc_mu_src", (1, ny, nx))) + (
+                      (("lbc_qv_held", m), ("lbc_held_qv", m)) if qvt else ()):
         out[n] = cp.zeros(sh, dtype=dtype)
     return out
 
@@ -517,7 +748,7 @@ def _lb_views(x, dx, kind):
     """lbc_tl/lbc_ad's dicts for a ``kind`` row on the step dicts: the
     state (tendency, held buffer), its trajectory and the active names."""
     def act(d):
-        out = {"src": _3d(d[_LBC_SRC[kind]]), "mup": d["mup"]}
+        out = {"src": _3d(d[_LBC_SRC[kind]]), "mup": d[_LBC_MU.get(kind, "mup")]}
         out.update({t: d[f"lbc_{kind}_{t}"] for t in LB_TABLES})
         return out
     st = lambda d: {"tend": _3d(d[_LBC_TEND[kind]]), "held": d["lbc_held_" + kind]}
@@ -547,10 +778,6 @@ def _inv(d: dict) -> dict:
     return {**d, "msfv": d["msfv_inv"]}
 
 
-def state_inputs(x: dict) -> dict:
-    return {n: x[n] for n in STEP_INPUTS}
-
-
 # ------------------------------------------------------------------ the step
 
 def _op_table(spec: StageSpec):
@@ -561,6 +788,8 @@ def _op_table(spec: StageSpec):
         ops.append(("prp", calc_p_rho_phi_tl, calc_p_rho_phi_ad, PRP_ALIAS, spec.diagnose,
                     PRP_STATE))
     ops.append(("rsp", rk_step_prep_tl, rk_step_prep_ad, _RSP_ALIAS, spec.rsp, RSP_STATE))
+    if spec.cq is not None:   # prepare_moist_cq, after stage_fluxes
+        ops.append(("cq", cq_tl, cq_ad, {}, spec.cq, CQ_STATE))
     for g in spec.adv:
         ops.append(("adv_" + g.kind, adv_tl, adv_ad, _ADV_ALIAS[g.kind], g, ADV_STATE))
     ops.append(("pgf", pgf_tl, pgf_ad, _PGF_ALIAS, spec.pgf, PGF_STATE))
@@ -593,7 +822,7 @@ def _written(alias, names):
 
 def step_tl(x: dict, dx: dict, geom: StepGeometry, tape: list | None = None,
             observe=None) -> None:
-    """One strict dry step: ``x`` advances (NL in its dtype) and ``dx``
+    """One strict step (dry, or moist with qv, qc and qr): ``x`` advances (NL in its dtype) and ``dx``
     maps to the step's output perturbation, in place.  ``dx`` holds every
     name of ``x`` (zeros where unperturbed).  With a ``tape`` each
     operator's written arrays are appended before it runs.  ``observe``
@@ -634,7 +863,10 @@ def _step(x, dx, geom, tape, observe, *, tl):
             if tl:
                 dx[d][...] = dx[s]
 
-    copy_names(tuple(n + "0" for n in PROGNOSTICS), PROGNOSTICS)   # _save_time_t
+    saved = PROGNOSTICS + (SPECIES if geom.moist else ())
+    copy_names(tuple(n + "0" for n in saved), saved)               # _save_time_t
+    _held_start_tl(x, dx, geom, snap, tl)
+    seen("mixing", x)
     for spec in geom.stages:
         snap(TENDENCIES)                                          # zero_tendencies
         for n in TENDENCIES:
@@ -646,7 +878,7 @@ def _step(x, dx, geom, tape, observe, *, tl):
             s, p = _view(x, alias), _view(dx, alias)
             op_tl(s, p, s, p, g, nl=True)
             seen(name, x)
-        if geom.specified:
+        if geom.specified or geom.held:
             _lbc_stage_tl(x, dx, geom, spec, snap, tl)
             seen("lbc", x)
         snap(SI_STATE)
@@ -660,12 +892,18 @@ def _step(x, dx, geom, tape, observe, *, tl):
         snap(CW_STATE)
         calc_coef_w_tl(x, dx, x, dx, spec.cw, nl=True)
         seen("cw", x)
+        if spec.sf is not None:                                   # zero_sumflux
+            snap(SUMFLUX)
+            sumflux_zero_tl(x, dx, spec.sf, nl=True)
         for i in range(spec.nsub):
             acoustic_substep_tl(_acoustic(x), _acoustic(dx),
                                 spec.first if i == 0 else spec.later, tape)
             if spec.sph is not None:   # advance_specified_phi_w
                 snap(SP_STATE)
                 sph_tl(x, dx, x, dx, spec.sph, nl=True)
+            if spec.sf is not None:                               # accumulate_sumflux
+                snap(SUMFLUX)
+                sumflux_accumulate_tl(x, dx, x, dx, spec.sf, nl=True)
             seen("substep", x)
         if not geom.specified:
             # _capture_wrf_muts; with a boundary zone it keeps the
@@ -677,6 +915,9 @@ def _step(x, dx, geom, tape, observe, *, tl):
         snap(SF_STATE)
         small_step_finish_tl(x, dx, x, dx, spec.ss, nl=True)
         seen("sf", x)
+        if geom.moist:
+            _scalars_tl(x, dx, spec, snap)
+            seen("scalars", x)
     snap(_written(PRP_ALIAS, PRP_STATE))                          # epilogue diagnosis
     s, p = _view(x, PRP_ALIAS), _view(dx, PRP_ALIAS)
     calc_p_rho_phi_tl(s, p, s, p, geom.end_prp, nl=True)
@@ -699,73 +940,237 @@ def _step(x, dx, geom, tape, observe, *, tl):
             d["v"][..., -1, :] = d["v"][..., 0, :]
 
 
-def _fold_tl(d, kind, held_name, mapped):
-    """fold_lateral_relaxation on one row, in the primal's operations:
-    the zeroed slot plus the relaxation times its map factor, then the
-    map-factor division of _couple_dry_mixing_map_factor (times msfv_inv
-    for v)."""
-    slot, scale, div = _FOLD[kind]
-    out = d[slot]
-    out[...] = 0
-    h = d[held_name]
-    out += h * d[scale][None] if (mapped and scale) else h
-    if mapped:
-        if div == "inv":
-            out *= d["msfv_inv"][None]
+#: sumflux's stage fluxes on the step dict (finish_sumflux's ru, rv, ww).
+_SF_ALIAS = {"ww": "ww_ref"}
+#: The flow-dependent species (moist._apply_specified_scalar_flow_boundaries:
+#: every species but qv, which never takes flow_dep_bdy).
+_FLOW_SPECIES = ("qc", "qr")
+
+
+def _su_view(d, name):
+    """One species' update dicts on the step dict (scalar.su_tl/_ad)."""
+    out = {"q": d[name], "q0": d[name + "0"], "tend": d["moist_tend"]}
+    if name == "qv" and "lbc_qv_held" in d:
+        out["held"] = d["lbc_qv_held"]
+    for n in SUMFLUX + ("mup0", "mup", "mub2d", "c1h", "c2h", "msft", "rdnw", "fnm", "fnp"):
+        out[n] = d[n]
+    return out
+
+
+def _flow_traj(d):
+    """flow_dep_bdy's fluxes: the stage's sumflux ones, as
+    advance_scalars_stage passes them."""
+    return {"ru": d["ru_m"], "rv": d["rv_m"]}
+
+
+def _scalars_tl(x, dx, spec, snap):
+    """A moist stage's scalar work after small_step_finish, in
+    dycore._step_body's strict order: finish_sumflux, then
+    moist.advance_scalars_stage (qv's held capture on rk_step 1, the
+    qv, qc and qr updates, flow_dep_bdy for qc and qr on a specified
+    domain)."""
+    snap(SUMFLUX)
+    sumflux_finish_tl(_view(x, _SF_ALIAS), _view(dx, _SF_ALIAS), _view(x, _SF_ALIAS),
+                      _view(dx, _SF_ALIAS), spec.sf, nl=True)
+    if spec.qv_capture is not None:
+        snap(("lbc_qv_held",))
+        for d in (x, dx):   # moist._wrf_scalar_source: no physics or mixing
+            d["lbc_qv_held"][...] = 0
+        st, traj, act = _lb_views(x, dx, "qv")
+        lbc_tl(st(x), st(dx), traj, act(dx), spec.qv_capture, nl=True)
+    for name, g in spec.su:
+        snap((name, "moist_tend"))
+        su_tl(_su_view(x, name), _su_view(dx, name), _su_view(x, name), _su_view(dx, name),
+              g, nl=True)
+    if spec.flow is not None:
+        for name in _FLOW_SPECIES:
+            snap((name,))
+            flow_tl({"q": x[name]}, {"q": dx[name]}, _flow_traj(x), {}, spec.flow, nl=True)
+
+
+def _scalars_ad(ax, back, spec):
+    """Adjoint of :func:`_scalars_tl`."""
+    if spec.flow is not None:
+        for name in reversed(_FLOW_SPECIES):
+            base = back()
+            flow_ad({"q": ax[name]}, _flow_traj(base), {}, spec.flow)
+    for name, g in reversed(spec.su):
+        base = back()
+        su_ad(_su_view(ax, name), _su_view(base, name), _su_view(ax, name), g)
+    if spec.qv_capture is not None:
+        base = back()
+        st, traj, act = _lb_views(base, None, "qv")
+        lbc_ad(st(ax), traj, _lb_adj(ax, "qv"), spec.qv_capture)
+        ax["lbc_qv_held"][...] = 0
+    back()
+    sumflux_finish_ad(_view(ax, _SF_ALIAS), None, _view(ax, _SF_ALIAS), spec.sf)
+
+
+def _couple(d, geom, names=None):
+    """_couple_dry_mixing_map_factor on the held rows of ``d`` (the msf
+    factors read from ``names``, ``d`` itself by default): divided by the
+    row's map factor, v times msfv_inv under BIGSTEP.  Its own adjoint."""
+    names = d if names is None else names
+    for kind in geom.couple:
+        slot = d[_HELD[kind]]
+        if kind == "v" and geom.v_inv:
+            slot *= names["msfv_inv"][None]
         else:
-            out /= d[div][None]
+            slot /= names[_COUPLE[kind]][None]
+
+
+def _held_start_tl(x, dx, geom, snap, tl):
+    """prepare_fixed_tendencies' dry work at the step start: the held
+    rows zeroed; with the mixing (a cold step's diagnosis first) the
+    deformation and smag2d_km of the time-t winds and geopotential, the
+    rows' mass mub2d + mup0, the u, v, w and theta rows into the held rows
+    and, unless a specified domain's fold takes it, the map-factor
+    coupling."""
+    import cupy as cp
+    m = geom.mix
+    if m is not None and m.prp is not None:     # _step_body's cold diagnosis
+        snap(_written(PRP_ALIAS, PRP_STATE))
+        s, p = _view(x, PRP_ALIAS), _view(dx, PRP_ALIAS)
+        calc_p_rho_phi_tl(s, p, s, p, m.prp, nl=True)
+    if geom.held:
+        names = tuple(_HELD[k] for k in geom.held)
+        snap(names)
+        for n in names:
+            x[n][...] = 0
+            if tl:
+                dx[n][...] = 0
+    if m is None:
+        return
+    snap(DF_STATE)
+    df_tl({n: x[n] for n in DF_STATE}, {n: dx[n] for n in DF_STATE}, _df_traj(x),
+          _df_act(dx), m.df, nl=True)
+    snap(("smag_km", "smag_kh"))
+    km_tl(_km_out(x), _km_out(dx), {**{n: x[n] for n in DF_STATE}, "msft": x["msft"]},
+          {n: dx[n] for n in DF_STATE}, m.km, nl=True)
+    snap(("smag_mut",))
+    cp.add(x["mub2d"], x["mup0"], out=x["smag_mut"])
+    if tl:
+        dx["smag_mut"][...] = dx["mup0"]
+    # each row adds into its own slot, zeroed above: no snapshot needed
+    for row, g in m.rows:
+        kind = row[0]
+        hd_tl({"tend": x[_HELD[kind]]}, {"tend": dx[_HELD[kind]]}, _hd_traj(x, row, g),
+              _hd_act(dx, row), g, nl=True)
+    if not geom.specified and geom.couple:
+        snap(tuple(_HELD[k] for k in geom.couple))
+        _couple(x, geom)
+        if tl:
+            _couple(dx, geom, x)
+
+
+def _held_start_ad(ax, back, peek, geom):
+    """Adjoint of :func:`_held_start_tl`."""
+    m = geom.mix
+    if m is not None:
+        if not geom.specified and geom.couple:
+            base = back()
+            _couple(ax, geom, base)
+        base = peek()   # the rows read no slot they write: no snapshot
+        for row, g in reversed(m.rows):
+            kind = row[0]
+            hd_ad({"tend": ax[_HELD[kind]]}, _hd_traj(base, row, g), _hd_act(ax, row), g)
+        back()
+        ax["mup0"] += ax["smag_mut"]
+        ax["smag_mut"][...] = 0
+        base = back()
+        km_ad(_km_out(ax), {**{n: base[n] for n in DF_STATE}, "msft": base["msft"]},
+              {n: ax[n] for n in DF_STATE}, m.km)
+        base = back()
+        df_ad({n: ax[n] for n in DF_STATE}, _df_traj(base), _df_act(ax), m.df)
+    if geom.held:
+        back()
+        for k in geom.held:
+            ax[_HELD[k]][...] = 0
+    if m is not None and m.prp is not None:
+        base = back()
+        a = _view(ax, PRP_ALIAS)
+        calc_p_rho_phi_ad(a, _view(base, PRP_ALIAS), a, m.prp)
+
+
+def _df_act(d):
+    """The deformation's active inputs: the time-t winds and geopotential
+    (_wrf_smag_grid_args with time_t)."""
+    return {"u": d["u0"], "v": d["v0"], "php": d["php0"]}
+
+
+def _df_traj(x):
+    return {**_df_act(x), **{n: x[n] for n in DF_PASSIVE}}
+
+
+def _km_out(d):
+    return {"xkmh": d["smag_km"], "xkhh": d["smag_kh"]}
+
+
+def _hd_act(d, row):
+    _kind, _row, field, xk, _c1, _c2 = row
+    return {"field": d[field], "xk": d[xk], "mut": d["smag_mut"]}
+
+
+def _hd_traj(x, row, g):
+    _kind, _row, _field, _xk, c1, c2 = row
+    out = {**_hd_act(x, row), "c1": x[c1], "c2": x[c2], "msft": x["msft"],
+           "msfu": x["msfu"], "msfv": x["msfv"]}
+    if g.perturb:
+        out["base"] = x["diff1_theta_initial"]
+    return out
 
 
 def _lbc_stage_tl(x, dx, geom, spec, snap, tl):
-    """A stage's specified work after the slow tendencies, in
-    dycore._step_body's strict order: on stage 1 the held relaxation of
-    u, v and theta and its fold (fold_lateral_relaxation), every stage the
-    folded slots' add (add_fixed_dry_tendencies), then the boundary rows
-    (_apply_state_lateral_boundaries_wrf)."""
-    if spec.rk_step == 1:
+    """A stage's held and specified work after the slow tendencies, in
+    dycore._step_body's strict order: on a specified domain's stage 1 the
+    held relaxation of u, v and theta, folded into the held rows (times
+    the map factor) and the rows' coupling (fold_lateral_relaxation);
+    every stage the held rows' add (add_fixed_dry_tendencies), then the
+    boundary rows (_apply_state_lateral_boundaries_wrf)."""
+    if geom.specified and spec.rk_step == 1:
         for kind, g in geom.capture:
             snap(("lbc_held_" + kind,))
             st, traj, act = _lb_views(x, dx, kind)
             lbc_tl(st(x), st(dx), traj, act(dx), g, nl=True)
-        for kind in geom.fold:
-            snap((_FOLD[kind][0],))
-            _fold_tl(x, kind, "lbc_held_" + kind, geom.fold_msf)
-            if tl:   # the msf factors are passive: the same operations
-                _fold_tl({**x, _FOLD[kind][0]: dx[_FOLD[kind][0]],
-                          "lbc_held_" + kind: dx["lbc_held_" + kind]},
-                         kind, "lbc_held_" + kind, geom.fold_msf)
-    snap(tuple(_LBC_TEND[k] for k in geom.fold))
-    for kind in geom.fold:
-        x[_LBC_TEND[kind]] += x[_FOLD[kind][0]]
-        if tl:
-            dx[_LBC_TEND[kind]] += dx[_FOLD[kind][0]]
-    for kind, g in spec.lbc:
-        snap((_LBC_TEND[kind], "lbc_held_" + kind))
-        st, traj, act = _lb_views(x, dx, kind)
-        lbc_tl(st(x), st(dx), traj, act(dx), g, nl=True)
+        snap(tuple(dict.fromkeys(_HELD[k] for k in geom.fold + geom.couple)))
+        for d in ((x, dx) if tl else (x,)):   # the msf factors are passive
+            for kind in geom.fold:
+                scale = _FOLD_SCALE[kind]
+                h = d["lbc_held_" + kind]
+                d[_HELD[kind]] += h * x[scale][None] if (geom.fold_msf and scale) else h
+            _couple(d, geom, x)
+    if geom.held:
+        snap(tuple(_HELD_TEND[k] for k in geom.held))
+        for d in ((x, dx) if tl else (x,)):
+            for kind in geom.held:
+                d[_HELD_TEND[kind]] += d[_HELD[kind]]
+    if geom.specified:
+        for kind, g in spec.lbc:
+            snap((_LBC_TEND[kind], "lbc_held_" + kind))
+            st, traj, act = _lb_views(x, dx, kind)
+            lbc_tl(st(x), st(dx), traj, act(dx), g, nl=True)
 
 
 def _lbc_stage_ad(ax, back, geom, spec):
     """Adjoint of :func:`_lbc_stage_tl` (``back`` pops one snapshot and
     returns the base before that operation)."""
-    for kind, g in reversed(spec.lbc):
-        base = back()
-        st, traj, act = _lb_views(base, None, kind)
-        lbc_ad(st(ax), traj, _lb_adj(ax, kind), g)
-    back()
-    for kind in geom.fold:
-        ax[_FOLD[kind][0]] += ax[_LBC_TEND[kind]]
-    if spec.rk_step == 1:
-        for kind in reversed(geom.fold):
+    if geom.specified:
+        for kind, g in reversed(spec.lbc):
             base = back()
-            slot, scale, div = _FOLD[kind]
-            a = ax[slot]
-            if geom.fold_msf:
-                a = a * base["msfv_inv"][None] if div == "inv" else a / base[div][None]
-                if scale:
-                    a = a * base[scale][None]
-            ax["lbc_held_" + kind] += a
-            ax[slot][...] = 0
+            st, traj, act = _lb_views(base, None, kind)
+            lbc_ad(st(ax), traj, _lb_adj(ax, kind), g)
+    if geom.held:
+        back()
+        for kind in geom.held:
+            ax[_HELD[kind]] += ax[_HELD_TEND[kind]]
+    if geom.specified and spec.rk_step == 1:
+        base = back()
+        _couple(ax, geom, base)
+        for kind in reversed(geom.fold):
+            scale = _FOLD_SCALE[kind]
+            a = ax[_HELD[kind]]
+            ax["lbc_held_" + kind] += (a * base[scale][None] if (geom.fold_msf and scale)
+                                       else a)
         for kind, g in reversed(geom.capture):
             base = back()
             st, traj, act = _lb_views(base, None, kind)
@@ -775,7 +1180,7 @@ def _lbc_stage_ad(ax, back, geom, spec):
 def _lb_adj(ax, kind):
     """lbc_ad's active adjoints on ``ax``: the mu row's source is never
     read, so its adjoint lands in the unread scratch."""
-    out = {"src": _3d(ax[_LBC_SRC[kind]]), "mup": ax["mup"]}
+    out = {"src": _3d(ax[_LBC_SRC[kind]]), "mup": ax[_LBC_MU.get(kind, "mup")]}
     out.update({t: ax[f"lbc_{kind}_{t}"] for t in LB_TABLES})
     return out
 
@@ -812,6 +1217,8 @@ def step_ad(ax: dict, x: dict, tape: list, geom: StepGeometry) -> dict:
     a = _view(ax, PRP_ALIAS)
     calc_p_rho_phi_ad(a, _view(base, PRP_ALIAS), a, geom.end_prp)
     for spec in reversed(geom.stages):
+        if geom.moist:
+            _scalars_ad(ax, back, spec)
         base = back()                                             # sf
         small_step_finish_ad(ax, {n: base[n] for n in SF_STATE}, base, ax, spec.ss)
         if not geom.specified:
@@ -820,12 +1227,18 @@ def step_ad(ax: dict, x: dict, tape: list, geom: StepGeometry) -> dict:
             ax["mu_pp"] += ax["muts"]
             ax["muts"][...] = 0
         for i in reversed(range(spec.nsub)):
+            if spec.sf is not None:                               # accumulate_sumflux
+                back()
+                sumflux_accumulate_ad(ax, None, ax, spec.sf)
             if spec.sph is not None:
                 base = back()
                 sph_ad(ax, base, base, ax, spec.sph)
             cur = acoustic_substep_ad(_acoustic(ax), _acoustic(cur), tape,
                                       spec.first if i == 0 else spec.later)
             cur.update(fnm=x["fnm"], fnp=x["fnp"], msfv=x["msfv"])
+        if spec.sf is not None:                                   # zero_sumflux
+            back()
+            sumflux_zero_ad(ax, spec.sf)
         base = back()                                             # cw
         calc_coef_w_ad(ax, base, ax, spec.cw)
         back()                                                    # small_step_prep's muts
@@ -834,7 +1247,7 @@ def step_ad(ax: dict, x: dict, tape: list, geom: StepGeometry) -> dict:
         ax["muts"][...] = 0
         base = back()                                             # si
         small_step_init_ad(_inv(ax), _inv(base), _inv(ax), spec.ss)
-        if geom.specified:
+        if geom.specified or geom.held:
             _lbc_stage_ad(ax, back, geom, spec)
         for _, _, ad, alias, g, _ in reversed(_op_table(spec)):
             base = back()
@@ -843,8 +1256,9 @@ def step_ad(ax: dict, x: dict, tape: list, geom: StepGeometry) -> dict:
         back()                                                    # zero_tendencies
         for n in TENDENCIES:
             ax[n][...] = 0
+    _held_start_ad(ax, back, lambda: cur, geom)
     back()                                                        # _save_time_t
-    for n in PROGNOSTICS:
+    for n in PROGNOSTICS + (SPECIES if geom.moist else ()):
         ax[n] += ax[n + "0"]
         ax[n + "0"][...] = 0
     assert not tape, len(tape)

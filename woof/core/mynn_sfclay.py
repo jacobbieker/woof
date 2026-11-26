@@ -104,9 +104,27 @@ MYNN_SFCLAY_DEFINES = {
 }
 
 
-def mynn_surface_kernel(variant: str = MYNN_SFCLAY_DEFAULT, shape=()):
+#: RunConfig.mynn_sfclay_psih_zolzt (on in correct mode, FQ3): the 2 m / 10 m heat
+#: profile integrated from zt/L, as gz2ozt/gz10ozt and psih are.
+MYNN_SL_PSIH_ZOLZT_DEFINES = (("MYNN_SL_PSIH_ZOLZT", 1),)
+
+
+def mynn_surface_defines(variant: str = MYNN_SFCLAY_DEFAULT, psih_zolzt: bool = False):
+    """The compile-time defines of one MYNN surface unit."""
+    variant = mynn_sfclay_variant_form(variant)
+    defines = MYNN_SFCLAY_DEFINES[variant]
+    if psih_zolzt:
+        if variant != "wrf_461":
+            raise ValueError(
+                "psih_zolzt corrects the wrf_461 MYNN surface layer; the "
+                "gsl_wrf39 fork already integrates from z0/L throughout")
+        defines = defines + MYNN_SL_PSIH_ZOLZT_DEFINES
+    return defines
+
+
+def mynn_surface_kernel(variant: str = MYNN_SFCLAY_DEFAULT, shape=(), psih_zolzt: bool = False):
     """The deterministic MYNN surface kernel for one variant."""
-    defines = MYNN_SFCLAY_DEFINES[mynn_sfclay_variant_form(variant)]
+    defines = mynn_surface_defines(variant, psih_zolzt)
     if not defines:
         return get_kernel("mynn_surface", "mynn_surface_column", shape)
     return get_kernel_int_defines(
@@ -211,8 +229,15 @@ def launch_mynn_surface_layer(
     pattern_spp_pbl=None,
     variant: str = MYNN_SFCLAY_DEFAULT,
     ocean_z0=None,
+    psih_zolzt: bool = False,
 ) -> None:
-    """Launch the MYNN surface kernel into preallocated outputs."""
+    """Launch the MYNN surface kernel into preallocated outputs.
+
+    ``psih_zolzt`` (RunConfig.mynn_sfclay_psih_zolzt, FQ3) is an
+    opt-in correction of a WRF quirk: module_sf_mynn.F integrates the 2 m
+    and 10 m heat profile from z0/L, not zt/L.  False compiles exactly the
+    unit this function compiled before the key existed.
+    """
 
     _validate_options(dx, itimestep, isfflx, isftcflx)
     variant = mynn_sfclay_variant_form(variant)
@@ -232,7 +257,7 @@ def launch_mynn_surface_layer(
                 "float32 surface arrays"
             )
     ocean_args = ()
-    defines = MYNN_SFCLAY_DEFINES[variant]
+    defines = mynn_surface_defines(variant, psih_zolzt)
     if ocean_z0 is not None:
         if ocean_z0.shape != shape or ocean_z0.dtype != DTYPE or not ocean_z0.flags.c_contiguous:
             raise ValueError("wave roughness requires contiguous FP32 on the surface grid")
@@ -258,7 +283,7 @@ def launch_mynn_surface_layer(
         from woof.core.kernels import get_kernel_int_defines
         kernel = get_kernel_int_defines("mynn_surface", "mynn_surface_column", defines, (1, 1, n))
     else:
-        kernel = mynn_surface_kernel(variant, (1, 1, n))
+        kernel = mynn_surface_kernel(variant, (1, 1, n), psih_zolzt)
     kernel(
         (blocks,),
         (_TPB,),
@@ -281,6 +306,7 @@ def mynn_surface_layer(
     spp_pbl: int = 0,
     pattern_spp_pbl=None,
     variant: str = MYNN_SFCLAY_DEFAULT,
+    psih_zolzt: bool = False,
 ) -> MynnSurfaceResult:
     """Evaluate WRF MYNN surface physics on 2-D device fields."""
 
@@ -306,6 +332,7 @@ def mynn_surface_layer(
         inputs, mol_array, ustm_array, result,
         dx=dx, itimestep=itimestep, isfflx=isfflx, isftcflx=isftcflx,
         spp_pbl=spp_pbl, pattern_spp_pbl=pattern_spp_pbl, variant=variant,
+        psih_zolzt=psih_zolzt,
     )
     return result
 

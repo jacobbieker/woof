@@ -41,7 +41,9 @@ def test_tiers_preserve_deeper_column_capacity():
         f.force_level_tier(80)
         assert f.level_tier(24, 45) == 80
         with pytest.raises(ValueError, match="requires"):
-            f.level_tier(24, 81)
+            f.level_tier(24, 257)
+        assert f.level_tier(24, 81) == 128
+        assert f.level_tier(24, 129) == 256
     finally:
         f.force_level_tier(None)
 

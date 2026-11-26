@@ -311,7 +311,7 @@ def _apply_thompson_aerosol(
     """
     from woof.config import THOMPSON_AEROSOL_FAMILY
     from woof.core.thompson_aerosol_launch import (
-        hail_aware_scope, thompson_version_scope)
+        hail_aware_scope, rain_snow_closure_scope, thompson_version_scope)
     version = getattr(cfg, "thompson_version", "wrf_461")
     # The family row decides hail awareness (mp_physics=38): WRF runs one
     # module for both members, so one adapter call runs both, with the
@@ -322,7 +322,11 @@ def _apply_thompson_aerosol(
     # module caller's captured flags, including synthetic oracle calls.
     if effective_radii_due is None:
         effective_radii_due = not hail
-    with thompson_version_scope(version), hail_aware_scope(hail):
+    # RunConfig.thompson_rain_snow_closure (FQ5).
+    from woof.core.thompson import rain_snow_closure_due
+    closure = rain_snow_closure_due(cfg)
+    with (thompson_version_scope(version), hail_aware_scope(hail),
+          rain_snow_closure_scope(closure)):
         return _apply_thompson_aerosol_call(
             state, cfg, dt, refl_10cm_due=refl_10cm_due, version=version,
             hail=hail, effective_radii_due=effective_radii_due,
@@ -392,6 +396,7 @@ def _apply_thompson_fork_call(
     save_pre_mp_theta(state)
     refl = state.scratch((nz, ny, nx), "refl_10cm") if refl_10cm_due \
         else None
+    from woof.core.thompson import rain_snow_closure_due
     # calc_refl10cm's melting-snow term: off on the fork's first step
     # (itimestep 1, :5374-5379) and wherever WOOF's state policy turns the
     # melting term off (woof.core.refl.refl_melting_for).
@@ -407,7 +412,8 @@ def _apply_thompson_fork_call(
         first_time_step=first_step or not refl_melting_for(state),
         do_refl=bool(refl_10cm_due),
         singular_fall=getattr(cfg, "thompson_fork_snow_fall",
-                              "blend") == "wrf_39_noaa")
+                              "blend") == "wrf_39_noaa",
+        rain_snow_closure=rain_snow_closure_due(cfg))
     if refl_10cm_due:
         stash_refl_10cm(state, refl)
     moist_physics_finish(state, cfg, th, dt)

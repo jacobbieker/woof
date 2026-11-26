@@ -206,8 +206,8 @@ tests/test_mynn_mixlength2.py  needs a CUDA device for its CUDA column compariso
 # calibration refusal or are deselected by the leg's marker expression;
 # they are written down so their absence from
 # tools/battery/gpu_shard_files.txt is a statement.
-tests/test_ensemble_spp_runtime_gpu.py  needs a CUDA device and WOOF_TEST_RUNTIME_CASE_CONFIG (staged on a development machine); with both, its SPP member arm builds a public EnsembleRequest with stochastic controls, which the 2.8.5 calibration refusal (woof/ensemble/calibration_admission.py) refuses, so 1 of its 3 tests fails until that arm reaches the stochastic path through a door the refusal admits; it joins tools/battery/gpu_shard_files.txt SHARD 1w when it does.
-tests/test_ensemble_wrf_seed_labels_runtime_gpu.py  needs a CUDA device and WOOF_TEST_RUNTIME_CASE_CONFIG (staged on a development machine); with both, its 2 tests build a public EnsembleRequest with SPPT controls (one arm adds SKEBS), which the 2.8.5 calibration refusal (woof/ensemble/calibration_admission.py) refuses, so both fail until they reach the stochastic path through a door the refusal admits; it joins tools/battery/gpu_shard_files.txt SHARD 1w when they do.
+tests/test_ensemble_spp_runtime_gpu.py  needs a CUDA device and WOOF_TEST_RUNTIME_CASE_CONFIG (staged on the release node); with both, its SPP member arm builds a public EnsembleRequest with stochastic controls, which the 2.8.5 calibration refusal (woof/ensemble/calibration_admission.py) refuses, so 1 of its 3 tests fails until that arm reaches the stochastic path through a door the refusal admits; it joins tools/battery/gpu_shard_files.txt SHARD 1w when it does.
+tests/test_ensemble_wrf_seed_labels_runtime_gpu.py  needs a CUDA device and WOOF_TEST_RUNTIME_CASE_CONFIG (staged on the release node); with both, its 2 tests build a public EnsembleRequest with SPPT controls (one arm adds SKEBS), which the 2.8.5 calibration refusal (woof/ensemble/calibration_admission.py) refuses, so both fail until they reach the stochastic path through a door the refusal admits; it joins tools/battery/gpu_shard_files.txt SHARD 1w when they do.
 tests/test_ensemble_tiny_domain_gpu.py  needs a CUDA device and the staged May-1999 ERA5 case data with its reference bundle under GPUWM_CASE_DATA_ROOT, which is not staged on the release node; it is marked slow, so every battery leg's marker expression deselects it.
 
 # Module-level skips added on the 2.8.8 and 2.8.9 lines without an entry here
@@ -324,3 +324,9 @@ tests/test_nn_train.py  needs the zarr package, which the base-feature pixi envi
 
 # Strict mode (GPUWM_WRF_EXACT=1) adds its held dry slots when no mixing package runs (99c765505).
 tests/test_strict_held_slots_no_mixing.py  needs GPUWM_WRF_EXACT=1 (the strict build) and a GPU backend; a strict-mode GPU leg runs it, and the default leg skips it by design (99c765505).
+# Module-level skips added on the 3.0.3 line without an entry here (declared by
+# the 3.0.3 docs pack): the Shin-Hong 4.8.0 replay, and two gates that need files
+# RELEASE-EXCLUDE.txt drops from the public snapshot.
+tests/test_shinhong480_replay_gpu.py  needs GPUWM_WRF_EXACT=1 set before import: it grades the WRF 4.8.0 Shin-Hong replay under the opt-in strict arithmetic only, which a default process never installs; the strict GPU leg runs it (0e7c9c9310).
+tests/test_seal_check.py  needs the release cut tooling (tools/release/cut/drivers/seal_check.py) and RELEASE-EXCLUDE.txt, which the public snapshot does not carry; every leg on the private tree runs it.
+tests/test_build_drops_release_excluded.py  needs RELEASE-EXCLUDE.txt, which the public snapshot does not carry (and with it nothing to drop); every leg on the private tree runs it.

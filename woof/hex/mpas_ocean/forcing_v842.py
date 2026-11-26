@@ -62,6 +62,7 @@ from pathlib import Path
 
 import numpy as np
 
+from woof import quirk_corrections
 from woof.hex.errors import ConfigurationRefusal
 
 from . import frazil_v842, land_ice_v842, pgrad_hmix_v842, tend_v842
@@ -155,11 +156,16 @@ def _function(precision: str, name: str):
 
 def _configs(configs: dict | None) -> dict:
     merged = {**DEFAULT_CONFIGS, **WOOF_OPT_INS}
-    if configs:
-        unknown = set(configs) - set(merged)
-        if unknown:
-            raise ValueError(f"configs the composed tendencies do not read: {sorted(unknown)}")
-        merged.update(configs)
+    configs = configs or {}
+    unknown = set(configs) - set(merged) - {quirk_corrections.UMBRELLA, quirk_corrections.MODE_KEY}
+    if unknown:
+        raise ValueError(f"configs the composed tendencies do not read: {sorted(unknown)}")
+    # the corrections follow the physics mode (correct: on, exact: off) unless
+    # woof_quirk_corrections or their own key says otherwise (a set value
+    # that conflicts with an explicit umbrella is refused by name)
+    merged.update(quirk_corrections.with_options(configs, "mpas_ocean"))
+    merged.pop(quirk_corrections.UMBRELLA, None)
+    merged.pop(quirk_corrections.MODE_KEY, None)
     for knob, values in _OPT_IN_VALUES.items():
         if merged[knob] not in values:
             raise ConfigurationRefusal(knob=knob, value=merged[knob], reason="not one of its values",

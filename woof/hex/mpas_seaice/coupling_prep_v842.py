@@ -20,7 +20,8 @@ package is on. It works per cell over ``nCellsSolve``:
 - it forms the shortwave scaling factor;
 - under ``config_use_column_biogeochemistry`` it maps the column package's
   ocean biogeochemical fluxes onto the ``ocean*Flux`` fields: with the brine
-  height alone there are none (``nBioTracers`` is 0), so each is zero.
+  height alone there are none (``nBioTracers`` is 0), and the nonreactive
+  vertical tracer's has no field (the mapping skips it), so each is zero.
 
 It then runs ``seaice_column_scale_fluxes``. Where there is ice, that divides
 the air stress, the atmospheric and ocean fluxes, the reference
@@ -39,8 +40,8 @@ Refused by name:
 
 - what :mod:`~woof.hex.mpas_seaice.ocean_mixed_layer_v842` refuses, under
   ``config_use_ocean_mixed_layer``;
-- ``config_use_column_biogeochemistry`` with biogeochemical tracers (only
-  the brine height, which has no ocean flux, is carried).
+- ``config_use_column_biogeochemistry`` with biogeochemical tracers other
+  than the nonreactive vertical tracer (whose ocean flux has no field).
 """
 from __future__ import annotations
 
@@ -141,13 +142,19 @@ def check_config(configs: dict) -> None:
                 reason="the column biogeochemistry runs only with the column package on",
                 declaration="config_use_column_package = .true., or config_use_column_biogeochemistry = .false.")
         # the vertical salinity is no biogeochemical tracer: colpkg_init_zbgc leaves it out of
-        # nbtrcr (nBioTracers), so its fluxes are not among oceanBioFluxes
+        # nbtrcr (nBioTracers), so its fluxes are not among oceanBioFluxes. The nonreactive
+        # tracer is (bio_index_o 17), and coupling_prep's mapping skips that entry (PON has no
+        # ocean*Flux field, mpas_seaice_column.F:3998-3999): every ocean*Flux stays zero
+        carried = cv.BGC_PORTED + (cv.ZSAL_FLAG,)
+        if cv.vertical_tracers(c):
+            cv._refuse_z_tracers(c)
+            carried += (cv.VT_FLAG,) + cv.VT_PORTED
         for flag in cv._BGC_FLAGS:
-            if flag not in cv.BGC_PORTED and flag != cv.ZSAL_FLAG and c[flag]:
+            if flag not in carried and c[flag]:
                 raise ConfigurationRefusal(
                     knob=flag, value=True,
-                    reason="the column biogeochemistry's ocean fluxes are ported for the brine height and the "
-                           "vertical salinity only (no biogeochemical tracer)",
+                    reason="the column biogeochemistry's ocean fluxes are ported for the brine height, the "
+                           "vertical salinity and the nonreactive vertical tracer only",
                     declaration=f"{flag} = .false.")
 
 

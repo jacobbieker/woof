@@ -32,6 +32,12 @@ def package_active(packages: str, active: Iterable[str]) -> bool:
     return not packages or bool(set(packages.split(';')) & set(active))
 
 
+#: MPAS-Model PR #1409's Registry field (the KIM drag's elvmax, sfc_input/invariant): in a run's Registry only
+#: when it selects bl_kim_gwdo (mpasphys.kim_gwdo_2026.prepare_registry); no other run ever asks for it.
+PR1409_FIELDS = {'elvmax': {'type': 'real', 'dimensions': ['nCells'],
+                            'attrs': {'units': 'm', 'long_name': 'elevation maximum over a grid cell'}, 'gates': []}}
+
+
 def field_definition(name: str, *, physics: bool = True) -> dict:
     """MPAS src/tools/registry/gen_inc.c:40-58; Registry.xml:1356-4020."""
     if not physics and name not in _REGISTRY['dry_fields']:
@@ -40,6 +46,8 @@ def field_definition(name: str, *, physics: bool = True) -> dict:
         return _REGISTRY['fields'][name]
     except KeyError:
         pass
+    if name in PR1409_FIELDS:
+        return PR1409_FIELDS[name]
     # WOOF's own package-gated fields (rrtmg_spectral_output), never in the pinned Registry.
     from .mpasphys import radiation_spectral_v842 as spectral
     if physics and name in spectral.FIELDS:
@@ -68,6 +76,9 @@ def field_definition(name: str, *, physics: bool = True) -> dict:
     from .mpasdiag import lightning_diag_v842 as lightning
     if physics and name in lightning.FIELDS:
         return lightning.field_definition(name)
+    from .mpasdiag import spacewx_diag_v842 as spacewx
+    if physics and name in spacewx.FIELDS:
+        return spacewx.field_definition(name)
     from .mpasdiag import reduction_diag_v842 as reduce
     if physics and name in reduce.FIELDS:
         return reduce.field_definition(name)
@@ -437,7 +448,8 @@ def _all_packages() -> frozenset[str]:
     from .mpasdiag.reduction_diag_v842 import PACKAGES as REDUCTION_PACKAGES
     from .mpasdiag.lightning_diag_v842 import PACKAGES as LIGHTNING_PACKAGES
     from .mpasdiag.hailcast_diag_v842 import PACKAGE as HAILCAST_PACKAGE
-    return frozenset(PACKAGES.values()) | {RADTRAN_PACKAGE, SOLAR_PACKAGE, NWP_PACKAGE, P_PACKAGE, Z_PACKAGE, PREC_PACKAGE, TEND_PACKAGE, *AFWA_PACKAGES, *REDUCTION_PACKAGES, *LIGHTNING_PACKAGES.values(), HAILCAST_PACKAGE} | frozenset(p for f in _REGISTRY['fields'].values() for gate in f['gates']
+    from .mpasdiag.spacewx_diag_v842 import PACKAGES as SPACEWX_PACKAGES
+    return frozenset(PACKAGES.values()) | {RADTRAN_PACKAGE, SOLAR_PACKAGE, NWP_PACKAGE, P_PACKAGE, Z_PACKAGE, PREC_PACKAGE, TEND_PACKAGE, *AFWA_PACKAGES, *REDUCTION_PACKAGES, *LIGHTNING_PACKAGES.values(), HAILCAST_PACKAGE, *SPACEWX_PACKAGES} | frozenset(p for f in _REGISTRY['fields'].values() for gate in f['gates']
                      for p in gate.split(';')) | frozenset(
                      p for s in _REGISTRY['streams'].values()
                      for p in s['options'].get('packages','').split(';')) | {'no_invariant_stream'}

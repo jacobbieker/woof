@@ -805,6 +805,20 @@ extern "C" __global__ void mfshconv_column(
         emf[jk + 1] = FMUL(FMUL(frac[jk + 1], sqrtf(w2[jk + 1])), s2[jk + 1]);
     }
     if (tile_mode == 1) {
+#ifdef __WOOF_METAL__
+        // Metal has no __activemask.  The tile reduction is an integer
+        // maximum folded into *tile_top by atomicMax, which no order of
+        // lanes changes: each SIMD group takes its maximum with simd_max
+        // (the prelude's __reduce_max_sync) and its lowest live thread posts
+        // it, so tile_top ends on the same word the CUDA warp reduction
+        // leaves.  The poster is chosen by the group's own minimum thread
+        // index, so neither the SIMD width nor which lanes have exited
+        // matters.
+        const int group_top = __reduce_max_sync(0xffffffffu, processed);
+        const int first = __reduce_min_sync(0xffffffffu, (int)threadIdx.x);
+        if ((int)threadIdx.x == first) atomicMax(tile_top, group_top);
+        return;
+#else
         const unsigned mask = __activemask();
         const int lane = threadIdx.x & 31;
         for (int offset = 16; offset; offset >>= 1) {
@@ -814,6 +828,7 @@ extern "C" __global__ void mfshconv_column(
         }
         if (lane == 0) atomicMax(tile_top, processed);
         return;
+#endif
     }
     emf[0] = 0.0f;                                       // :1599-1601
     emf[iku - 1] = 0.0f;

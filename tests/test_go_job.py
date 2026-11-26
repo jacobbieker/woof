@@ -134,6 +134,7 @@ def test_push_uploads_a_folder_and_prints_its_manifest(tmp_path, capsys):
     (_job(go_args=["--restart", "x"]), "not a flag a job may pass"),
     (_job(go_args=["--cycle"]), "needs a value"),
     (_job(go_args=["--whole-cycle=yes"]), "takes no value"),
+    (_job(go_args=["--run-stamp=maybe"]), "takes on or off"),
     (_job(icechunk_url="https://h.example/x"), "https://"),
     (_job(products="-x"), "products"),
     (_job(resources={"gpu_mem_gib": -1}), "gpu_mem_gib"),
@@ -153,10 +154,11 @@ def test_a_job_without_a_store_needs_a_prefix(monkeypatch):
 
 def test_go_args_are_normalised_and_passed_after_the_owned_flags(tmp_path):
     job = gj.parse_job(_job(go_args=["--cycle", "2026-08-20T00",
-                                     "--keep-checkpoints=1", "--whole-cycle"],
+                                     "--keep-checkpoints=1", "--whole-cycle",
+                                     "--run-stamp", "off"],
                             products="t2m"))
     assert job.go_args == ("--cycle=2026-08-20T00", "--keep-checkpoints=1",
-                           "--whole-cycle")
+                           "--whole-cycle", "--run-stamp=off")
     argv = gj.go_command(job, tmp_path / "R001.toml", tmp_path / "go")
     assert argv[:5] == [sys.executable, "-m", "woof", "go",
                         str(tmp_path / "R001.toml")]
@@ -170,6 +172,7 @@ def test_go_args_are_normalised_and_passed_after_the_owned_flags(tmp_path):
     assert parsed.command == "go" and parsed.icechunk_store == job.icechunk_url
     assert parsed.output_format == "netcdf,icechunk"
     assert parsed.render_products == "t2m" and parsed.cycle == "2026-08-20T00"
+    assert parsed.run_stamp == "off"
 
 
 # --------------------------------------------------------------------------
