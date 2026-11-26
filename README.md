@@ -716,6 +716,17 @@ Notes on the 1.1.7 sync:
     bit with the WRF route's adapter on the same columns; a 1 h forecast on
     the `edi-vr` variable-resolution mesh takes 0.184 s/step on CUDA (A6000)
     and 0.282 s/step on Metal (M3 Max).
+- **WRF 4.8.1 as the reference (in progress).** `wrf_reference` accepts
+  `"4.8.1"` (the default), `"4.8.0"` and `"4.7.1"`. The 4.8.1 pin is the
+  `v4.8.1` tag commit plus its submodule commits, because the release
+  tarball ships the submodules empty. `tools/wrf481_source` records the
+  sha256 of every WRF file the repository cites, in 4.8.1 and in 4.8.0, and
+  names the change behind each file that differs. A WRF 4.8.1 namelist
+  imports under the 4.8.1 Registry, which has the same keys and defaults as
+  4.8.0's. The scheme fixes in 4.8.1 are being ported one family at a time.
+  Until a family lands, a run receipt that says `"4.8.1"` also lists the
+  changes the engine does not run yet (`wrf_reference_pending`). Noah-MP
+  5.2.2 stays excluded on licence grounds.
 - **Corrections of WRF/MPAS quirks, on by default (correct mode).**
   Each key changes only the arithmetic it names, where its scheme runs.
   Exact mode turns every one off, so the run is the WRF 4.7.1 / MPAS v8.4.2

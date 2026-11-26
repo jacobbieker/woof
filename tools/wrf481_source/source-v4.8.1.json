@@ -1,0 +1,2227 @@
+{
+ "schema": "woof.wrf-source-pin.v1",
+ "tag": "v4.8.1",
+ "commit": "e209f84a1a811424990a8f2f373a0b77c0d35f0d",
+ "tree": "a6fabccf8cab800467b2e8499ddbee64186fd2f4",
+ "url": "https://github.com/wrf-model/WRF",
+ "released": "2026-11-23",
+ "license": "public domain",
+ "submodules": {
+  "phys/GFL": "873b414670323ae766ec4fe1f4b6b5ab891358ed",
+  "phys/MYNN-EDMF": "8f8e8b59021249949c04d1686edc5a02ca325627",
+  "phys/MYNN-SFC": "b66187f54a0c169e36592552634867474e603ac0",
+  "phys/TEMPO": "881614f68aa65de8f383d56139162049baf600fa",
+  "phys/physics_mmm": "d524bc9b8c8cf3e56dbe12f6dd0c728936c79153",
+  "phys/noahmp": "e7b26ca47793edef99ce4dda1a9ac234cb352710",
+  "phys/fire_behavior": "f456cd5f00ce1ea42e28486f6d970599e3626272"
+ },
+ "release_asset": {
+  "name": "v4.8.1.tar.gz",
+  "bytes": 104369508,
+  "sha256": "777cd5a2b859387a44e45d31939aa515543885fdc8265c9c7f69dca6172f2316",
+  "note": "secondary fact: the asset ships every submodule directory empty; outside them it equals the tag tree"
+ },
+ "previous": {
+  "tag": "v4.8.0",
+  "commit": "06d4240ae989cc3e50af412bb472df3d9048783c",
+  "release_asset_sha256": "f3b997266379e1719d186c92471a8f44f8185e976244abde82145a7fddeaf418"
+ },
+ "files": {
+  "Registry/Registry.CONVERT": {
+   "sha256": "01909e87a6b811ecab376628e61d21ff4a9676077542286e103b3e8aa9a184a0",
+   "sha256_v4.8.0": "01909e87a6b811ecab376628e61d21ff4a9676077542286e103b3e8aa9a184a0"
+  },
+  "Registry/Registry.EM": {
+   "sha256": "2bcaf5871914ad7f4683f2bc0a5f8ada5b1199915f3263d1e4c5b1d3986bdff8",
+   "sha256_v4.8.0": "2bcaf5871914ad7f4683f2bc0a5f8ada5b1199915f3263d1e4c5b1d3986bdff8"
+  },
+  "Registry/Registry.EM_CHEM": {
+   "sha256": "d377fdaeb72052ddc045ec5cbb3996e344f2313ef80b9d57def5aa8572f8dcbb",
+   "sha256_v4.8.0": "d377fdaeb72052ddc045ec5cbb3996e344f2313ef80b9d57def5aa8572f8dcbb"
+  },
+  "Registry/Registry.EM_COMMON": {
+   "sha256": "cc6053f775f5544f82e7aa32577d64dbd148d21db4ff82d6fb816faa9952b2b0",
+   "sha256_v4.8.0": "78aa665d0488da08b7441b8a7802c5c774cb21b24f64e99b8ef6cf805c84b0eb",
+   "changes": [
+    "R1",
+    "W2"
+   ]
+  },
+  "Registry/Registry.tladj": {
+   "sha256": "dcd552c11f90364c2604443d0d454b5b478cac49abeee3575465ca2f8a89fab1",
+   "sha256_v4.8.0": "dcd552c11f90364c2604443d0d454b5b478cac49abeee3575465ca2f8a89fab1"
+  },
+  "Registry/Registry.wrfchemvar": {
+   "sha256": "aae20f1e33a84ef8e53702b67799e46b65e04705ae9e755c2c8796aa534e1b89",
+   "sha256_v4.8.0": "aae20f1e33a84ef8e53702b67799e46b65e04705ae9e755c2c8796aa534e1b89"
+  },
+  "Registry/Registry.wrfvar": {
+   "sha256": "e7d8d0f0db571fa16536018c15d50c9cef109c54cb73445f88a2399eed301e28",
+   "sha256_v4.8.0": "e7d8d0f0db571fa16536018c15d50c9cef109c54cb73445f88a2399eed301e28"
+  },
+  "chem/MODAL_AERO_CPP_DEFINES.h": {
+   "sha256": "ed32c9b57ae655a946f13fd56ad1a6f9c52a6e6688cea669e1eed1d38bee1220",
+   "sha256_v4.8.0": "ed32c9b57ae655a946f13fd56ad1a6f9c52a6e6688cea669e1eed1d38bee1220"
+  },
+  "chem/aerorate_so2.F": {
+   "sha256": "7e4c282ff2d17758f6294af0c0f5c658b45e8d6d91ce40f2d41f96f3e92a7fcb",
+   "sha256_v4.8.0": "7e4c282ff2d17758f6294af0c0f5c658b45e8d6d91ce40f2d41f96f3e92a7fcb"
+  },
+  "chem/aerosol_driver.F": {
+   "sha256": "19e5ede904ee356b1787f82763cf56fc5697fc6beef916e0f7fb20912da4887a",
+   "sha256_v4.8.0": "19e5ede904ee356b1787f82763cf56fc5697fc6beef916e0f7fb20912da4887a"
+  },
+  "chem/chem_driver.F": {
+   "sha256": "38587e455cf5f299470ef79aef0b146bc6af07d0728bd131b8cd1e51e32bc73f",
+   "sha256_v4.8.0": "38587e455cf5f299470ef79aef0b146bc6af07d0728bd131b8cd1e51e32bc73f"
+  },
+  "chem/chemics_init.F": {
+   "sha256": "6fc1ffbbfba806a86339d48d4523d91246cfb44cfae0583eb18a40c59df449bc",
+   "sha256_v4.8.0": "6fc1ffbbfba806a86339d48d4523d91246cfb44cfae0583eb18a40c59df449bc"
+  },
+  "chem/cloudchem_driver.F": {
+   "sha256": "52f9d79ec6d4928f6331935d4b8e8ebc0a04acf006ed5a52023715ac7cebd789",
+   "sha256_v4.8.0": "52f9d79ec6d4928f6331935d4b8e8ebc0a04acf006ed5a52023715ac7cebd789"
+  },
+  "chem/convert_emiss.F": {
+   "sha256": "60d83caa921ab6fc586d13e5a4361323deb35f6b7b0d4fe36e4a13c355ecb8e8",
+   "sha256_v4.8.0": "60d83caa921ab6fc586d13e5a4361323deb35f6b7b0d4fe36e4a13c355ecb8e8"
+  },
+  "chem/dry_dep_driver.F": {
+   "sha256": "4676f781b5ca404c933d0867a931462923602732107df82003f66f9e11fb5717",
+   "sha256_v4.8.0": "7707e30dd9c539362adce90c4c55c4baea85dc4fb2d96ef74f5d1aa6de26b59e",
+   "changes": [
+    "C7"
+   ]
+  },
+  "chem/emissions_driver.F": {
+   "sha256": "7f1937e17e6595679885558955e23c2d98c941bd1c06d6608bb9eca9ac9e015f",
+   "sha256_v4.8.0": "8abc108df7b06bc2eba7b8d9a07f00091b5d8ab66d1d00372105139c7d409f9b",
+   "changes": [
+    "C7"
+   ]
+  },
+  "chem/isocom.F": {
+   "sha256": "f4f453131843a1eb616f8c107e4cb0fc0d6dbee82e69b319e157d07e5bf93f07",
+   "sha256_v4.8.0": "f4f453131843a1eb616f8c107e4cb0fc0d6dbee82e69b319e157d07e5bf93f07"
+  },
+  "chem/isofwd.F": {
+   "sha256": "8ca6f5631772cd3f879fb5f7f422cc9ec338071cccc5ccc8f7a099f6948bba8a",
+   "sha256_v4.8.0": "8ca6f5631772cd3f879fb5f7f422cc9ec338071cccc5ccc8f7a099f6948bba8a"
+  },
+  "chem/isorev.F": {
+   "sha256": "906ad48845ecced111ed3c7e3b2e62680aa941b34c86031dfcf3baf9220d74fc",
+   "sha256_v4.8.0": "906ad48845ecced111ed3c7e3b2e62680aa941b34c86031dfcf3baf9220d74fc"
+  },
+  "chem/la_srb.F": {
+   "sha256": "421c98b2e6d00d3a1a94f5a0995912b0b2703525fabb7b8f9d0b74e064bffb1d",
+   "sha256_v4.8.0": "421c98b2e6d00d3a1a94f5a0995912b0b2703525fabb7b8f9d0b74e064bffb1d"
+  },
+  "chem/mechanism_driver.F": {
+   "sha256": "7f4fe81cdd276a3f19f211125ed1c8179ec2b23031818bda2ae5e17b782e2c03",
+   "sha256_v4.8.0": "5d09beb1bb955711fc0dee6fd911fd719bb08c9f18eb60fed8730e17cea350a9",
+   "changes": [
+    "C7"
+   ]
+  },
+  "chem/moduleAERODATA.F": {
+   "sha256": "3088a45e61f2115cbc19515f438ffd7133f631c3ed51bd324c0a7a0b83ba2e33",
+   "sha256_v4.8.0": "3088a45e61f2115cbc19515f438ffd7133f631c3ed51bd324c0a7a0b83ba2e33"
+  },
+  "chem/moduleHETAERO.F": {
+   "sha256": "115a0cfdff8c4ffa056f7094fea2a2c9f4ffad89f1dae6675a112c82ed99ca76",
+   "sha256_v4.8.0": "115a0cfdff8c4ffa056f7094fea2a2c9f4ffad89f1dae6675a112c82ed99ca76"
+  },
+  "chem/moduleHETDATA.F": {
+   "sha256": "eeb4e18efab52c26e711760cd6556dcf56fa98b3b49f3acd4ade86044e810ce6",
+   "sha256_v4.8.0": "eeb4e18efab52c26e711760cd6556dcf56fa98b3b49f3acd4ade86044e810ce6"
+  },
+  "chem/module_add_emis_cptec.F": {
+   "sha256": "9d5055c8faa5ba4a7a20ad0d0c46b3c920d22ab0d8d8df7ab96df659ee7923ec",
+   "sha256_v4.8.0": "9d5055c8faa5ba4a7a20ad0d0c46b3c920d22ab0d8d8df7ab96df659ee7923ec"
+  },
+  "chem/module_add_emiss_burn.F": {
+   "sha256": "14bca8f2f274cd7b709c4766cac336433162e2a0de80268a4c8412668c282941",
+   "sha256_v4.8.0": "14bca8f2f274cd7b709c4766cac336433162e2a0de80268a4c8412668c282941"
+  },
+  "chem/module_aer_drydep.F": {
+   "sha256": "9bd19b05beb7fa71265ed69b4512c7aeb8d72f5d58e0eef9f3086c3d24863d63",
+   "sha256_v4.8.0": "9bd19b05beb7fa71265ed69b4512c7aeb8d72f5d58e0eef9f3086c3d24863d63"
+  },
+  "chem/module_aer_opt_out.F": {
+   "sha256": "2ca789959d80201430b493511885f07221a100ec603954041049dd75ed3127f1",
+   "sha256_v4.8.0": "2ca789959d80201430b493511885f07221a100ec603954041049dd75ed3127f1"
+  },
+  "chem/module_aerosols_soa_vbs.F": {
+   "sha256": "2878549ff38a2e9f06f7478bbf27e74e777e527eb2b19e5e99ee4f980533f919",
+   "sha256_v4.8.0": "2878549ff38a2e9f06f7478bbf27e74e777e527eb2b19e5e99ee4f980533f919"
+  },
+  "chem/module_aerosols_soa_vbs_het.F": {
+   "sha256": "9cb3a6428befe88e1d756f99cb492dc4f78cec4f908ce4bd9a53a4c769f9de7e",
+   "sha256_v4.8.0": "9cb3a6428befe88e1d756f99cb492dc4f78cec4f908ce4bd9a53a4c769f9de7e"
+  },
+  "chem/module_aerosols_sorgam.F": {
+   "sha256": "20c5ac49779c7df414d46e8d8c44982f4bcac1341f24d11cf1c3f30b874bf13a",
+   "sha256_v4.8.0": "20c5ac49779c7df414d46e8d8c44982f4bcac1341f24d11cf1c3f30b874bf13a"
+  },
+  "chem/module_aerosols_sorgam_vbs.F": {
+   "sha256": "245ecc2b96abd0fbef4bc6e00ea12c80829c30d21f803534a3e86c8c0457359f",
+   "sha256_v4.8.0": "245ecc2b96abd0fbef4bc6e00ea12c80829c30d21f803534a3e86c8c0457359f"
+  },
+  "chem/module_bioemi_beis314.F": {
+   "sha256": "d46c9a0fc65e521ba88b4accb40f0523f39704b7d3602c8edd05044d70fbbde3",
+   "sha256_v4.8.0": "d46c9a0fc65e521ba88b4accb40f0523f39704b7d3602c8edd05044d70fbbde3"
+  },
+  "chem/module_bioemi_megan2.F": {
+   "sha256": "ea7c7f17a335e5f73a43546363ab14d14061f37bc1601f7b5e8bdbe5cc3c6c3b",
+   "sha256_v4.8.0": "ea7c7f17a335e5f73a43546363ab14d14061f37bc1601f7b5e8bdbe5cc3c6c3b"
+  },
+  "chem/module_bioemi_simple.F": {
+   "sha256": "053af327fb22828f3021118bebaa1473d4f52723b0f718101c533f13ff1aa981",
+   "sha256_v4.8.0": "053af327fb22828f3021118bebaa1473d4f52723b0f718101c533f13ff1aa981"
+  },
+  "chem/module_cam_mam_addemiss.F": {
+   "sha256": "b1a8dca3eab9bfe1a519c9e206e3b90b364a860ce432525ee075a2455e84339f",
+   "sha256_v4.8.0": "b1a8dca3eab9bfe1a519c9e206e3b90b364a860ce432525ee075a2455e84339f"
+  },
+  "chem/module_cam_mam_aerchem_driver.F": {
+   "sha256": "7d63553becb97d62f75bd8bd6785f7a76295090348ac6c787f773fe983096735",
+   "sha256_v4.8.0": "7d63553becb97d62f75bd8bd6785f7a76295090348ac6c787f773fe983096735"
+  },
+  "chem/module_cam_mam_calcsize.F": {
+   "sha256": "4fd7ddc1c107aba6386bfbbb13e32ec5161eab34b99021b5738cd503bc1a58b0",
+   "sha256_v4.8.0": "4fd7ddc1c107aba6386bfbbb13e32ec5161eab34b99021b5738cd503bc1a58b0"
+  },
+  "chem/module_cam_mam_cloudchem.F": {
+   "sha256": "e213dcc562a3c9eab1a281e7cfb2c48923db6b94b73c28f83240d16a3c00b5d0",
+   "sha256_v4.8.0": "e213dcc562a3c9eab1a281e7cfb2c48923db6b94b73c28f83240d16a3c00b5d0"
+  },
+  "chem/module_cam_mam_coag.F": {
+   "sha256": "bb7a2eb7db3413251da68dbc4fd07cff5e6248c367af320d7fef7d1316dc1ff6",
+   "sha256_v4.8.0": "bb7a2eb7db3413251da68dbc4fd07cff5e6248c367af320d7fef7d1316dc1ff6"
+  },
+  "chem/module_cam_mam_drydep.F": {
+   "sha256": "c52bf4f7614f11640bf3dfdb78d0a2bbc40edad1c689edb9b7ed3995b98d5904",
+   "sha256_v4.8.0": "c52bf4f7614f11640bf3dfdb78d0a2bbc40edad1c689edb9b7ed3995b98d5904"
+  },
+  "chem/module_cam_mam_dust_sediment.F": {
+   "sha256": "93042738d9a5a877aa57fdad57904f22d3086d2594796283de6d8162d8d939c9",
+   "sha256_v4.8.0": "93042738d9a5a877aa57fdad57904f22d3086d2594796283de6d8162d8d939c9"
+  },
+  "chem/module_cam_mam_gas_wetdep_driver.F": {
+   "sha256": "891dabe3e8279ba301193141402fe7b2a4c1762541e942f4e01ed4b152c0ef76",
+   "sha256_v4.8.0": "891dabe3e8279ba301193141402fe7b2a4c1762541e942f4e01ed4b152c0ef76"
+  },
+  "chem/module_cam_mam_gasaerexch.F": {
+   "sha256": "c5d613345496de0d0ee7a64abe1752c0542ccd812be184f8c0b57dae4db50a11",
+   "sha256_v4.8.0": "c5d613345496de0d0ee7a64abe1752c0542ccd812be184f8c0b57dae4db50a11"
+  },
+  "chem/module_cam_mam_init.F": {
+   "sha256": "339cc9d68def404a5c1fe3eb3023d013995aed28da08bb1542e4f36f92c92fcb",
+   "sha256_v4.8.0": "339cc9d68def404a5c1fe3eb3023d013995aed28da08bb1542e4f36f92c92fcb"
+  },
+  "chem/module_cam_mam_initaerodata.F": {
+   "sha256": "0c38d29f2dd2accdd6cf24034f70cd96bb5725dc01ce6dd358c80e680d44aa4b",
+   "sha256_v4.8.0": "0c38d29f2dd2accdd6cf24034f70cd96bb5725dc01ce6dd358c80e680d44aa4b"
+  },
+  "chem/module_cam_mam_initmixrats.F": {
+   "sha256": "7ed0289817294a71a24684d3d9ae575c97f9c711fd28a0a9808df7f8a8f612e1",
+   "sha256_v4.8.0": "7ed0289817294a71a24684d3d9ae575c97f9c711fd28a0a9808df7f8a8f612e1"
+  },
+  "chem/module_cam_mam_mo_chem_utls.F": {
+   "sha256": "5924886e658954c27417cea502a546ccbd41200854897eca4834aebfbce64b06",
+   "sha256_v4.8.0": "5924886e658954c27417cea502a546ccbd41200854897eca4834aebfbce64b06"
+  },
+  "chem/module_cam_mam_mo_sethet.F": {
+   "sha256": "1f63ae4f23f97579294536f4637b8e6be3c8d23d8cfee2e1fc2b568ad1b7ece3",
+   "sha256_v4.8.0": "1f63ae4f23f97579294536f4637b8e6be3c8d23d8cfee2e1fc2b568ad1b7ece3"
+  },
+  "chem/module_cam_mam_mz_aerosols_intr.F": {
+   "sha256": "b6790aa1c70c8f8329f0d3bf164c80cccf6d39a54f4907be2c1ee830f6c9a6c6",
+   "sha256_v4.8.0": "b6790aa1c70c8f8329f0d3bf164c80cccf6d39a54f4907be2c1ee830f6c9a6c6"
+  },
+  "chem/module_cam_mam_newnuc.F": {
+   "sha256": "d645923d1f186128fdbfda51319812523b20caf867dd80e2bc28e75c7181c25f",
+   "sha256_v4.8.0": "d645923d1f186128fdbfda51319812523b20caf867dd80e2bc28e75c7181c25f"
+  },
+  "chem/module_cam_mam_rename.F": {
+   "sha256": "63acd5ee68ea4dd465d6be1e1af6276d71554dd6a2d9d964d47d1f7c930a5fd4",
+   "sha256_v4.8.0": "63acd5ee68ea4dd465d6be1e1af6276d71554dd6a2d9d964d47d1f7c930a5fd4"
+  },
+  "chem/module_cam_mam_setsox.F": {
+   "sha256": "e2e252eecffe99e0e4ee1932b2140ae6f3445c9e806ba3cc63d6c16308b31f08",
+   "sha256_v4.8.0": "e2e252eecffe99e0e4ee1932b2140ae6f3445c9e806ba3cc63d6c16308b31f08"
+  },
+  "chem/module_cam_mam_wateruptake.F": {
+   "sha256": "3f87d03ed3079c826317a44296bc6244857dc0aa0bd83c6a61118c5a67744f1e",
+   "sha256_v4.8.0": "3f87d03ed3079c826317a44296bc6244857dc0aa0bd83c6a61118c5a67744f1e"
+  },
+  "chem/module_cam_mam_wetdep.F": {
+   "sha256": "9f5690919c90b478a61228af54030b4534fc0671da6f591ea5e0e12035c7ae5d",
+   "sha256_v4.8.0": "9f5690919c90b478a61228af54030b4534fc0671da6f591ea5e0e12035c7ae5d"
+  },
+  "chem/module_cam_mam_wetscav.F": {
+   "sha256": "0a44b695666f74699f0f6ea6e3c772c42aa80582250a37f601dabb926130942f",
+   "sha256_v4.8.0": "0a44b695666f74699f0f6ea6e3c772c42aa80582250a37f601dabb926130942f"
+  },
+  "chem/module_cb05_addemiss.F": {
+   "sha256": "91961a1f5642d161cf87743c4bdf9b7b08ab386998e937ab3938eec8c76bb89f",
+   "sha256_v4.8.0": "91961a1f5642d161cf87743c4bdf9b7b08ab386998e937ab3938eec8c76bb89f"
+  },
+  "chem/module_cb05_initmixrats.F": {
+   "sha256": "431fd415bfebdd3e0ad80cca5ce98cde0b3ba8466f8ee35e48f8abdfc738fccb",
+   "sha256_v4.8.0": "431fd415bfebdd3e0ad80cca5ce98cde0b3ba8466f8ee35e48f8abdfc738fccb"
+  },
+  "chem/module_cb05_vbs_initmixrats.F": {
+   "sha256": "9b9abc62108d6a1f9d73a311eaf4266ebef69f2aa0ee018f950e5e0179fa9f1c",
+   "sha256_v4.8.0": "9b9abc62108d6a1f9d73a311eaf4266ebef69f2aa0ee018f950e5e0179fa9f1c"
+  },
+  "chem/module_cbm4_addemiss.F": {
+   "sha256": "79e0a0723177271f17df5aebd97e6fe2fda5f310e61555fd19b1952e544e7bbe",
+   "sha256_v4.8.0": "79e0a0723177271f17df5aebd97e6fe2fda5f310e61555fd19b1952e544e7bbe"
+  },
+  "chem/module_cbm4_initmixrats.F": {
+   "sha256": "4f73b48a35f2790ed82bc952c588b1c4498e2ad4f5621a4bbcc1fdde2ca33cb3",
+   "sha256_v4.8.0": "4f73b48a35f2790ed82bc952c588b1c4498e2ad4f5621a4bbcc1fdde2ca33cb3"
+  },
+  "chem/module_cbmz.F": {
+   "sha256": "2f2ab81e21dfa007ad9e5a503738bf44a6c9c525414878e7343292cb5eba67ed",
+   "sha256_v4.8.0": "2f2ab81e21dfa007ad9e5a503738bf44a6c9c525414878e7343292cb5eba67ed"
+  },
+  "chem/module_cbmz_addemiss.F": {
+   "sha256": "1fe1f4b1dd4194a0a39800a2b6c6199459f4767da9b4796155e526bfe045203d",
+   "sha256_v4.8.0": "1fe1f4b1dd4194a0a39800a2b6c6199459f4767da9b4796155e526bfe045203d"
+  },
+  "chem/module_cbmz_initmixrats.F": {
+   "sha256": "475d974283bb221c0f0f5e330c628ad4301cee0f7931ab5bcf58e40d1d7cd096",
+   "sha256_v4.8.0": "475d974283bb221c0f0f5e330c628ad4301cee0f7931ab5bcf58e40d1d7cd096"
+  },
+  "chem/module_cbmz_lsodes_solver.F": {
+   "sha256": "4718af196353a73b71fa2f434c3f48ae431857ba25951563b4073f033189d05e",
+   "sha256_v4.8.0": "4718af196353a73b71fa2f434c3f48ae431857ba25951563b4073f033189d05e"
+  },
+  "chem/module_cbmz_rodas3_solver.F": {
+   "sha256": "361351d51bb94c8fe8f69ea609726892393cd1a43b2e55228477da67eaee7da3",
+   "sha256_v4.8.0": "361351d51bb94c8fe8f69ea609726892393cd1a43b2e55228477da67eaee7da3"
+  },
+  "chem/module_cbmz_rodas_prep.F": {
+   "sha256": "fe793bb5f5cb700cfc8f1b00110113cce7dec9baf555a1be46dad80a42059c0b",
+   "sha256_v4.8.0": "fe793bb5f5cb700cfc8f1b00110113cce7dec9baf555a1be46dad80a42059c0b"
+  },
+  "chem/module_chem_cup.F": {
+   "sha256": "a213439dbe432ca8edb55795630a859ecba096a30b265db3daf9cac78f1c385a",
+   "sha256_v4.8.0": "a213439dbe432ca8edb55795630a859ecba096a30b265db3daf9cac78f1c385a"
+  },
+  "chem/module_chem_plumerise_scalar.F": {
+   "sha256": "57d2cc62bf87c3aa7d7d423731b9dad956dc33ca06a3ddf2b973b2133b3b8633",
+   "sha256_v4.8.0": "57d2cc62bf87c3aa7d7d423731b9dad956dc33ca06a3ddf2b973b2133b3b8633"
+  },
+  "chem/module_chem_utilities.F": {
+   "sha256": "f41a89cd0e6aaf9e4f7649cd6f244b97a999684f47e88808c5973d4d0f70367a",
+   "sha256_v4.8.0": "b381bb70028d2eb2546944a15369c012c01d1d69277d853c7e210af6d181f573",
+   "changes": [
+    "C4"
+   ]
+  },
+  "chem/module_cmu_bulkaqchem.F": {
+   "sha256": "0a99f1c42a4422a123f6ec9ab0fab44d86a8abf24eb8bd9f3046457b15e1d2c9",
+   "sha256_v4.8.0": "0a99f1c42a4422a123f6ec9ab0fab44d86a8abf24eb8bd9f3046457b15e1d2c9"
+  },
+  "chem/module_cmu_dvode_solver.F": {
+   "sha256": "999b70f46a6a906a6e1542d72d0fd98d9e8d44aa822f6efc98fc12b63c988f63",
+   "sha256_v4.8.0": "999b70f46a6a906a6e1542d72d0fd98d9e8d44aa822f6efc98fc12b63c988f63"
+  },
+  "chem/module_ctrans_grell.F": {
+   "sha256": "aae238778187ce8f92d9b15d2e924ba1d4a251c3174e839e40942ef6b6acff6c",
+   "sha256_v4.8.0": "726c53485e37070a02e918b6dc74dc73d8bd22468bc91c3b367f8a11f9b83641",
+   "changes": [
+    "C6"
+   ]
+  },
+  "chem/module_data_ISRPIA.F": {
+   "sha256": "28e3b664170194226779bab02bb884668e3ae14e9e3313ffda7b17c7379a351e",
+   "sha256_v4.8.0": "28e3b664170194226779bab02bb884668e3ae14e9e3313ffda7b17c7379a351e"
+  },
+  "chem/module_data_cbmz.F": {
+   "sha256": "06ce4e942e90f7fdd813afbc5dd7fc65d7bf26569d540a2bb960cf7bb2fa062a",
+   "sha256_v4.8.0": "06ce4e942e90f7fdd813afbc5dd7fc65d7bf26569d540a2bb960cf7bb2fa062a"
+  },
+  "chem/module_data_cmu_bulkaqchem.F": {
+   "sha256": "6e255da9df4a7dbfe76e57a6853bf7a85eff362f2f2d63c10877e57e7d27a855",
+   "sha256_v4.8.0": "6e255da9df4a7dbfe76e57a6853bf7a85eff362f2f2d63c10877e57e7d27a855"
+  },
+  "chem/module_data_gocart_seas.F": {
+   "sha256": "26699ba06e3d12234f31ec64df4f19cfced3cf1df1b27fa35b2c6ca5a5b4c69d",
+   "sha256_v4.8.0": "26699ba06e3d12234f31ec64df4f19cfced3cf1df1b27fa35b2c6ca5a5b4c69d"
+  },
+  "chem/module_data_gocartchem.F": {
+   "sha256": "9e66dfe27952d72d499c6fbbcb4a82fa0606fd5275216389249d927c64f36e9a",
+   "sha256_v4.8.0": "9e66dfe27952d72d499c6fbbcb4a82fa0606fd5275216389249d927c64f36e9a"
+  },
+  "chem/module_data_isrpia_asrc.F": {
+   "sha256": "96044f2c69f545b6498e088a0dd5c089e135e57e9e8d672a62831e313c76f3ce",
+   "sha256_v4.8.0": "96044f2c69f545b6498e088a0dd5c089e135e57e9e8d672a62831e313c76f3ce"
+  },
+  "chem/module_data_isrpia_caseg.F": {
+   "sha256": "dacf6b0f3a4a7a799a0a21dd84d28d15b12d53c72ced6c7207e21f24c7415fce",
+   "sha256_v4.8.0": "dacf6b0f3a4a7a799a0a21dd84d28d15b12d53c72ced6c7207e21f24c7415fce"
+  },
+  "chem/module_data_isrpia_casej.F": {
+   "sha256": "f28846fabfd845b272ac069b50226b4fc5e09b8c24dff9b82b8535c6c1f4a35f",
+   "sha256_v4.8.0": "f28846fabfd845b272ac069b50226b4fc5e09b8c24dff9b82b8535c6c1f4a35f"
+  },
+  "chem/module_data_isrpia_data.F": {
+   "sha256": "a5a28d853053b5c18f0493662d968cf641d16c2d8f67bb55560309553ceabb47",
+   "sha256_v4.8.0": "a5a28d853053b5c18f0493662d968cf641d16c2d8f67bb55560309553ceabb47"
+  },
+  "chem/module_data_isrpia_expnc.F": {
+   "sha256": "4f3468169fecefe010f9c7124f01f62b56c292c37a0d810f125a66e24441447e",
+   "sha256_v4.8.0": "4f3468169fecefe010f9c7124f01f62b56c292c37a0d810f125a66e24441447e"
+  },
+  "chem/module_data_isrpia_kmc198.F": {
+   "sha256": "732a69c3f129eeab0a4194f0966e9b2a901d1f48d8923ea6e519841c97e78a95",
+   "sha256_v4.8.0": "732a69c3f129eeab0a4194f0966e9b2a901d1f48d8923ea6e519841c97e78a95"
+  },
+  "chem/module_data_isrpia_kmc223.F": {
+   "sha256": "c39ea604631d281ffb6087875ac4ab256b9a923ab4b60cb4eb930a46b2c96ca8",
+   "sha256_v4.8.0": "c39ea604631d281ffb6087875ac4ab256b9a923ab4b60cb4eb930a46b2c96ca8"
+  },
+  "chem/module_data_isrpia_kmc248.F": {
+   "sha256": "602b6ad27ff588b061a1adbd1033c295d0e164c51ddf2e0d3704dc5a80534ff5",
+   "sha256_v4.8.0": "602b6ad27ff588b061a1adbd1033c295d0e164c51ddf2e0d3704dc5a80534ff5"
+  },
+  "chem/module_data_isrpia_kmc273.F": {
+   "sha256": "b77820f33541a39597be459eeb371f17f76ad3d7843fc846ab60af35d65d3826",
+   "sha256_v4.8.0": "b77820f33541a39597be459eeb371f17f76ad3d7843fc846ab60af35d65d3826"
+  },
+  "chem/module_data_isrpia_kmc298.F": {
+   "sha256": "4991a62817e4e94c4f3281e26f5be6e14ac2805f560dfc6037fb22f7b2addcca",
+   "sha256_v4.8.0": "4991a62817e4e94c4f3281e26f5be6e14ac2805f560dfc6037fb22f7b2addcca"
+  },
+  "chem/module_data_isrpia_kmc323.F": {
+   "sha256": "5504e6c863c4c41118693b76f8c120c206bc9d75c615b2cce0c74d85a119a414",
+   "sha256_v4.8.0": "5504e6c863c4c41118693b76f8c120c206bc9d75c615b2cce0c74d85a119a414"
+  },
+  "chem/module_data_isrpia_solut.F": {
+   "sha256": "266194fce465619cedb72a323779f13c6272e858dbbda92990f914862766d480",
+   "sha256_v4.8.0": "266194fce465619cedb72a323779f13c6272e858dbbda92990f914862766d480"
+  },
+  "chem/module_data_megan2.F": {
+   "sha256": "29736744c7c27b832f2d568a807ffce539b8e3a9a7814ee160eac7c3eb43217a",
+   "sha256_v4.8.0": "29736744c7c27b832f2d568a807ffce539b8e3a9a7814ee160eac7c3eb43217a"
+  },
+  "chem/module_data_mgn2mech.F": {
+   "sha256": "489f064fdf827aa89fac649cbcf7dc77075eb4e5593ec176e811bf0ff5e63348",
+   "sha256_v4.8.0": "489f064fdf827aa89fac649cbcf7dc77075eb4e5593ec176e811bf0ff5e63348"
+  },
+  "chem/module_data_mosaic_aero.F": {
+   "sha256": "cc7c84d09bfab6bb84abb6cc2c1b6bb82b18786224f7c83e547c173a6d369482",
+   "sha256_v4.8.0": "cc7c84d09bfab6bb84abb6cc2c1b6bb82b18786224f7c83e547c173a6d369482"
+  },
+  "chem/module_data_mosaic_asect.F": {
+   "sha256": "22e44c37aa46e390f3ae0159efcef822876de5ff43b32c5e2131c54b07260f73",
+   "sha256_v4.8.0": "22e44c37aa46e390f3ae0159efcef822876de5ff43b32c5e2131c54b07260f73"
+  },
+  "chem/module_data_mosaic_asecthp.F": {
+   "sha256": "8c1e3800a156244e772a1c5e04c823dd03700b1179062a435ebcb4f0d6f2902d",
+   "sha256_v4.8.0": "8c1e3800a156244e772a1c5e04c823dd03700b1179062a435ebcb4f0d6f2902d"
+  },
+  "chem/module_data_mosaic_boxmod.F": {
+   "sha256": "806b48ffde3f2519c0205e5647c7d4c99853246512f9d71f97df57b34b4e2ec9",
+   "sha256_v4.8.0": "806b48ffde3f2519c0205e5647c7d4c99853246512f9d71f97df57b34b4e2ec9"
+  },
+  "chem/module_data_mosaic_constants.F": {
+   "sha256": "17a6a749a1a2172103b85157d46f68a6d98f0898e410fb8566c8c5ee1c109d29",
+   "sha256_v4.8.0": "17a6a749a1a2172103b85157d46f68a6d98f0898e410fb8566c8c5ee1c109d29"
+  },
+  "chem/module_data_mosaic_kind.F": {
+   "sha256": "7d7994a970baadaf8617af1838d5a069c6f6602230fa61af3f8b43fc6346ab7b",
+   "sha256_v4.8.0": "7d7994a970baadaf8617af1838d5a069c6f6602230fa61af3f8b43fc6346ab7b"
+  },
+  "chem/module_data_mosaic_main.F": {
+   "sha256": "2455f231354f671094b3d1185a51994f4e9062b847a7216b98c3c77f234c0fa2",
+   "sha256_v4.8.0": "2455f231354f671094b3d1185a51994f4e9062b847a7216b98c3c77f234c0fa2"
+  },
+  "chem/module_data_mosaic_other.F": {
+   "sha256": "0d909df9da383405f0f211744970299efa8c0c20ec6cf310e466bd6cf4b7946c",
+   "sha256_v4.8.0": "0d909df9da383405f0f211744970299efa8c0c20ec6cf310e466bd6cf4b7946c"
+  },
+  "chem/module_data_mosaic_therm.F": {
+   "sha256": "114ffef752ba45c1b13d70e72453f08547ab026eceb92073a71117c75076c002",
+   "sha256_v4.8.0": "114ffef752ba45c1b13d70e72453f08547ab026eceb92073a71117c75076c002"
+  },
+  "chem/module_data_radm2.F": {
+   "sha256": "101beef4c417aa35e4526081aa016be60f2ef777cf5b0d574006ce2d041c723f",
+   "sha256_v4.8.0": "101beef4c417aa35e4526081aa016be60f2ef777cf5b0d574006ce2d041c723f"
+  },
+  "chem/module_data_rrtmgaeropt.F": {
+   "sha256": "fe3766c67ac0761c8387affb242de48b5f97d6a7f799fe8e1eef1d1d5876cc3a",
+   "sha256_v4.8.0": "fe3766c67ac0761c8387affb242de48b5f97d6a7f799fe8e1eef1d1d5876cc3a"
+  },
+  "chem/module_data_soa_vbs.F": {
+   "sha256": "f10bd4fed7d22d436462aca7cd3eaeff691d3b31e1b1e54712177158b9ba679a",
+   "sha256_v4.8.0": "f10bd4fed7d22d436462aca7cd3eaeff691d3b31e1b1e54712177158b9ba679a"
+  },
+  "chem/module_data_soa_vbs_het.F": {
+   "sha256": "c06cff6e6fe115447fb6efb85847b75affde7ab134ba49f380ed5082e21dd977",
+   "sha256_v4.8.0": "c06cff6e6fe115447fb6efb85847b75affde7ab134ba49f380ed5082e21dd977"
+  },
+  "chem/module_data_sorgam.F": {
+   "sha256": "51ab49d24e570f5565fbc0cb137df566e6403205d885fc7c1fae8999ca010b9b",
+   "sha256_v4.8.0": "51ab49d24e570f5565fbc0cb137df566e6403205d885fc7c1fae8999ca010b9b"
+  },
+  "chem/module_data_sorgam_vbs.F": {
+   "sha256": "2c31239822c660912a5813170a303e3c0797e9f5797e571c865623c3bd3c4535",
+   "sha256_v4.8.0": "2c31239822c660912a5813170a303e3c0797e9f5797e571c865623c3bd3c4535"
+  },
+  "chem/module_data_uoc_wd.F": {
+   "sha256": "cee3179a13275a5b19cfb62c04b0d233589856fcc233651a2435b4423ecd6cc5",
+   "sha256_v4.8.0": "cee3179a13275a5b19cfb62c04b0d233589856fcc233651a2435b4423ecd6cc5"
+  },
+  "chem/module_dep_simple.F": {
+   "sha256": "063b72f585f6b48b7e487408431a0d2c80cf2109b4bed2c5efde7d01f1aeb811",
+   "sha256_v4.8.0": "063b72f585f6b48b7e487408431a0d2c80cf2109b4bed2c5efde7d01f1aeb811"
+  },
+  "chem/module_dust_load.F": {
+   "sha256": "f7d1a0ba5a5e773073123d999567284afee7d4e3cf784c2e02179080f35b2599",
+   "sha256_v4.8.0": "f7d1a0ba5a5e773073123d999567284afee7d4e3cf784c2e02179080f35b2599"
+  },
+  "chem/module_emissions_anthropogenics.F": {
+   "sha256": "29b83521a9f20261d847e5aaaf54549c5e1f14bd1fcb6aa5ea4304d80f7684f6",
+   "sha256_v4.8.0": "ec7ff5bfa293993301a84d72f3763c5c3f9a32b5981fd2db1f6bd31834cb5862",
+   "changes": [
+    "C7"
+   ]
+  },
+  "chem/module_fastj_data.F": {
+   "sha256": "2b284cb046c939bea85cb83633138ae0ad39610a3e47f5295a69fdb789bccbfb",
+   "sha256_v4.8.0": "2b284cb046c939bea85cb83633138ae0ad39610a3e47f5295a69fdb789bccbfb"
+  },
+  "chem/module_fastj_mie.F": {
+   "sha256": "57809413e398642cbd78a4e33bf06ebda91d78c54c625a4b50176c49ce83971a",
+   "sha256_v4.8.0": "57809413e398642cbd78a4e33bf06ebda91d78c54c625a4b50176c49ce83971a"
+  },
+  "chem/module_ftuv_driver.F": {
+   "sha256": "d1d7bc05dce435604af9ded4eefb1ba3d1a63024f37a9d61536a11ce066c48a6",
+   "sha256_v4.8.0": "d1d7bc05dce435604af9ded4eefb1ba3d1a63024f37a9d61536a11ce066c48a6"
+  },
+  "chem/module_ftuv_subs.F": {
+   "sha256": "22ae3b0d291b256d3a5fca70d59d3a53b0975bfa5bdb5a61dfa9c2365bf04940",
+   "sha256_v4.8.0": "22ae3b0d291b256d3a5fca70d59d3a53b0975bfa5bdb5a61dfa9c2365bf04940"
+  },
+  "chem/module_ghg_fluxes.F": {
+   "sha256": "ead28049b5f82170a166b371ef45a37aaeed12deb1025d6eacf2f5524d221496",
+   "sha256_v4.8.0": "ead28049b5f82170a166b371ef45a37aaeed12deb1025d6eacf2f5524d221496"
+  },
+  "chem/module_gocart_aerosols.F": {
+   "sha256": "6c6a985876b03bdcfb7a4a7bcbef9f91e4105d8cba19d587c5a625ff3bddfac8",
+   "sha256_v4.8.0": "6c6a985876b03bdcfb7a4a7bcbef9f91e4105d8cba19d587c5a625ff3bddfac8"
+  },
+  "chem/module_gocart_chem.F": {
+   "sha256": "5d26621f47f95c0c64c155c29c45e85296fdfe37631623e11c57b45e709356a4",
+   "sha256_v4.8.0": "5d26621f47f95c0c64c155c29c45e85296fdfe37631623e11c57b45e709356a4"
+  },
+  "chem/module_gocart_dmsemis.F": {
+   "sha256": "ab9be4dc4db10bdfc8eb3fb57fe48272470de59bd85964faffde7d07fa0c774d",
+   "sha256_v4.8.0": "ab9be4dc4db10bdfc8eb3fb57fe48272470de59bd85964faffde7d07fa0c774d"
+  },
+  "chem/module_gocart_drydep.F": {
+   "sha256": "8bd2fbe3e43eb4d6c56db35d9b2493f33768aa793535589ab1d2cad83fbe7dc2",
+   "sha256_v4.8.0": "8bd2fbe3e43eb4d6c56db35d9b2493f33768aa793535589ab1d2cad83fbe7dc2"
+  },
+  "chem/module_gocart_dust.F": {
+   "sha256": "df481177ab95ca91bf1155abf9690ade1b12c0a329d8a3914b48459c0c496fcb",
+   "sha256_v4.8.0": "df481177ab95ca91bf1155abf9690ade1b12c0a329d8a3914b48459c0c496fcb"
+  },
+  "chem/module_gocart_dust_afwa.F": {
+   "sha256": "54f9fd0655848cc1f1a18b8abb164733edd56b8a3c539c63281d5f0e20c672fb",
+   "sha256_v4.8.0": "54f9fd0655848cc1f1a18b8abb164733edd56b8a3c539c63281d5f0e20c672fb"
+  },
+  "chem/module_gocart_seasalt.F": {
+   "sha256": "9c5006a6a81810e193661dba2744837802515c283f169c63736fcc7ae419963a",
+   "sha256_v4.8.0": "9c5006a6a81810e193661dba2744837802515c283f169c63736fcc7ae419963a"
+  },
+  "chem/module_gocart_settling.F": {
+   "sha256": "9ace253845fc3e4ac0534a7984584d54a47fffababe82220cb0c78865ff6b9f0",
+   "sha256_v4.8.0": "9ace253845fc3e4ac0534a7984584d54a47fffababe82220cb0c78865ff6b9f0"
+  },
+  "chem/module_gocart_so2so4.F": {
+   "sha256": "505e7a834873211dd0905238646008ac75378c6e620011c27510fbbe52a0364e",
+   "sha256_v4.8.0": "505e7a834873211dd0905238646008ac75378c6e620011c27510fbbe52a0364e"
+  },
+  "chem/module_hetn2o5.F": {
+   "sha256": "c8fe7303c3a529452f3837516ca5d376880f8a5f73a2cc9511c29c07568309e3",
+   "sha256_v4.8.0": "c8fe7303c3a529452f3837516ca5d376880f8a5f73a2cc9511c29c07568309e3"
+  },
+  "chem/module_input_chem_bioemiss.F": {
+   "sha256": "bea4a4871a5d33936e0cbcf1f93fb3fa22f09a8541f99043c63b51b830609306",
+   "sha256_v4.8.0": "bea4a4871a5d33936e0cbcf1f93fb3fa22f09a8541f99043c63b51b830609306"
+  },
+  "chem/module_input_chem_data.F": {
+   "sha256": "4b65cc83a531df5085668ec0c3bcd5b2af9fed3f6d802b18276dcbb233f00ed0",
+   "sha256_v4.8.0": "4b65cc83a531df5085668ec0c3bcd5b2af9fed3f6d802b18276dcbb233f00ed0"
+  },
+  "chem/module_input_dust_errosion.F": {
+   "sha256": "51b4c8daa4980c049a479c7689e74340befbe46afe6562af8119684abebf4df4",
+   "sha256_v4.8.0": "51b4c8daa4980c049a479c7689e74340befbe46afe6562af8119684abebf4df4"
+  },
+  "chem/module_input_gocart_dms.F": {
+   "sha256": "5788239ed482dcea3a8540e00993852ba2c1201199af2aabc6ec85e323a6cf39",
+   "sha256_v4.8.0": "5788239ed482dcea3a8540e00993852ba2c1201199af2aabc6ec85e323a6cf39"
+  },
+  "chem/module_input_tracer.F": {
+   "sha256": "a94270b1bb0dc918a24cc3f3f522b207549604bc8351229714920cd911b65333",
+   "sha256_v4.8.0": "a94270b1bb0dc918a24cc3f3f522b207549604bc8351229714920cd911b65333"
+  },
+  "chem/module_input_tracer_data.F": {
+   "sha256": "dd78d645ad0b6647a5bb6f5b272afbe64a593d2e769e89cf2af16bb11c1c6fe8",
+   "sha256_v4.8.0": "dd78d645ad0b6647a5bb6f5b272afbe64a593d2e769e89cf2af16bb11c1c6fe8"
+  },
+  "chem/module_interpolate.F": {
+   "sha256": "e271680daf9b5935507ab908009d00b13d86d4e97d70df48c2aa73a3d434a2c4",
+   "sha256_v4.8.0": "e271680daf9b5935507ab908009d00b13d86d4e97d70df48c2aa73a3d434a2c4"
+  },
+  "chem/module_isocom.F": {
+   "sha256": "543b77f8a03e1657c13acc495bcc2e4447e5a6867c89a691fdb2aa70bf8361bd",
+   "sha256_v4.8.0": "543b77f8a03e1657c13acc495bcc2e4447e5a6867c89a691fdb2aa70bf8361bd"
+  },
+  "chem/module_isofwd.F": {
+   "sha256": "dfbd6e31f3911b70793b795c0400cec4798b35c27e5f8ca3ecce21f386d4b5a5",
+   "sha256_v4.8.0": "dfbd6e31f3911b70793b795c0400cec4798b35c27e5f8ca3ecce21f386d4b5a5"
+  },
+  "chem/module_isorev.F": {
+   "sha256": "2b935c6ba163c7c6a5d609f9104fccfc28ff120889fd8a5d2da963e0b3f8a9e9",
+   "sha256_v4.8.0": "2b935c6ba163c7c6a5d609f9104fccfc28ff120889fd8a5d2da963e0b3f8a9e9"
+  },
+  "chem/module_isrpia.F": {
+   "sha256": "67e60a5b246c2ac48bacc3803f70b48409f6b50ac3a604beca9e62ce798c44f8",
+   "sha256_v4.8.0": "67e60a5b246c2ac48bacc3803f70b48409f6b50ac3a604beca9e62ce798c44f8"
+  },
+  "chem/module_isrpia_inc.F": {
+   "sha256": "c8586503adee283b723ff810287525470062f5b4f163fc046443030bfe2d36f5",
+   "sha256_v4.8.0": "c8586503adee283b723ff810287525470062f5b4f163fc046443030bfe2d36f5"
+  },
+  "chem/module_lightning_nox_decaria.F": {
+   "sha256": "2598d9cc4ee6f5ee2d191f77ecbec362377fba7f63411b8169923d9ed5e941b1",
+   "sha256_v4.8.0": "2598d9cc4ee6f5ee2d191f77ecbec362377fba7f63411b8169923d9ed5e941b1"
+  },
+  "chem/module_lightning_nox_driver.F": {
+   "sha256": "4dd425d5a92ca6bede244947fe106866d55db78db3af0ad2a08107577c1d360e",
+   "sha256_v4.8.0": "4dd425d5a92ca6bede244947fe106866d55db78db3af0ad2a08107577c1d360e"
+  },
+  "chem/module_lightning_nox_ott.F": {
+   "sha256": "391938255e2d505cb99e0028d37b5a4c0c073d9a05c18c3d9fe95f09623e4089",
+   "sha256_v4.8.0": "391938255e2d505cb99e0028d37b5a4c0c073d9a05c18c3d9fe95f09623e4089"
+  },
+  "chem/module_mixactivate_wrappers.F": {
+   "sha256": "2cd2feeab521c3afc38ad553f3ef5ee009e5691d0ec1b0efb692573e2905a280",
+   "sha256_v4.8.0": "2cd2feeab521c3afc38ad553f3ef5ee009e5691d0ec1b0efb692573e2905a280"
+  },
+  "chem/module_mosaic2_driver.F": {
+   "sha256": "ea97468676977971c5d17fb971f332709ce02596a445a05574358e97aa78d8b1",
+   "sha256_v4.8.0": "ea97468676977971c5d17fb971f332709ce02596a445a05574358e97aa78d8b1"
+  },
+  "chem/module_mosaic_addemiss.F": {
+   "sha256": "245c62e6c9fd0696c3e868ce6fd91414936b235ca3f96d79809b5ebda316f2ae",
+   "sha256_v4.8.0": "245c62e6c9fd0696c3e868ce6fd91414936b235ca3f96d79809b5ebda316f2ae"
+  },
+  "chem/module_mosaic_aerchem_intr.F": {
+   "sha256": "751470c91631aa9d622deeb1db55c8aafd0d10cd747dc8510c446f2d7c1ab2b5",
+   "sha256_v4.8.0": "751470c91631aa9d622deeb1db55c8aafd0d10cd747dc8510c446f2d7c1ab2b5"
+  },
+  "chem/module_mosaic_aerdynam_intr.F": {
+   "sha256": "8cb3f88b819667949badb731127d2baa41429b34b76ba1f7ac5cc545680740a7",
+   "sha256_v4.8.0": "8cb3f88b819667949badb731127d2baa41429b34b76ba1f7ac5cc545680740a7"
+  },
+  "chem/module_mosaic_astem.F": {
+   "sha256": "fcd43f387486ea7968a90fa783e2d58646eaa8a4317188de836262ccfb266cd7",
+   "sha256_v4.8.0": "fcd43f387486ea7968a90fa783e2d58646eaa8a4317188de836262ccfb266cd7"
+  },
+  "chem/module_mosaic_box_aerchem.F": {
+   "sha256": "cbcec6fecf65426dc979ef581bb763186cd1c301d9903028065a6875b6aa8b64",
+   "sha256_v4.8.0": "cbcec6fecf65426dc979ef581bb763186cd1c301d9903028065a6875b6aa8b64"
+  },
+  "chem/module_mosaic_cloudchem.F": {
+   "sha256": "23e4a1d1c0c7762c5b435ea60b0a39fbf9606e0c9cbebb6becc75e07e0c5ebc1",
+   "sha256_v4.8.0": "23e4a1d1c0c7762c5b435ea60b0a39fbf9606e0c9cbebb6becc75e07e0c5ebc1"
+  },
+  "chem/module_mosaic_coag.F": {
+   "sha256": "5fe29cd1f6dda4daa30bc1d3aa28834289749e91cc6f09f16fcbd2400b954d67",
+   "sha256_v4.8.0": "5fe29cd1f6dda4daa30bc1d3aa28834289749e91cc6f09f16fcbd2400b954d67"
+  },
+  "chem/module_mosaic_coag1d.F": {
+   "sha256": "8b95cfd4028c15de601871d4359c1fe531a3c028ff40550434825f1b317f278d",
+   "sha256_v4.8.0": "8b95cfd4028c15de601871d4359c1fe531a3c028ff40550434825f1b317f278d"
+  },
+  "chem/module_mosaic_coag3d.F": {
+   "sha256": "6994b4f18b5c7cb7d433800856a3a86246ee24a90d752febeb2f55fb9f0f8298",
+   "sha256_v4.8.0": "6994b4f18b5c7cb7d433800856a3a86246ee24a90d752febeb2f55fb9f0f8298"
+  },
+  "chem/module_mosaic_csuesat.F": {
+   "sha256": "cecd7e9aee8ca9d7a24b5390b0a90c11db334603500c599370992e9f15a3cb9b",
+   "sha256_v4.8.0": "cecd7e9aee8ca9d7a24b5390b0a90c11db334603500c599370992e9f15a3cb9b"
+  },
+  "chem/module_mosaic_driver.F": {
+   "sha256": "77e197626e3ce04156aab4d52716b16aa019e2a4a94ae7960447af1052a02654",
+   "sha256_v4.8.0": "77e197626e3ce04156aab4d52716b16aa019e2a4a94ae7960447af1052a02654"
+  },
+  "chem/module_mosaic_drydep.F": {
+   "sha256": "5b0fbcf4d6eaea72b35307907340fab7b9adbcdc0ea9616c1fa3e1f00f7f02ae",
+   "sha256_v4.8.0": "5b0fbcf4d6eaea72b35307907340fab7b9adbcdc0ea9616c1fa3e1f00f7f02ae"
+  },
+  "chem/module_mosaic_ext.F": {
+   "sha256": "07276bc1be41fc32a27223851b9db0d66e71bf8f25f7f9593fc2197b8730c928",
+   "sha256_v4.8.0": "07276bc1be41fc32a27223851b9db0d66e71bf8f25f7f9593fc2197b8730c928"
+  },
+  "chem/module_mosaic_gly.F": {
+   "sha256": "5b25af45bd194299114559164d14093bf0275d880c7a4b1b280a7d400ea72ce5",
+   "sha256_v4.8.0": "5b25af45bd194299114559164d14093bf0275d880c7a4b1b280a7d400ea72ce5"
+  },
+  "chem/module_mosaic_init_aerpar.F": {
+   "sha256": "466c62775dda06e74e7b90776406fbffe53302d57b60d5ba87902bd9b29b7313",
+   "sha256_v4.8.0": "466c62775dda06e74e7b90776406fbffe53302d57b60d5ba87902bd9b29b7313"
+  },
+  "chem/module_mosaic_initmixrats.F": {
+   "sha256": "4d33a1c3ab8c7dd843889470296255b579327efcdb79a7096f1a34777f0eecbb",
+   "sha256_v4.8.0": "4d33a1c3ab8c7dd843889470296255b579327efcdb79a7096f1a34777f0eecbb"
+  },
+  "chem/module_mosaic_lsode.F": {
+   "sha256": "1ae1bfdd6c8c1b46201438cf3fb4c784f1fdcbd08629f91badda81e9907cf227",
+   "sha256_v4.8.0": "1ae1bfdd6c8c1b46201438cf3fb4c784f1fdcbd08629f91badda81e9907cf227"
+  },
+  "chem/module_mosaic_movesect.F": {
+   "sha256": "3633d77319b817ac4ef3b3015681712f511f9d628518647aa9e8fa36972e5440",
+   "sha256_v4.8.0": "3633d77319b817ac4ef3b3015681712f511f9d628518647aa9e8fa36972e5440"
+  },
+  "chem/module_mosaic_movesect1d.F": {
+   "sha256": "d632b556136ba81baafc41f8d6d7309d19530887c2caef2e2864332cc216f9d2",
+   "sha256_v4.8.0": "d632b556136ba81baafc41f8d6d7309d19530887c2caef2e2864332cc216f9d2"
+  },
+  "chem/module_mosaic_movesect3d.F": {
+   "sha256": "dcc0910e110f7836e069b02734a8adc3258e765ba3413574e115ac3e7201b342",
+   "sha256_v4.8.0": "dcc0910e110f7836e069b02734a8adc3258e765ba3413574e115ac3e7201b342"
+  },
+  "chem/module_mosaic_newnuc.F": {
+   "sha256": "55824a059624d67f522ad98b6fb7f9e10497ad9e4c7def6bcc3b5e0033ce7431",
+   "sha256_v4.8.0": "55824a059624d67f522ad98b6fb7f9e10497ad9e4c7def6bcc3b5e0033ce7431"
+  },
+  "chem/module_mosaic_newnucb.F": {
+   "sha256": "4007158b2ce4392dc6126f5506187d71c0ed4e558f1cd0953ee0ab7cdd1e6fdc",
+   "sha256_v4.8.0": "4007158b2ce4392dc6126f5506187d71c0ed4e558f1cd0953ee0ab7cdd1e6fdc"
+  },
+  "chem/module_mosaic_sect_intr.F": {
+   "sha256": "0df74d5aced5d599bbffc46e41bcf26ce26c58d79b7fc83f154a3b318fd2c740",
+   "sha256_v4.8.0": "0df74d5aced5d599bbffc46e41bcf26ce26c58d79b7fc83f154a3b318fd2c740"
+  },
+  "chem/module_mosaic_soa_vbs.F": {
+   "sha256": "df73acc3cf71cd147badcf35df77589c7aa9b5cf4efd7a0b64ef31af3aad7b59",
+   "sha256_v4.8.0": "df73acc3cf71cd147badcf35df77589c7aa9b5cf4efd7a0b64ef31af3aad7b59"
+  },
+  "chem/module_mosaic_sumpm.F": {
+   "sha256": "663ffe4b6a528f158ba73ccc64f05bb4dad8c340a99d9694e92dc80cacb6c9ae",
+   "sha256_v4.8.0": "663ffe4b6a528f158ba73ccc64f05bb4dad8c340a99d9694e92dc80cacb6c9ae"
+  },
+  "chem/module_mosaic_support.F": {
+   "sha256": "4f113d1b49daa5972474a3a15be63b8bbfe0608889cf99bc31d11c11d0551d4c",
+   "sha256_v4.8.0": "4f113d1b49daa5972474a3a15be63b8bbfe0608889cf99bc31d11c11d0551d4c"
+  },
+  "chem/module_mosaic_therm.F": {
+   "sha256": "9d0d7f811267c53864930835c84958f0f37dfbc1d4b44095a67e2b03ae1d2488",
+   "sha256_v4.8.0": "9d0d7f811267c53864930835c84958f0f37dfbc1d4b44095a67e2b03ae1d2488"
+  },
+  "chem/module_mosaic_wetscav.F": {
+   "sha256": "2c282ea20c257af788abb3a3bb1521c161b735c0de5b52c51253c466579a5cbb",
+   "sha256_v4.8.0": "2c282ea20c257af788abb3a3bb1521c161b735c0de5b52c51253c466579a5cbb"
+  },
+  "chem/module_mozcart_wetscav.F": {
+   "sha256": "c051d0472c27eb559deec4262e41f36c7625f8bfef07030fe484ef5180a41d50",
+   "sha256_v4.8.0": "c051d0472c27eb559deec4262e41f36c7625f8bfef07030fe484ef5180a41d50"
+  },
+  "chem/module_optical_averaging.F": {
+   "sha256": "d6a1ff82ea289f28bca2feeccd8a8b2bc76f9d75e52dee02b71fa6cd712a6bf5",
+   "sha256_v4.8.0": "be62760fd14678a15ea4ca4599259cb65489a19f9c2cc35a36539c6d38b585bf",
+   "changes": [
+    "C5"
+   ]
+  },
+  "chem/module_peg_util.F": {
+   "sha256": "132280440d2426c41f8ef22e8d1d2868e29fa13481d123a42b2d9307260026f4",
+   "sha256_v4.8.0": "132280440d2426c41f8ef22e8d1d2868e29fa13481d123a42b2d9307260026f4"
+  },
+  "chem/module_phot_fastj.F": {
+   "sha256": "ba142c8f62cd021c74706ac357e9d39e57d0aa3872455c25a1c7ee87678655bf",
+   "sha256_v4.8.0": "ba142c8f62cd021c74706ac357e9d39e57d0aa3872455c25a1c7ee87678655bf"
+  },
+  "chem/module_phot_mad.F": {
+   "sha256": "e1f09e032819714e9f1aefee9db536c5900fe271ab6551d89dcfbe9eedba437b",
+   "sha256_v4.8.0": "e1f09e032819714e9f1aefee9db536c5900fe271ab6551d89dcfbe9eedba437b"
+  },
+  "chem/module_phot_tuv.F": {
+   "sha256": "60cfb33e49b535cc60b70c788fd00219400fa35a6de2b7a0a5be33a0912bb4cb",
+   "sha256_v4.8.0": "60cfb33e49b535cc60b70c788fd00219400fa35a6de2b7a0a5be33a0912bb4cb"
+  },
+  "chem/module_plumerise1.F": {
+   "sha256": "42e8dd19573ea2a6411619b1eecc2747a4a7cf11b2cd3252b72f10e6b18e875d",
+   "sha256_v4.8.0": "42e8dd19573ea2a6411619b1eecc2747a4a7cf11b2cd3252b72f10e6b18e875d"
+  },
+  "chem/module_prep_wetscav_sorgam.F": {
+   "sha256": "161aa0a9c032d073ef9d368b86dfde333167a3e878c558a05bd07afef451f9fa",
+   "sha256_v4.8.0": "161aa0a9c032d073ef9d368b86dfde333167a3e878c558a05bd07afef451f9fa"
+  },
+  "chem/module_qf03.F": {
+   "sha256": "4c39512dac10ca3f37570e860e7fb475c883667772bb3f4eb743291e9881a63c",
+   "sha256_v4.8.0": "4c39512dac10ca3f37570e860e7fb475c883667772bb3f4eb743291e9881a63c"
+  },
+  "chem/module_radm.F": {
+   "sha256": "56e25d1d42f449e932ed1bfd70fb249a147f1c00f7dfeb32801ac16473d3b70e",
+   "sha256_v4.8.0": "56e25d1d42f449e932ed1bfd70fb249a147f1c00f7dfeb32801ac16473d3b70e"
+  },
+  "chem/module_sea_salt_emis.F": {
+   "sha256": "bea2b499c7d63b8caeb0529dd990c8c83175af839dd67bce06e11b1a66a11a2b",
+   "sha256_v4.8.0": "bea2b499c7d63b8caeb0529dd990c8c83175af839dd67bce06e11b1a66a11a2b"
+  },
+  "chem/module_soilpsd.F": {
+   "sha256": "2ea2df2d7baa82af1399c9dca4e77fcd0a8dc788e799023fa5dc3b96c11e2609",
+   "sha256_v4.8.0": "2ea2df2d7baa82af1399c9dca4e77fcd0a8dc788e799023fa5dc3b96c11e2609"
+  },
+  "chem/module_sorgam_aqchem.F": {
+   "sha256": "de568afc8fbb2d5809d653f9b952e1c3b57e662cff4ae07f6df591c896b128b1",
+   "sha256_v4.8.0": "de568afc8fbb2d5809d653f9b952e1c3b57e662cff4ae07f6df591c896b128b1"
+  },
+  "chem/module_sorgam_cloudchem.F": {
+   "sha256": "53367ac66e8097cb54c861f3f79c2def263298fb2091289f2804d1ece147c544",
+   "sha256_v4.8.0": "53367ac66e8097cb54c861f3f79c2def263298fb2091289f2804d1ece147c544"
+  },
+  "chem/module_sorgam_vbs_aqchem.F": {
+   "sha256": "b7017183182e0a5d8dc174f062bc900eac3498e56d9d42c4fd4bbaacc850fd53",
+   "sha256_v4.8.0": "b7017183182e0a5d8dc174f062bc900eac3498e56d9d42c4fd4bbaacc850fd53"
+  },
+  "chem/module_sorgam_vbs_cloudchem.F": {
+   "sha256": "4fc16f4f6fef85c65b36c676580cab91c47988afe80ea4c6542d211ca2183d96",
+   "sha256_v4.8.0": "4fc16f4f6fef85c65b36c676580cab91c47988afe80ea4c6542d211ca2183d96"
+  },
+  "chem/module_subs_tuv.F": {
+   "sha256": "d3161c649d7ba0f7cbfcf69a004d0f694ed892992cf571fb5669192482bd0bfa",
+   "sha256_v4.8.0": "d3161c649d7ba0f7cbfcf69a004d0f694ed892992cf571fb5669192482bd0bfa"
+  },
+  "chem/module_tropopause.F": {
+   "sha256": "cf1d4db775e8879a2b7aa53d299e8476be8686d75e7100642102a10776acdd63",
+   "sha256_v4.8.0": "cf1d4db775e8879a2b7aa53d299e8476be8686d75e7100642102a10776acdd63"
+  },
+  "chem/module_uoc_dust.F": {
+   "sha256": "98a17e2feb8c81786d7ae8d694b124b50f8e4746cc7edc176305bc1ab4030ab8",
+   "sha256_v4.8.0": "98a17e2feb8c81786d7ae8d694b124b50f8e4746cc7edc176305bc1ab4030ab8"
+  },
+  "chem/module_uoc_dustwd.F": {
+   "sha256": "7e7ad88e4a052c04d0970c2e2303354ca374976aa4edde8de5c96ada2ea91c38",
+   "sha256_v4.8.0": "7e7ad88e4a052c04d0970c2e2303354ca374976aa4edde8de5c96ada2ea91c38"
+  },
+  "chem/module_upper_bc_driver.F": {
+   "sha256": "66e6d587178c74d6b90e9dae9302e1dd660990b8b63ba8b736d1b314b2fccac1",
+   "sha256_v4.8.0": "66e6d587178c74d6b90e9dae9302e1dd660990b8b63ba8b736d1b314b2fccac1"
+  },
+  "chem/module_vash_settling.F": {
+   "sha256": "574e4860e396552f85ac92e1a127a5e8a034f4d4123ff4d352fb16415a2e0d18",
+   "sha256_v4.8.0": "c6accaf72bb26abbfe7f3e70f4e4add95a3ed152c84e552a6f62f3e827b2a1e8",
+   "changes": [
+    "C7"
+   ]
+  },
+  "chem/module_vertmx_wrf.F": {
+   "sha256": "901c9bd369bce19b459a66ab2f210b2db1f4bbeb966376dc6bcaddc50ad546c9",
+   "sha256_v4.8.0": "901c9bd369bce19b459a66ab2f210b2db1f4bbeb966376dc6bcaddc50ad546c9"
+  },
+  "chem/module_wave_data.F": {
+   "sha256": "0994077d1ecd9231fcafbebce52eda59ebe316f3d0aadff3a3fc360ac46e4e3b",
+   "sha256_v4.8.0": "0994077d1ecd9231fcafbebce52eda59ebe316f3d0aadff3a3fc360ac46e4e3b"
+  },
+  "chem/module_wetdep_ls.F": {
+   "sha256": "fbe9c4fd59625e22577b6bb6c368e4dfcb3f993ba232e51f9123c6ff34518146",
+   "sha256_v4.8.0": "fbe9c4fd59625e22577b6bb6c368e4dfcb3f993ba232e51f9123c6ff34518146"
+  },
+  "chem/module_wetscav_driver.F": {
+   "sha256": "4d52613eac599aeb49831080713d4b40b085821d9755e1430b0b8fad526544ba",
+   "sha256_v4.8.0": "4d52613eac599aeb49831080713d4b40b085821d9755e1430b0b8fad526544ba"
+  },
+  "chem/module_zero_plumegen_coms.F": {
+   "sha256": "98cac206ad0c1478275520fb4696ec41a0f5ee625c8e9022736eca981b85afcf",
+   "sha256_v4.8.0": "98cac206ad0c1478275520fb4696ec41a0f5ee625c8e9022736eca981b85afcf"
+  },
+  "chem/numer.F": {
+   "sha256": "b18a7d21b6d5fa6c7a483c3f70f202e27f350d888c2df31acea3448a64aaa1cd",
+   "sha256_v4.8.0": "b18a7d21b6d5fa6c7a483c3f70f202e27f350d888c2df31acea3448a64aaa1cd"
+  },
+  "chem/optical_driver.F": {
+   "sha256": "053d7032146c6d04f2f601158358ae7cbf8b3b3a6d5b110f3e37f95fe29fa279",
+   "sha256_v4.8.0": "053d7032146c6d04f2f601158358ae7cbf8b3b3a6d5b110f3e37f95fe29fa279"
+  },
+  "chem/params.mod.F": {
+   "sha256": "13e4038d5a95045cf9370ed896f31fe824cc700cd3153e0507dd2337a7a7acb0",
+   "sha256_v4.8.0": "13e4038d5a95045cf9370ed896f31fe824cc700cd3153e0507dd2337a7a7acb0"
+  },
+  "chem/params_mod.F": {
+   "sha256": "afba208eaab93245f1110078ebbe56844bc070d15cdb2d3e16a5f468d30d0837",
+   "sha256_v4.8.0": "afba208eaab93245f1110078ebbe56844bc070d15cdb2d3e16a5f468d30d0837"
+  },
+  "chem/photolysis_driver.F": {
+   "sha256": "2da117e14e98aff82656aca2a6c9f41167df34b2af76bf402090562ec826b217",
+   "sha256_v4.8.0": "2da117e14e98aff82656aca2a6c9f41167df34b2af76bf402090562ec826b217"
+  },
+  "chem/rdxs.F": {
+   "sha256": "14f5c340c26d870103bdcf7fe2a0216fd06029bcc2d47132f6dab91a46da4e21",
+   "sha256_v4.8.0": "14f5c340c26d870103bdcf7fe2a0216fd06029bcc2d47132f6dab91a46da4e21"
+  },
+  "chem/rtrans.F": {
+   "sha256": "495889a843641fa9eab5740c75d9ef9da1a84dbde6fc9429ce1cb40eec56f359",
+   "sha256_v4.8.0": "495889a843641fa9eab5740c75d9ef9da1a84dbde6fc9429ce1cb40eec56f359"
+  },
+  "chem/rxn.F": {
+   "sha256": "1ac2c4fb1b2fe26218b7fdc89ff8367e2cb567217dbab0d8bcf3f6ab5845c71f",
+   "sha256_v4.8.0": "1ac2c4fb1b2fe26218b7fdc89ff8367e2cb567217dbab0d8bcf3f6ab5845c71f"
+  },
+  "dyn_em/adapt_timestep_em.F": {
+   "sha256": "1c8dc3784b052f2c0c728715bffca4952cf5b27fe2b4daced53e3377ef3f8d2d",
+   "sha256_v4.8.0": "1c8dc3784b052f2c0c728715bffca4952cf5b27fe2b4daced53e3377ef3f8d2d"
+  },
+  "dyn_em/couple_or_uncouple_em.F": {
+   "sha256": "24e9ff7bfe6acb17d89af3e8192825bb0cac2da37ff95b9fb8cae617aea06544",
+   "sha256_v4.8.0": "a716939b0bd4d78bb694cb66d278914264cfb34fa8eb04681b4ce2a5c4f26cdf",
+   "changes": [
+    "R4"
+   ]
+  },
+  "dyn_em/module_advect_em.F": {
+   "sha256": "58253bdbeb188dd47ed0579fcd2891086be1889b75c0c7d3696c9ad1d213559d",
+   "sha256_v4.8.0": "58253bdbeb188dd47ed0579fcd2891086be1889b75c0c7d3696c9ad1d213559d"
+  },
+  "dyn_em/module_avgflx_em.F": {
+   "sha256": "224d293174f1a90f335fcbba69c461683d3aca7fe5061edc185f442fb2ced3e1",
+   "sha256_v4.8.0": "224d293174f1a90f335fcbba69c461683d3aca7fe5061edc185f442fb2ced3e1"
+  },
+  "dyn_em/module_bc_em.F": {
+   "sha256": "6cfb52b849e3dd0b24769709cf502faa75886da454d9b668af725cccdc56d47f",
+   "sha256_v4.8.0": "6cfb52b849e3dd0b24769709cf502faa75886da454d9b668af725cccdc56d47f"
+  },
+  "dyn_em/module_big_step_utilities_em.F": {
+   "sha256": "838f735699db2f6b2a5e8f61873c29da52a2742dcdede8cd7523261c6f8a28de",
+   "sha256_v4.8.0": "b8c46ba091d017f70e2d75b9a87e198a0242f6c80341cd402d65677ba339a532",
+   "changes": [
+    "R2"
+   ]
+  },
+  "dyn_em/module_convtrans_prep.F": {
+   "sha256": "984bb0fce9db889241d8d460367d8eb22d6d0e552f44a2774cb7847eca75b2da",
+   "sha256_v4.8.0": "984bb0fce9db889241d8d460367d8eb22d6d0e552f44a2774cb7847eca75b2da"
+  },
+  "dyn_em/module_damping_em.F": {
+   "sha256": "933628eae4ef09513d338317529d252933ef602c8659972b99ad67d70583c98f",
+   "sha256_v4.8.0": "933628eae4ef09513d338317529d252933ef602c8659972b99ad67d70583c98f"
+  },
+  "dyn_em/module_diffusion_em.F": {
+   "sha256": "9b67188623d0f7c45edf4e3a3c57d297bd32c0b92e17804cc226e628a0fce6a4",
+   "sha256_v4.8.0": "a7d4570c97e51c635e86a0dbd628c6846457ac5b93d5a7af798b118c7d8d2d54",
+   "changes": [
+    "R3"
+   ]
+  },
+  "dyn_em/module_em.F": {
+   "sha256": "67c5842c1c5d407a26139f26bd317f3016c610aeaf60207dfd21394ddb81482c",
+   "sha256_v4.8.0": "67c5842c1c5d407a26139f26bd317f3016c610aeaf60207dfd21394ddb81482c"
+  },
+  "dyn_em/module_first_rk_step_part1.F": {
+   "sha256": "2e6aa4cbad7479a166d15264cece2e9ce6f2126f80fbd50d4fae54f893ffe72d",
+   "sha256_v4.8.0": "d4c6407227ce1e497eb3ffdc018db3f907186dd8c316437eb269ef8b8fb26902",
+   "changes": [
+    "W2"
+   ]
+  },
+  "dyn_em/module_first_rk_step_part2.F": {
+   "sha256": "9c8c06b246c1cb1bb1632c25e5683a0cfd8545e6832df6eeaa1c744524325738",
+   "sha256_v4.8.0": "9c8c06b246c1cb1bb1632c25e5683a0cfd8545e6832df6eeaa1c744524325738"
+  },
+  "dyn_em/module_ieva_em.F": {
+   "sha256": "407164f39b91199867a13e5fac6b380d0b21a62ce7ef65605cb4c6069ea98799",
+   "sha256_v4.8.0": "407164f39b91199867a13e5fac6b380d0b21a62ce7ef65605cb4c6069ea98799"
+  },
+  "dyn_em/module_initialize_fire.F": {
+   "sha256": "c92d30ddb871bd2188fc7c37391b330eb6c9eca24a81abbfc34429fc5ab966b7",
+   "sha256_v4.8.0": "c92d30ddb871bd2188fc7c37391b330eb6c9eca24a81abbfc34429fc5ab966b7"
+  },
+  "dyn_em/module_initialize_heldsuarez.F": {
+   "sha256": "f93af2b6e3303af3efb92dc119decd8cf3bd60489d5a12845a00041f45167c33",
+   "sha256_v4.8.0": "f93af2b6e3303af3efb92dc119decd8cf3bd60489d5a12845a00041f45167c33"
+  },
+  "dyn_em/module_initialize_ideal.F": {
+   "sha256": "bf626347bfe3bc66921bafb71fb29bf46b057a22b74abd55abcc47c3c1385f5e",
+   "sha256_v4.8.0": "bf626347bfe3bc66921bafb71fb29bf46b057a22b74abd55abcc47c3c1385f5e"
+  },
+  "dyn_em/module_initialize_real.F": {
+   "sha256": "81b40b4ae6891d522b2e30d8cee2036c20e139ef9e780c9a17b0d895ca13d87f",
+   "sha256_v4.8.0": "81b40b4ae6891d522b2e30d8cee2036c20e139ef9e780c9a17b0d895ca13d87f"
+  },
+  "dyn_em/module_initialize_scm_xy.F": {
+   "sha256": "6fa095fa28da044ebb1bd51184e81fbd8b881ee5afed8cd2358f497efb07a658",
+   "sha256_v4.8.0": "6fa095fa28da044ebb1bd51184e81fbd8b881ee5afed8cd2358f497efb07a658"
+  },
+  "dyn_em/module_initialize_tropical_cyclone.F": {
+   "sha256": "8719cd1b3398cbe5f297d22215c53f497b5d55fc8f010b3dd61819f4204fabc8",
+   "sha256_v4.8.0": "8719cd1b3398cbe5f297d22215c53f497b5d55fc8f010b3dd61819f4204fabc8"
+  },
+  "dyn_em/module_polarfft.F": {
+   "sha256": "12d62a8493f78e09a68aa6a216facebea90f4b456c800b62a605010813754d1e",
+   "sha256_v4.8.0": "12d62a8493f78e09a68aa6a216facebea90f4b456c800b62a605010813754d1e"
+  },
+  "dyn_em/module_small_step_em.F": {
+   "sha256": "e75f672441fcaaf559352da711ab17738e482ec270059bbed980b2fff0918cd2",
+   "sha256_v4.8.0": "cabf1a177d50fb0096db79644af20cfe6d75217dbe63ab406a7e29bb54c17634",
+   "changes": [
+    "R1"
+   ]
+  },
+  "dyn_em/module_stoch.F": {
+   "sha256": "e28c912fa69aebdfd9d27fef5e75bd2ab84018767f5a0e7c642aeeae31190ae2",
+   "sha256_v4.8.0": "e28c912fa69aebdfd9d27fef5e75bd2ab84018767f5a0e7c642aeeae31190ae2"
+  },
+  "dyn_em/nest_init_utils.F": {
+   "sha256": "07db287108ab031f89e8bb80d830871daf8ba962f60d394e1ff31c845c1b4a14",
+   "sha256_v4.8.0": "07db287108ab031f89e8bb80d830871daf8ba962f60d394e1ff31c845c1b4a14"
+  },
+  "dyn_em/solve_em.F": {
+   "sha256": "f990560c173b557ec7ce60a1635050eb015bbcb03e6700deaf8bde78a648b20e",
+   "sha256_v4.8.0": "e971ed333197cd10739be0261b0d855ad368ed701187342a2fbdb8e73b4af7e2",
+   "changes": [
+    "R1",
+    "R6"
+   ]
+  },
+  "dyn_em/start_em.F": {
+   "sha256": "fd929ded82a60c1c8c281394f113a3f98a742b739bf394a873e5f0a77b7122ae",
+   "sha256_v4.8.0": "76c6ab37b71251e676ea428f7a078d324286edc395f16f282331d097242e9fad",
+   "changes": [
+    "R5"
+   ]
+  },
+  "external/RSL_LITE/feedback_domain_em_part1.F": {
+   "sha256": "ccc3726f9725886edbb179dbeda753e490abebc6a592d12817aced88e18ee986",
+   "sha256_v4.8.0": "ccc3726f9725886edbb179dbeda753e490abebc6a592d12817aced88e18ee986"
+  },
+  "external/RSL_LITE/feedback_domain_em_part2.F": {
+   "sha256": "48f6c902bf0acafc7b8e894295d2fb07b8c9d3186ce09067c5de275a2970a541",
+   "sha256_v4.8.0": "48f6c902bf0acafc7b8e894295d2fb07b8c9d3186ce09067c5de275a2970a541"
+  },
+  "external/RSL_LITE/force_domain_em_part2.F": {
+   "sha256": "768d95ef689a6e38a69c2bc8fd822c71b24a4811d4620aa62db38e951cd7ebe9",
+   "sha256_v4.8.0": "768d95ef689a6e38a69c2bc8fd822c71b24a4811d4620aa62db38e951cd7ebe9"
+  },
+  "external/RSL_LITE/interp_domain_em_part2.F": {
+   "sha256": "7428971d4d18ffa7489b9f72d74b641b41049d1f9d3d68dcdca889477d5554f5",
+   "sha256_v4.8.0": "7428971d4d18ffa7489b9f72d74b641b41049d1f9d3d68dcdca889477d5554f5"
+  },
+  "external/esmf_time_f90/ESMF_BaseTime.F90": {
+   "sha256": "76d3de3ad982372470218d5e4c9424f892b312ea51cfbbe0b87d32c7a38645a7",
+   "sha256_v4.8.0": "76d3de3ad982372470218d5e4c9424f892b312ea51cfbbe0b87d32c7a38645a7"
+  },
+  "external/esmf_time_f90/ESMF_Clock.F90": {
+   "sha256": "7981355af1585f3f44b0abde02cbf7b52bf2206e1ea78bba1678a8dc4082d1fe",
+   "sha256_v4.8.0": "7981355af1585f3f44b0abde02cbf7b52bf2206e1ea78bba1678a8dc4082d1fe"
+  },
+  "external/esmf_time_f90/ESMF_Time.F90": {
+   "sha256": "a118e70d66f269d7d2e79225c12fc0e794ab06e1cfb94f5b46658737e6052224",
+   "sha256_v4.8.0": "a118e70d66f269d7d2e79225c12fc0e794ab06e1cfb94f5b46658737e6052224"
+  },
+  "external/fftpack/fftpack5/c1f2kb.F": {
+   "sha256": "ec62dfef0a28a7439655fa5401cfd5cfff36508c95140ce342abafcf1db638ce",
+   "sha256_v4.8.0": "ec62dfef0a28a7439655fa5401cfd5cfff36508c95140ce342abafcf1db638ce"
+  },
+  "external/fftpack/fftpack5/c1f3kb.F": {
+   "sha256": "9ba6779d05b0a5d11b7270a2367bb218895fd4398bb4c8d7ed63eeb956df2797",
+   "sha256_v4.8.0": "9ba6779d05b0a5d11b7270a2367bb218895fd4398bb4c8d7ed63eeb956df2797"
+  },
+  "external/fftpack/fftpack5/c1f4kb.F": {
+   "sha256": "94b22b2e5abcc0167cbffb9beaedf5e666da3fc2d830069ef330d0728f0a2cd0",
+   "sha256_v4.8.0": "94b22b2e5abcc0167cbffb9beaedf5e666da3fc2d830069ef330d0728f0a2cd0"
+  },
+  "external/fftpack/fftpack5/c1f5kb.F": {
+   "sha256": "f7358f7843f18f822f3a3013a6b4cbfc86e9206f4d64374fadcdaa4303bb23bf",
+   "sha256_v4.8.0": "f7358f7843f18f822f3a3013a6b4cbfc86e9206f4d64374fadcdaa4303bb23bf"
+  },
+  "external/fftpack/fftpack5/c1fgkb.F": {
+   "sha256": "ea8a4700bd802fceaca486058a40d01453fe7efafcf3ea3197186cb2ec7ee7ba",
+   "sha256_v4.8.0": "ea8a4700bd802fceaca486058a40d01453fe7efafcf3ea3197186cb2ec7ee7ba"
+  },
+  "external/fftpack/fftpack5/c1fm1b.F": {
+   "sha256": "29a83db0fb5395f7bce9629a29e079d4feb48423e1f862c7a50328af94028975",
+   "sha256_v4.8.0": "29a83db0fb5395f7bce9629a29e079d4feb48423e1f862c7a50328af94028975"
+  },
+  "external/fftpack/fftpack5/cfft1b.F": {
+   "sha256": "df2cec55269a90e45d559fb204bafb22136a6fb672f874345fe88fa45f250512",
+   "sha256_v4.8.0": "df2cec55269a90e45d559fb204bafb22136a6fb672f874345fe88fa45f250512"
+  },
+  "external/fftpack/fftpack5/cfft1i.F": {
+   "sha256": "a6e1b6ec9e074b1cff11f68e4ac4abe48d914e3b8efa60f971e0befbd1087d6d",
+   "sha256_v4.8.0": "a6e1b6ec9e074b1cff11f68e4ac4abe48d914e3b8efa60f971e0befbd1087d6d"
+  },
+  "external/fftpack/fftpack5/r4_factor.F": {
+   "sha256": "a731d2e8a8fa22cc733d1166166f0b8988f2be9a8ab8497f8c64b42b09f219dc",
+   "sha256_v4.8.0": "a731d2e8a8fa22cc733d1166166f0b8988f2be9a8ab8497f8c64b42b09f219dc"
+  },
+  "external/fftpack/fftpack5/r4_mcfti1.F": {
+   "sha256": "28a144f6ef329e0f79e1fd1db94b9329469749e55d3ccc94a685df44ea0c827f",
+   "sha256_v4.8.0": "28a144f6ef329e0f79e1fd1db94b9329469749e55d3ccc94a685df44ea0c827f"
+  },
+  "external/fftpack/fftpack5/r4_tables.F": {
+   "sha256": "333b09a4706e65f18fde658a8f6d8aebb38b26f1391254a26728dde95a851b2e",
+   "sha256_v4.8.0": "333b09a4706e65f18fde658a8f6d8aebb38b26f1391254a26728dde95a851b2e"
+  },
+  "external/fftpack/fftpack5/xerfft.F": {
+   "sha256": "41791f66a4529edc7cb37b62da8de07509a781dcf6b240c31350ef521a1b493a",
+   "sha256_v4.8.0": "41791f66a4529edc7cb37b62da8de07509a781dcf6b240c31350ef521a1b493a"
+  },
+  "frame/libmassv.F": {
+   "sha256": "449be0d252beba8c5a42ade42fceb2e582239d1a36db79ef3ad902f0ed82ede1",
+   "sha256_v4.8.0": "449be0d252beba8c5a42ade42fceb2e582239d1a36db79ef3ad902f0ed82ede1"
+  },
+  "frame/module_configure.F": {
+   "sha256": "b529093aeca870bb19cd42af7760bd495ef052637eba7c91ab0411384f00d36d",
+   "sha256_v4.8.0": "b529093aeca870bb19cd42af7760bd495ef052637eba7c91ab0411384f00d36d"
+  },
+  "frame/module_cpl.F": {
+   "sha256": "7a34a1ed28c12cfe651ed10383824d813a03f259083924478052b003a4f7e788",
+   "sha256_v4.8.0": "7a34a1ed28c12cfe651ed10383824d813a03f259083924478052b003a4f7e788"
+  },
+  "frame/module_domain.F": {
+   "sha256": "765a469f2ba8b09cf6d7d53f90f7bca339eef007f70301a0b990393f6d9420b3",
+   "sha256_v4.8.0": "765a469f2ba8b09cf6d7d53f90f7bca339eef007f70301a0b990393f6d9420b3"
+  },
+  "frame/module_driver_constants.F": {
+   "sha256": "a24f3c078c0466817a1ec484bf85d4dd3fcb48d0ddd8f3dc7c5faf173405d80b",
+   "sha256_v4.8.0": "a24f3c078c0466817a1ec484bf85d4dd3fcb48d0ddd8f3dc7c5faf173405d80b"
+  },
+  "frame/module_integrate.F": {
+   "sha256": "10cb942dc9f98a7683a5ce52821bf1b95d0f9222ff57f5145fe9b8e848bb131c",
+   "sha256_v4.8.0": "10cb942dc9f98a7683a5ce52821bf1b95d0f9222ff57f5145fe9b8e848bb131c"
+  },
+  "frame/module_io.F": {
+   "sha256": "93a0de120c33b3803743b406f70473e9fe673425844c2fc502358d17d21720d2",
+   "sha256_v4.8.0": "93a0de120c33b3803743b406f70473e9fe673425844c2fc502358d17d21720d2"
+  },
+  "frame/module_nesting.F": {
+   "sha256": "d19670d3a292a43f1671fef7299785fdbd4105ee237af4f5290500bedcaef431",
+   "sha256_v4.8.0": "d19670d3a292a43f1671fef7299785fdbd4105ee237af4f5290500bedcaef431"
+  },
+  "frame/module_wrf_error.F": {
+   "sha256": "2ed7dc6e90e0fe442ffee84512b4998d31c8ec3400d3a7ab6078404065f784a6",
+   "sha256_v4.8.0": "2ed7dc6e90e0fe442ffee84512b4998d31c8ec3400d3a7ab6078404065f784a6"
+  },
+  "frame/wrf_num_bytes_between.c": {
+   "sha256": "291cc24b6c9a4c1f3a2a9fb2ca1b56c66894feaeebc47b925aba11c72de593bd",
+   "sha256_v4.8.0": "291cc24b6c9a4c1f3a2a9fb2ca1b56c66894feaeebc47b925aba11c72de593bd"
+  },
+  "hydro/CPL/WRF_cpl/module_wrf_HYDRO.F90": {
+   "sha256": "6dd8568eac1ed2392fb9339636479b1fdd1609060dbe7a2ab19c6ba9830770f4",
+   "sha256_v4.8.0": "6dd8568eac1ed2392fb9339636479b1fdd1609060dbe7a2ab19c6ba9830770f4"
+  },
+  "hydro/Routing/Noah_distr_routing_subsurface.F90": {
+   "sha256": "19fba28c57b1dedfc4224381c9943e58384424c2d5882a9c9dcf8efc7a455c46",
+   "sha256_v4.8.0": "19fba28c57b1dedfc4224381c9943e58384424c2d5882a9c9dcf8efc7a455c46"
+  },
+  "main/module_wrf_top.F": {
+   "sha256": "3a6645ae7e4c64b8757987924c9fe661344c307c6de447cdc6fd063d09b1683c",
+   "sha256_v4.8.0": "3a6645ae7e4c64b8757987924c9fe661344c307c6de447cdc6fd063d09b1683c"
+  },
+  "main/ndown_em.F": {
+   "sha256": "5601ebf8ef1caf634ef5fa68d8d1ea54f1f9e25db0510c44b8c570eec048dacd",
+   "sha256_v4.8.0": "5601ebf8ef1caf634ef5fa68d8d1ea54f1f9e25db0510c44b8c570eec048dacd"
+  },
+  "main/real_em.F": {
+   "sha256": "7b629c88409ae0820d19dca34194742fb91a96259fbbbf1b058716a0788167fd",
+   "sha256_v4.8.0": "7b629c88409ae0820d19dca34194742fb91a96259fbbbf1b058716a0788167fd"
+  },
+  "main/wrf_ESMFMod.F": {
+   "sha256": "c95bcd1ca99bf6efb04d21a89da1490ad551fc4cea8a2e96ef2ac961a846d066",
+   "sha256_v4.8.0": "c95bcd1ca99bf6efb04d21a89da1490ad551fc4cea8a2e96ef2ac961a846d066"
+  },
+  "phys/GFL/WRF/module_cu_gfl_wrf.F90": {
+   "sha256": "71e927c3f181cc0820d5599a808c8240b83dadae8b28dacedab3b13e7379a484",
+   "sha256_v4.8.0": "71e927c3f181cc0820d5599a808c8240b83dadae8b28dacedab3b13e7379a484"
+  },
+  "phys/GFL/module_cu_gfl_deep.F90": {
+   "sha256": "68dc04322599209036d05d2e53437f3a12490fc481085e5886756bc002df310e",
+   "sha256_v4.8.0": "68dc04322599209036d05d2e53437f3a12490fc481085e5886756bc002df310e"
+  },
+  "phys/GFL/module_cu_gfl_sh.F90": {
+   "sha256": "56f6bd459ec8ae3b2e3ac38457509b617a61a0865a4536ef6fecc349b43154cd",
+   "sha256_v4.8.0": "56f6bd459ec8ae3b2e3ac38457509b617a61a0865a4536ef6fecc349b43154cd"
+  },
+  "phys/MYNN-EDMF/WRF/module_bl_mynnedmf_common.F90": {
+   "sha256": "20c0e0c7c3ee0c08e4de67a6479049ef948022c11c70cff37e1a22b0bfd398ba",
+   "sha256_v4.8.0": "20c0e0c7c3ee0c08e4de67a6479049ef948022c11c70cff37e1a22b0bfd398ba"
+  },
+  "phys/MYNN-EDMF/WRF/module_bl_mynnedmf_driver.F90": {
+   "sha256": "b3e0646a53ad917521cf858818897c4eed019101b77686e32c8488326cee2cd4",
+   "sha256_v4.8.0": "b3e0646a53ad917521cf858818897c4eed019101b77686e32c8488326cee2cd4"
+  },
+  "phys/MYNN-EDMF/module_bl_mynnedmf.F90": {
+   "sha256": "4aee355aefaaa06c7d0838f97f69b64eda9d0402885c1c35b24454070df25a83",
+   "sha256_v4.8.0": "4aee355aefaaa06c7d0838f97f69b64eda9d0402885c1c35b24454070df25a83"
+  },
+  "phys/MYNN-SFC/WRF/module_sf_mynnsfc_driver.F90": {
+   "sha256": "16f453f529c1fa235e63c1a8883c585fb64a4e81bd3c79cbad3eb372ee08c4e4",
+   "sha256_v4.8.0": "16f453f529c1fa235e63c1a8883c585fb64a4e81bd3c79cbad3eb372ee08c4e4"
+  },
+  "phys/ccpp_kind_types.F": {
+   "sha256": "0cc7b2d71d8a93ff1f2b401324de8fd1ee70ba598f83d89254d6dbe8c31d0e4b",
+   "sha256_v4.8.0": "0cc7b2d71d8a93ff1f2b401324de8fd1ee70ba598f83d89254d6dbe8c31d0e4b"
+  },
+  "phys/fr_fire_params_args.h": {
+   "sha256": "59538a2313cadbe5ccc92ac916d1b7373f0b4ab9902cc44336b2ff31ea42f661",
+   "sha256_v4.8.0": "59538a2313cadbe5ccc92ac916d1b7373f0b4ab9902cc44336b2ff31ea42f661"
+  },
+  "phys/fr_fire_params_decl.h": {
+   "sha256": "72ffb0f34a3cf8f148d537fb026fc3a99055970de9a34735222fdbf954fcf333",
+   "sha256_v4.8.0": "72ffb0f34a3cf8f148d537fb026fc3a99055970de9a34735222fdbf954fcf333"
+  },
+  "phys/module_bep_bem_helper.F": {
+   "sha256": "79403e10104e23fc2a44eb7cf9c0a33c10fabed3b963c9ccb0ea0bfd29072b6d",
+   "sha256_v4.8.0": "79403e10104e23fc2a44eb7cf9c0a33c10fabed3b963c9ccb0ea0bfd29072b6d"
+  },
+  "phys/module_bl_acm.F": {
+   "sha256": "f18685f7ea091f567c3f37e983f26357dcd7e9ec2eea9a6e70635c506a66d60c",
+   "sha256_v4.8.0": "f18685f7ea091f567c3f37e983f26357dcd7e9ec2eea9a6e70635c506a66d60c"
+  },
+  "phys/module_bl_boulac.F": {
+   "sha256": "8ce2335f3ecaef0d532d92f7adf6a779af2ea6714e7059c59f62ee008c6fccd4",
+   "sha256_v4.8.0": "68285f1457fe62e37ad1d76680d3c69e4a48a6baca93348f6f8a15c5fb40d871",
+   "changes": [
+    "P1"
+   ]
+  },
+  "phys/module_bl_camuwpbl_driver.F": {
+   "sha256": "253886780ae99823608f28bbcf68e1bfdc97483fe6fe2d7df24866c2f2b1e42a",
+   "sha256_v4.8.0": "253886780ae99823608f28bbcf68e1bfdc97483fe6fe2d7df24866c2f2b1e42a"
+  },
+  "phys/module_bl_eepsilon.F": {
+   "sha256": "b1ea6db55866af15cb3c6962b1a15fa512eda803078f7304e6a133462d7e12de",
+   "sha256_v4.8.0": "b1ea6db55866af15cb3c6962b1a15fa512eda803078f7304e6a133462d7e12de"
+  },
+  "phys/module_bl_fogdes.F": {
+   "sha256": "32ae3720d97796b54ce660d7e685c9ddc620a1ddcee314adf02faa14ac54009a",
+   "sha256_v4.8.0": "94d6b4ed3f82c6d7ca9b14107ee07af8ace058dd65f7e07ab5fa0ab8ea1b0ed7",
+   "changes": [
+    "P7"
+   ]
+  },
+  "phys/module_bl_gbmpbl.F": {
+   "sha256": "92d318297a54b3e89a2735da1bf6cfcef27b053c02339c3fb82dbbc4ca59a4cf",
+   "sha256_v4.8.0": "92d318297a54b3e89a2735da1bf6cfcef27b053c02339c3fb82dbbc4ca59a4cf"
+  },
+  "phys/module_bl_gfs.F": {
+   "sha256": "a3898642ee386d60a74af2ef45867e6b5f7df518eef9543ae91586d00372b71c",
+   "sha256_v4.8.0": "a3898642ee386d60a74af2ef45867e6b5f7df518eef9543ae91586d00372b71c"
+  },
+  "phys/module_bl_gwdo.F": {
+   "sha256": "8bc746fd1f7314b6de16757d0c1dd9bc53abea1ed3bc0cdcdc211da621198351",
+   "sha256_v4.8.0": "8bc746fd1f7314b6de16757d0c1dd9bc53abea1ed3bc0cdcdc211da621198351"
+  },
+  "phys/module_bl_gwdo_gsl.F": {
+   "sha256": "812881f3b8bf496264ee963e3d019993f87825302169eff3bced7425cebd7258",
+   "sha256_v4.8.0": "812881f3b8bf496264ee963e3d019993f87825302169eff3bced7425cebd7258"
+  },
+  "phys/module_bl_keps.F": {
+   "sha256": "4a77469d16415ac87ee7edf13bcd139b6afa81e03ebbe3990fd5dabaa8e858d7",
+   "sha256_v4.8.0": "a79058405affcd293740b15137002e788d168a5eba51586d14cee41342ffc204",
+   "changes": [
+    "P2"
+   ]
+  },
+  "phys/module_bl_mfshconvpbl.F": {
+   "sha256": "cb678bb818adda9906ab6479cf04e665285042e5bfe9f39c7ddef2e9221c7a34",
+   "sha256_v4.8.0": "cb678bb818adda9906ab6479cf04e665285042e5bfe9f39c7ddef2e9221c7a34"
+  },
+  "phys/module_bl_mrf.F": {
+   "sha256": "a1306d0063043d001fa4a53b9219031b931999c7d7daea172fd97518bc9b19eb",
+   "sha256_v4.8.0": "a1306d0063043d001fa4a53b9219031b931999c7d7daea172fd97518bc9b19eb"
+  },
+  "phys/module_bl_myjpbl.F": {
+   "sha256": "ee6acc5e65b57a74a5f620d872000f46c321ddc9331d6773d88053f9144bc1cb",
+   "sha256_v4.8.0": "ee6acc5e65b57a74a5f620d872000f46c321ddc9331d6773d88053f9144bc1cb"
+  },
+  "phys/module_bl_myjurb.F": {
+   "sha256": "669ef6a3f2d9e93c63fb604d388d66b3d2013203ca9281034c2ab3688c63aabd",
+   "sha256_v4.8.0": "669ef6a3f2d9e93c63fb604d388d66b3d2013203ca9281034c2ab3688c63aabd"
+  },
+  "phys/module_bl_qnsepbl.F": {
+   "sha256": "737a235b9febb01004d5bfe7a9364a0fc57e8af79cbced8239d68ab623e80e66",
+   "sha256_v4.8.0": "737a235b9febb01004d5bfe7a9364a0fc57e8af79cbced8239d68ab623e80e66"
+  },
+  "phys/module_bl_shinhong.F": {
+   "sha256": "a32f17d8011a0d50af0145745d3a87e4b44aef967006761651758c24e6292e11",
+   "sha256_v4.8.0": "c7bfe36353a9db6f4fd471a5ca13287efb4b92d5c12ff2797af685eb536cb5dc",
+   "changes": [
+    "P3"
+   ]
+  },
+  "phys/module_bl_temf.F": {
+   "sha256": "0c4d731ca3124198342a3a2f90e0a43f34ddf5731b545460fb27bf794ed77475",
+   "sha256_v4.8.0": "0c4d731ca3124198342a3a2f90e0a43f34ddf5731b545460fb27bf794ed77475"
+  },
+  "phys/module_bl_ysu.F": {
+   "sha256": "46ad9d21ecc88461ec3fc06086f9cb25fdccf9fc0f9b8f122a0cc2ff7c92a662",
+   "sha256_v4.8.0": "46ad9d21ecc88461ec3fc06086f9cb25fdccf9fc0f9b8f122a0cc2ff7c92a662"
+  },
+  "phys/module_calc_lpi_new.F": {
+   "sha256": "0e9db1a8196d81c7ef616ba3c52e72f79d0b1e10049e39362ee908b9e974fa86",
+   "sha256_v4.8.0": "0e9db1a8196d81c7ef616ba3c52e72f79d0b1e10049e39362ee908b9e974fa86"
+  },
+  "phys/module_cam_bl_diffusion_solver.F": {
+   "sha256": "902050bd815678aad07757487bb68aa9bbd11341174a678b894f592f7d2d400e",
+   "sha256_v4.8.0": "902050bd815678aad07757487bb68aa9bbd11341174a678b894f592f7d2d400e"
+  },
+  "phys/module_cam_bl_eddy_diff.F": {
+   "sha256": "d1f5c261770d9d89bda0e48e3c9c7f9d96ea8989271960fb66d7e3af8b7f0d68",
+   "sha256_v4.8.0": "d1f5c261770d9d89bda0e48e3c9c7f9d96ea8989271960fb66d7e3af8b7f0d68"
+  },
+  "phys/module_cam_cldwat.F": {
+   "sha256": "29e8409b5dbcc64542298b69f23bcb087536f2bad0cd1b34c1f07b3bd51878ca",
+   "sha256_v4.8.0": "29e8409b5dbcc64542298b69f23bcb087536f2bad0cd1b34c1f07b3bd51878ca"
+  },
+  "phys/module_cam_constituents.F": {
+   "sha256": "b474633636c6c85b057436c3cf4f67a218ef1bb3424827ca530b55c7b12aca80",
+   "sha256_v4.8.0": "b474633636c6c85b057436c3cf4f67a218ef1bb3424827ca530b55c7b12aca80"
+  },
+  "phys/module_cam_error_function.F": {
+   "sha256": "49fa938132d5d49da279a387315bca8ff23c5de332b939a1065e95a063371bf0",
+   "sha256_v4.8.0": "49fa938132d5d49da279a387315bca8ff23c5de332b939a1065e95a063371bf0"
+  },
+  "phys/module_cam_esinti.F": {
+   "sha256": "7f70e0dd9e384e9e1c03c08a4b6f968311e0e2ca8df8e4eaa1205ffc81b03c46",
+   "sha256_v4.8.0": "7f70e0dd9e384e9e1c03c08a4b6f968311e0e2ca8df8e4eaa1205ffc81b03c46"
+  },
+  "phys/module_cam_gffgch.F": {
+   "sha256": "8df8ef34644e32e864dcb3e77ced680d790b41467ab7f3988919133b91982128",
+   "sha256_v4.8.0": "8df8ef34644e32e864dcb3e77ced680d790b41467ab7f3988919133b91982128"
+  },
+  "phys/module_cam_molec_diff.F": {
+   "sha256": "3d3de73e13fd6a86a635cf45bba9ab265221e097e8bf10bdf5acfac9e7ef03cb",
+   "sha256_v4.8.0": "3d3de73e13fd6a86a635cf45bba9ab265221e097e8bf10bdf5acfac9e7ef03cb"
+  },
+  "phys/module_cam_mp_cldwat2m_micro.F": {
+   "sha256": "780d1c5b994fb3935b4f3ff1f4aacd38a006e52919365722ed476cbc43b5dbcb",
+   "sha256_v4.8.0": "780d1c5b994fb3935b4f3ff1f4aacd38a006e52919365722ed476cbc43b5dbcb"
+  },
+  "phys/module_cam_mp_conv_water.F": {
+   "sha256": "ebf88ec31a2002cdd65a37b15eebab38bd41f27dacce136589fee8bf3b2ecfd1",
+   "sha256_v4.8.0": "ebf88ec31a2002cdd65a37b15eebab38bd41f27dacce136589fee8bf3b2ecfd1"
+  },
+  "phys/module_cam_mp_microp_aero.F": {
+   "sha256": "63ce85f72f4dda7b9db52d620f790fd034fdaa441a4fe13bf6dd395c76a3de31",
+   "sha256_v4.8.0": "63ce85f72f4dda7b9db52d620f790fd034fdaa441a4fe13bf6dd395c76a3de31"
+  },
+  "phys/module_cam_mp_modal_aero_initialize_data_phys.F": {
+   "sha256": "b9ec15d682f5d0b56bda5475c33bff06393ac51451ca97e059a2e9ec19582d24",
+   "sha256_v4.8.0": "b9ec15d682f5d0b56bda5475c33bff06393ac51451ca97e059a2e9ec19582d24"
+  },
+  "phys/module_cam_mp_ndrop.F": {
+   "sha256": "3a27c14cb82860516f1f42c8e6efe3b5d32b53fce1d356553bc931fbd0500d7c",
+   "sha256_v4.8.0": "3a27c14cb82860516f1f42c8e6efe3b5d32b53fce1d356553bc931fbd0500d7c"
+  },
+  "phys/module_cam_mp_qneg3.F": {
+   "sha256": "50f25b6d65b4456f7cf47904dd708b23ca9c1f0ec6418aae979fe80b222a8476",
+   "sha256_v4.8.0": "50f25b6d65b4456f7cf47904dd708b23ca9c1f0ec6418aae979fe80b222a8476"
+  },
+  "phys/module_cam_physconst.F": {
+   "sha256": "20d244afe2978ec8233bdb3ad47fbd156dbabf4ba50583208c2471a9a9a3c3ea",
+   "sha256_v4.8.0": "20d244afe2978ec8233bdb3ad47fbd156dbabf4ba50583208c2471a9a9a3c3ea"
+  },
+  "phys/module_cam_shr_const_mod.F": {
+   "sha256": "abe18d9dc7a44d0b6f53e1fb2770e796a6b52343eb5ea485baa69abffdbcf8f4",
+   "sha256_v4.8.0": "abe18d9dc7a44d0b6f53e1fb2770e796a6b52343eb5ea485baa69abffdbcf8f4"
+  },
+  "phys/module_cam_shr_kind_mod.F": {
+   "sha256": "369bad7e4b528953dc4047ad38bf0b0d88120190f75541667be635c55edf1783",
+   "sha256_v4.8.0": "369bad7e4b528953dc4047ad38bf0b0d88120190f75541667be635c55edf1783"
+  },
+  "phys/module_cam_support.F": {
+   "sha256": "7b01df6c29a2d2a001cc9a7d955d49d537d45e8489d64da1753aa8b465bf2e64",
+   "sha256_v4.8.0": "7b01df6c29a2d2a001cc9a7d955d49d537d45e8489d64da1753aa8b465bf2e64"
+  },
+  "phys/module_cam_trb_mtn_stress.F": {
+   "sha256": "012535354326b6f3fe8f672d1edbe16041c20d633e5e3dc219ef1b349343a8c3",
+   "sha256_v4.8.0": "012535354326b6f3fe8f672d1edbe16041c20d633e5e3dc219ef1b349343a8c3"
+  },
+  "phys/module_cam_upper_bc.F": {
+   "sha256": "e9e380665a5dd78aa2332ce25943d777e983290a28379ce31fe936a5fb073868",
+   "sha256_v4.8.0": "e9e380665a5dd78aa2332ce25943d777e983290a28379ce31fe936a5fb073868"
+  },
+  "phys/module_cam_wv_saturation.F": {
+   "sha256": "edb4a6bc27666918f9a3272c0fced4003e794a8ae22f755e2f640d875ade37c3",
+   "sha256_v4.8.0": "edb4a6bc27666918f9a3272c0fced4003e794a8ae22f755e2f640d875ade37c3"
+  },
+  "phys/module_cu_bmj.F": {
+   "sha256": "62d2805aae152b58093d07100000b581458b536164d90f9cecc27a157e2bd92f",
+   "sha256_v4.8.0": "62d2805aae152b58093d07100000b581458b536164d90f9cecc27a157e2bd92f"
+  },
+  "phys/module_cu_camzm.F": {
+   "sha256": "baab07991da90677e3dff4abb1c66022048b9caefab0d3f6f74b320db7cdda7b",
+   "sha256_v4.8.0": "baab07991da90677e3dff4abb1c66022048b9caefab0d3f6f74b320db7cdda7b"
+  },
+  "phys/module_cu_camzm_driver.F": {
+   "sha256": "a77aa3716ad10a8ef0264d58f220c5df92c093c9d12618dd4d052273b756eb3e",
+   "sha256_v4.8.0": "a77aa3716ad10a8ef0264d58f220c5df92c093c9d12618dd4d052273b756eb3e"
+  },
+  "phys/module_cu_g3.F": {
+   "sha256": "68089efd157753e8d050c19d4e65f711838147381639014f5f0be40576a337e9",
+   "sha256_v4.8.0": "68089efd157753e8d050c19d4e65f711838147381639014f5f0be40576a337e9"
+  },
+  "phys/module_cu_gd.F": {
+   "sha256": "2120494257cb7b580926af548a933d95e3a67c5bc422bb0a322cc46ef76c5f16",
+   "sha256_v4.8.0": "14948e3b6e82ba2d1529c2b31ff89c2e40e1596018d01898123bc2baa8eb81df",
+   "changes": [
+    "P5"
+   ]
+  },
+  "phys/module_cu_kf.F": {
+   "sha256": "8042c90f7b7f5b14b36acd809f4f310b8fc3f75101039169e602e7df3b5d2f61",
+   "sha256_v4.8.0": "8042c90f7b7f5b14b36acd809f4f310b8fc3f75101039169e602e7df3b5d2f61"
+  },
+  "phys/module_cu_kfcup.F": {
+   "sha256": "d5773c66c9e353b7838bc14e59d66905091425ce449e84cea58f14e7725b074c",
+   "sha256_v4.8.0": "d5773c66c9e353b7838bc14e59d66905091425ce449e84cea58f14e7725b074c"
+  },
+  "phys/module_cu_kfeta.F": {
+   "sha256": "e6376c2d85c45470f49d545b25d513b5ec111bf36b87beebc740bf42825c6e5f",
+   "sha256_v4.8.0": "e6376c2d85c45470f49d545b25d513b5ec111bf36b87beebc740bf42825c6e5f"
+  },
+  "phys/module_cu_ksas.F": {
+   "sha256": "84d88fe79c3aba7c299d0efaee216c596021c9659b445dd8d3365c5799a48854",
+   "sha256_v4.8.0": "84d88fe79c3aba7c299d0efaee216c596021c9659b445dd8d3365c5799a48854"
+  },
+  "phys/module_cu_mskf.F": {
+   "sha256": "4bca54b294def08ffc98ef69a30650c943e2c394f34802e75e50c7f1a2896fcb",
+   "sha256_v4.8.0": "4bca54b294def08ffc98ef69a30650c943e2c394f34802e75e50c7f1a2896fcb"
+  },
+  "phys/module_cu_nsas.F": {
+   "sha256": "092cfc6685a7006ecf9200b0dbb9296f0e7bb6af11e46bbbd92a843a4d1b911a",
+   "sha256_v4.8.0": "092cfc6685a7006ecf9200b0dbb9296f0e7bb6af11e46bbbd92a843a4d1b911a"
+  },
+  "phys/module_cu_ntiedtke.F": {
+   "sha256": "447406d1550d4095e4e6f129ee74a7ec0ccdebd21383ba0cc6fe3d282ac58d2f",
+   "sha256_v4.8.0": "447406d1550d4095e4e6f129ee74a7ec0ccdebd21383ba0cc6fe3d282ac58d2f"
+  },
+  "phys/module_cu_osas.F": {
+   "sha256": "f8cc3fbd6277cf886bcdffa9e8df7623884dfb1886acdbfd0d2471329c3cfd50",
+   "sha256_v4.8.0": "f8cc3fbd6277cf886bcdffa9e8df7623884dfb1886acdbfd0d2471329c3cfd50"
+  },
+  "phys/module_cu_sas.F": {
+   "sha256": "a59026ff2061293ce657e7d56fdcbe2381a615721e2801616997cd3f96456158",
+   "sha256_v4.8.0": "a59026ff2061293ce657e7d56fdcbe2381a615721e2801616997cd3f96456158"
+  },
+  "phys/module_cu_tiedtke.F": {
+   "sha256": "3514aaaaf6084edc0f6a6b2097e34607562f0b6f12934cc3c675a9e651566999",
+   "sha256_v4.8.0": "3514aaaaf6084edc0f6a6b2097e34607562f0b6f12934cc3c675a9e651566999"
+  },
+  "phys/module_cumulus_driver.F": {
+   "sha256": "2cab31622b43b151265977e561a9dfcb4c7ef6bd9c7a7f0f8308ceffc2a56dfc",
+   "sha256_v4.8.0": "2cab31622b43b151265977e561a9dfcb4c7ef6bd9c7a7f0f8308ceffc2a56dfc"
+  },
+  "phys/module_data_cam_mam_aero.F": {
+   "sha256": "f4b79ab82a813a55efacea03f73391549367f46caf2045b88bbb98f00cde71c2",
+   "sha256_v4.8.0": "f4b79ab82a813a55efacea03f73391549367f46caf2045b88bbb98f00cde71c2"
+  },
+  "phys/module_data_gocart_dust.F": {
+   "sha256": "8694100875645b54a58bcff38d462ad3c9fd115261fb39941358466c84b62329",
+   "sha256_v4.8.0": "8694100875645b54a58bcff38d462ad3c9fd115261fb39941358466c84b62329"
+  },
+  "phys/module_diag_afwa.F": {
+   "sha256": "c1e87739334987c20b143cd1136f9614040f475fb746feee96ee3e304ded0835",
+   "sha256_v4.8.0": "c1e87739334987c20b143cd1136f9614040f475fb746feee96ee3e304ded0835"
+  },
+  "phys/module_diag_cl.F": {
+   "sha256": "2ec1e964a9ae94244d513fac38e0ce9a33212b21ca232fcc01de890afd152a54",
+   "sha256_v4.8.0": "2ec1e964a9ae94244d513fac38e0ce9a33212b21ca232fcc01de890afd152a54"
+  },
+  "phys/module_diag_functions.F": {
+   "sha256": "86690bdbcd3101fec71c4859abe666b72441bd856217214cd3088c1ff76c14a7",
+   "sha256_v4.8.0": "86690bdbcd3101fec71c4859abe666b72441bd856217214cd3088c1ff76c14a7"
+  },
+  "phys/module_diag_hailcast.F": {
+   "sha256": "21f99c1b9200a18c7ba4b0bdb07fa48941d5e2d3df0c21f55e1792b98ee18920",
+   "sha256_v4.8.0": "8fe1d76319ddcb63473752165485ca3cd2e30e62545620d16a2ee0c9f2721f14",
+   "changes": [
+    "P6"
+   ]
+  },
+  "phys/module_diag_misc.F": {
+   "sha256": "5245b541156a019c6e6faafcf84539997416a01e5b9b197b643f473464af6c83",
+   "sha256_v4.8.0": "5245b541156a019c6e6faafcf84539997416a01e5b9b197b643f473464af6c83"
+  },
+  "phys/module_diag_nwp.F": {
+   "sha256": "b4b5a6a713fd525a2887e192bee176b17945f2a3c313758f98cbebb08dbd03f1",
+   "sha256_v4.8.0": "b4b5a6a713fd525a2887e192bee176b17945f2a3c313758f98cbebb08dbd03f1"
+  },
+  "phys/module_diag_pld.F": {
+   "sha256": "b3e4669b5457f6a33f62355104d169e87784994553e3e4eb63947240fe7d5018",
+   "sha256_v4.8.0": "b3e4669b5457f6a33f62355104d169e87784994553e3e4eb63947240fe7d5018"
+  },
+  "phys/module_diag_rasm.F": {
+   "sha256": "1bd86fd585eebce07ce49ceeab7ec19584a963ded694eaf598ae2b29abd742d2",
+   "sha256_v4.8.0": "1bd86fd585eebce07ce49ceeab7ec19584a963ded694eaf598ae2b29abd742d2"
+  },
+  "phys/module_diag_refl.F": {
+   "sha256": "bf750f2a552e525496ef960c51534c79ba8ba10695bb122ca263008387f9e23e",
+   "sha256_v4.8.0": "bf750f2a552e525496ef960c51534c79ba8ba10695bb122ca263008387f9e23e"
+  },
+  "phys/module_diag_solar.F": {
+   "sha256": "95fca753e8874b8b74da533317771a840f0d9694290a2dab1879c9756128adf6",
+   "sha256_v4.8.0": "95fca753e8874b8b74da533317771a840f0d9694290a2dab1879c9756128adf6"
+  },
+  "phys/module_diag_trad_fields.F": {
+   "sha256": "4a66c59080424a21a5c1a6d2b3656e62a04546715e15ea01922ba3ad64cfbf98",
+   "sha256_v4.8.0": "4a66c59080424a21a5c1a6d2b3656e62a04546715e15ea01922ba3ad64cfbf98"
+  },
+  "phys/module_diag_zld.F": {
+   "sha256": "cbf1332046d120b33e2e47f4862758d5b59fe85764273556c4d42ede1d096952",
+   "sha256_v4.8.0": "cbf1332046d120b33e2e47f4862758d5b59fe85764273556c4d42ede1d096952"
+  },
+  "phys/module_diagnostics_driver.F": {
+   "sha256": "9dadc4bf609f54cb267e00e281a203d2d5b18415c0860fd26d795541be8ffcd8",
+   "sha256_v4.8.0": "9dadc4bf609f54cb267e00e281a203d2d5b18415c0860fd26d795541be8ffcd8"
+  },
+  "phys/module_dust_emis.F": {
+   "sha256": "29d778b02a8b776e96b599fbd4dad6c0451860b17371092dd7bccc0273f4fd2f",
+   "sha256_v4.8.0": "29d778b02a8b776e96b599fbd4dad6c0451860b17371092dd7bccc0273f4fd2f"
+  },
+  "phys/module_fdda_psufddagd.F": {
+   "sha256": "1d8aaf15a102ffe30ef25c96663c237cdfc16905b9c002064e9b8b387bc10648",
+   "sha256_v4.8.0": "1d8aaf15a102ffe30ef25c96663c237cdfc16905b9c002064e9b8b387bc10648"
+  },
+  "phys/module_fdda_spnudging.F": {
+   "sha256": "51fac7bd84e80675743e590373293ea946b058fc708593c8fc5a7aecb2b16bfa",
+   "sha256_v4.8.0": "51fac7bd84e80675743e590373293ea946b058fc708593c8fc5a7aecb2b16bfa"
+  },
+  "phys/module_fddagd_driver.F": {
+   "sha256": "7d5432fa88b3ae7d8ca78d9c7abaf02232c3ed23ca1a3e1bdfb799879c1b3692",
+   "sha256_v4.8.0": "7d5432fa88b3ae7d8ca78d9c7abaf02232c3ed23ca1a3e1bdfb799879c1b3692"
+  },
+  "phys/module_fddaobs_driver.F": {
+   "sha256": "fb7c6a73a443555a7cd2b0dd51a4269a0a9541d239a3a216a2e2385d99fa182a",
+   "sha256_v4.8.0": "fb7c6a73a443555a7cd2b0dd51a4269a0a9541d239a3a216a2e2385d99fa182a"
+  },
+  "phys/module_fddaobs_rtfdda.F": {
+   "sha256": "1ca4065b3aba0f926a7ded65f9eb92e1c6a7da678401271c9441bc93dda946c0",
+   "sha256_v4.8.0": "1ca4065b3aba0f926a7ded65f9eb92e1c6a7da678401271c9441bc93dda946c0"
+  },
+  "phys/module_firebrand_spotting.F": {
+   "sha256": "e68e4b4ddbde6fdc117163e3b396cff3a11bfc7f2ac586de1525707ba82092e4",
+   "sha256_v4.8.0": "e68e4b4ddbde6fdc117163e3b396cff3a11bfc7f2ac586de1525707ba82092e4"
+  },
+  "phys/module_firebrand_spotting_mpi.F": {
+   "sha256": "916bb9cd7b4405a49a4d1bcd4ae0adf98c33e568d55edf7956d1fb2afd4b3a21",
+   "sha256_v4.8.0": "916bb9cd7b4405a49a4d1bcd4ae0adf98c33e568d55edf7956d1fb2afd4b3a21"
+  },
+  "phys/module_fr_fire_atm.F": {
+   "sha256": "61583834842f4d382c7da3738b8a044f83b224f1d75cd0c6dfe1f2072e2fa272",
+   "sha256_v4.8.0": "61583834842f4d382c7da3738b8a044f83b224f1d75cd0c6dfe1f2072e2fa272"
+  },
+  "phys/module_fr_fire_core.F": {
+   "sha256": "04abcac229be6e9334440d21479c56294442a171fa6dfd2557bf190919494191",
+   "sha256_v4.8.0": "7679945766e20219934daacfa4b174ffea9cabdd442ccd347ccde5a3afda7bd2",
+   "changes": [
+    "P15"
+   ]
+  },
+  "phys/module_fr_fire_driver.F": {
+   "sha256": "7662f29bb003697d08ccee585e272a3ed7362edc73bcef5ea8dc95d100d9e578",
+   "sha256_v4.8.0": "7662f29bb003697d08ccee585e272a3ed7362edc73bcef5ea8dc95d100d9e578"
+  },
+  "phys/module_fr_fire_driver_wrf.F": {
+   "sha256": "de3e958071ada8522711ea2ca326a3d3dbf58f1f7a0df675485fff4745cbffb0",
+   "sha256_v4.8.0": "de3e958071ada8522711ea2ca326a3d3dbf58f1f7a0df675485fff4745cbffb0"
+  },
+  "phys/module_fr_fire_model.F": {
+   "sha256": "f2e3932e088076508a8c7284dc5395770b93b8eb5ba5cccbb1a56775dddd184b",
+   "sha256_v4.8.0": "f2e3932e088076508a8c7284dc5395770b93b8eb5ba5cccbb1a56775dddd184b"
+  },
+  "phys/module_fr_fire_phys.F": {
+   "sha256": "8185c11a706983db747c7e5059227d05e02185fa58f030126f3d07723acbab14",
+   "sha256_v4.8.0": "8185c11a706983db747c7e5059227d05e02185fa58f030126f3d07723acbab14"
+  },
+  "phys/module_fr_fire_util.F": {
+   "sha256": "ab9499f12b305257fd62a0c76f299ee308b7fabc98c6fae073ba25f132ec8d27",
+   "sha256_v4.8.0": "ab9499f12b305257fd62a0c76f299ee308b7fabc98c6fae073ba25f132ec8d27"
+  },
+  "phys/module_gfs_funcphys.F": {
+   "sha256": "0d43dccf0510bd49ef07f81c357e4b96fd9391604f7c14d7e3cf8700ff383e74",
+   "sha256_v4.8.0": "0d43dccf0510bd49ef07f81c357e4b96fd9391604f7c14d7e3cf8700ff383e74"
+  },
+  "phys/module_gfs_machine.F": {
+   "sha256": "300ee4f75663e89d34c8a9b8733cc07a5dd48c3d973da019d31cb76524babe25",
+   "sha256_v4.8.0": "300ee4f75663e89d34c8a9b8733cc07a5dd48c3d973da019d31cb76524babe25"
+  },
+  "phys/module_gfs_physcons.F": {
+   "sha256": "2b8ef99663ba62748b57c7002f5e5b8c9338f2a825c1d32c113bd4e3bff2eb52",
+   "sha256_v4.8.0": "2b8ef99663ba62748b57c7002f5e5b8c9338f2a825c1d32c113bd4e3bff2eb52"
+  },
+  "phys/module_irrigation.F": {
+   "sha256": "2b0bdac3d24d2fae8a943bb97488945dce89ebf87200880f4c15c85457162d8e",
+   "sha256_v4.8.0": "2b0bdac3d24d2fae8a943bb97488945dce89ebf87200880f4c15c85457162d8e"
+  },
+  "phys/module_lightning_driver.F": {
+   "sha256": "38e8d118aedc201730aa1bd55a55ce3d3eeebd873f5bd4d83e90147346be1c79",
+   "sha256_v4.8.0": "38e8d118aedc201730aa1bd55a55ce3d3eeebd873f5bd4d83e90147346be1c79"
+  },
+  "phys/module_ltng_cpmpr92z.F": {
+   "sha256": "6c1ea02184b8a7e8d4063513b6c6ef773525387af69610f8560206e7d4679cf5",
+   "sha256_v4.8.0": "6c1ea02184b8a7e8d4063513b6c6ef773525387af69610f8560206e7d4679cf5"
+  },
+  "phys/module_ltng_crmpr92.F": {
+   "sha256": "3bee154bb5f665fa2642453541aa9aab68803b115a47c1b7af5bf2af6e77fee9",
+   "sha256_v4.8.0": "3bee154bb5f665fa2642453541aa9aab68803b115a47c1b7af5bf2af6e77fee9"
+  },
+  "phys/module_ltng_iccg.F": {
+   "sha256": "686e20715be6b8b5e0c48821b9604fe154ce80cf1009ba976f143412dd03ce7c",
+   "sha256_v4.8.0": "686e20715be6b8b5e0c48821b9604fe154ce80cf1009ba976f143412dd03ce7c"
+  },
+  "phys/module_ltng_lpi.F": {
+   "sha256": "77ad8e7b5146f854e529db41033641ef99bae2b86581f33cf4d8fe197b1b472d",
+   "sha256_v4.8.0": "77ad8e7b5146f854e529db41033641ef99bae2b86581f33cf4d8fe197b1b472d"
+  },
+  "phys/module_ltng_pe.F": {
+   "sha256": "370a84677e13222856dcc39fbbc88c15ef41b2d71c0c61493ed79cc96c8cad9b",
+   "sha256_v4.8.0": "370a84677e13222856dcc39fbbc88c15ef41b2d71c0c61493ed79cc96c8cad9b"
+  },
+  "phys/module_ltng_strokes.F": {
+   "sha256": "c55291d5d7c46badb491feda30573af653867773f9f68424b5bd4420c29251f6",
+   "sha256_v4.8.0": "c55291d5d7c46badb491feda30573af653867773f9f68424b5bd4420c29251f6"
+  },
+  "phys/module_madwrf.F": {
+   "sha256": "745e020af31af12e1cbe4b391d78f5f32c23d2fb6037d7c44e3b190a18e15948",
+   "sha256_v4.8.0": "745e020af31af12e1cbe4b391d78f5f32c23d2fb6037d7c44e3b190a18e15948"
+  },
+  "phys/module_microphysics_driver.F": {
+   "sha256": "c0e6f7da92336b37446b43fc99c9f31a4bb6c5273ae384be8020ed853cdf067c",
+   "sha256_v4.8.0": "6df96b2919b43971fca136e8a7aefe1278e18e9c6cb3393b2dd7abcb54865867",
+   "changes": [
+    "W2"
+   ]
+  },
+  "phys/module_microphysics_zero_out.F": {
+   "sha256": "a57268701b424b07a604ce93f733314183a29bfb39e7e6283f92f8668808fa4f",
+   "sha256_v4.8.0": "a57268701b424b07a604ce93f733314183a29bfb39e7e6283f92f8668808fa4f"
+  },
+  "phys/module_mixactivate.F": {
+   "sha256": "d5192f37a45a2b4084165789bdff827813043dd8d16db0958d9c652132c6e9a1",
+   "sha256_v4.8.0": "d5192f37a45a2b4084165789bdff827813043dd8d16db0958d9c652132c6e9a1"
+  },
+  "phys/module_mp_SBM_polar_radar.F": {
+   "sha256": "dffddfbbca15b575aa2948482f34ce996896657b2b0809d3e3746c1c5a1bdf40",
+   "sha256_v4.8.0": "dffddfbbca15b575aa2948482f34ce996896657b2b0809d3e3746c1c5a1bdf40"
+  },
+  "phys/module_mp_cammgmp_driver.F": {
+   "sha256": "39d666c592cfced2e25449f5e50e69d7d8a972cd765bd39d0fcdfab3b2ab9361",
+   "sha256_v4.8.0": "39d666c592cfced2e25449f5e50e69d7d8a972cd765bd39d0fcdfab3b2ab9361"
+  },
+  "phys/module_mp_etanew.F": {
+   "sha256": "566a18b529a403f7f56bc9f8bcd94ea5a54521626398b6771d71139c11cfcefe",
+   "sha256_v4.8.0": "566a18b529a403f7f56bc9f8bcd94ea5a54521626398b6771d71139c11cfcefe"
+  },
+  "phys/module_mp_fast_sbm.F": {
+   "sha256": "fd72158202a98d4ad618ebb608eeadffd50852a9875f8bfd9bb8ad63c15f1a2e",
+   "sha256_v4.8.0": "fd72158202a98d4ad618ebb608eeadffd50852a9875f8bfd9bb8ad63c15f1a2e"
+  },
+  "phys/module_mp_fer_hires.F": {
+   "sha256": "69e937f0f10b4964e3c6742cb852ef68df451dcdeb05ee82451c23a15bb72a57",
+   "sha256_v4.8.0": "69e937f0f10b4964e3c6742cb852ef68df451dcdeb05ee82451c23a15bb72a57"
+  },
+  "phys/module_mp_gsfcgce.F": {
+   "sha256": "43e841f78e97a35e261f7d91d83c6ad54c7bf30a74625e933603d2e8d6126ef1",
+   "sha256_v4.8.0": "43e841f78e97a35e261f7d91d83c6ad54c7bf30a74625e933603d2e8d6126ef1"
+  },
+  "phys/module_mp_gsfcgce_4ice_nuwrf.F": {
+   "sha256": "79b782f6832ce45c0a13f463841d1820cabc4de0049ac60b5c2a23d24389cb8b",
+   "sha256_v4.8.0": "79b782f6832ce45c0a13f463841d1820cabc4de0049ac60b5c2a23d24389cb8b"
+  },
+  "phys/module_mp_jensen_ishmael.F": {
+   "sha256": "4cefa1a2f28c2bc36061100bd4bef10371643ccf1e80da43be96f8ba31843326",
+   "sha256_v4.8.0": "4cefa1a2f28c2bc36061100bd4bef10371643ccf1e80da43be96f8ba31843326"
+  },
+  "phys/module_mp_kessler.F": {
+   "sha256": "56935bc95cc72084a37cdaf1b680a6015806daccc48feaf4b3cc6f167653ebfc",
+   "sha256_v4.8.0": "56935bc95cc72084a37cdaf1b680a6015806daccc48feaf4b3cc6f167653ebfc"
+  },
+  "phys/module_mp_lin.F": {
+   "sha256": "bb9d0b99ab4ecd5ed6ce566e20f8f0b74b496410f47b4a9211a51501224f4b69",
+   "sha256_v4.8.0": "bb9d0b99ab4ecd5ed6ce566e20f8f0b74b496410f47b4a9211a51501224f4b69"
+  },
+  "phys/module_mp_milbrandt2mom.F": {
+   "sha256": "76d11c00976f3c7dac30ff6ebb3efac1698bf43c13131b3aae43e464f22d23e5",
+   "sha256_v4.8.0": "76d11c00976f3c7dac30ff6ebb3efac1698bf43c13131b3aae43e464f22d23e5"
+  },
+  "phys/module_mp_morr_two_moment.F": {
+   "sha256": "2dcd1c70127ea57c8a2437baf2b8a2388b1722e4d4ead9411834946439b8c273",
+   "sha256_v4.8.0": "2dcd1c70127ea57c8a2437baf2b8a2388b1722e4d4ead9411834946439b8c273"
+  },
+  "phys/module_mp_morr_two_moment_aero.F": {
+   "sha256": "d512aa16ad862b04c7278540a207a56aa10955e052bd9b9bc870e9a4f0812180",
+   "sha256_v4.8.0": "d512aa16ad862b04c7278540a207a56aa10955e052bd9b9bc870e9a4f0812180"
+  },
+  "phys/module_mp_nssl_2mom.F": {
+   "sha256": "40af70825c50d9cc3333573e348bcd0d3e3f16d50d816b1949f0c13b09b8e6a2",
+   "sha256_v4.8.0": "29f42e76fbeca027a3ffb2ac805b148aaa1425c7f99ed1d8f19a90ebc1d015f8",
+   "changes": [
+    "P8"
+   ]
+  },
+  "phys/module_mp_ntu.F": {
+   "sha256": "34d0833287403aa03e7da4d5d5714e9f9ed7ea2ec8c27642538d6f39c04bab82",
+   "sha256_v4.8.0": "e94adbcb0a42c74c51674d47fa6b7d73697b5ec89dcd31c1f877ab00e29af7de",
+   "changes": [
+    "P9"
+   ]
+  },
+  "phys/module_mp_p3.F": {
+   "sha256": "716950a3081ec4e338c9a918d26ec80f7ee0e40b3e284283f070423237f6a3c6",
+   "sha256_v4.8.0": "716950a3081ec4e338c9a918d26ec80f7ee0e40b3e284283f070423237f6a3c6"
+  },
+  "phys/module_mp_radar.F": {
+   "sha256": "fa5e06a4d64bbc32089a1357bfa5c57e6c682e5b68c706842698c2b0f292e68e",
+   "sha256_v4.8.0": "fa5e06a4d64bbc32089a1357bfa5c57e6c682e5b68c706842698c2b0f292e68e"
+  },
+  "phys/module_mp_sbu_ylin.F": {
+   "sha256": "d06a0b8fa01465c09ac218f94e2afc409b4ef3a65cf5782fc79cbe8a9d25e06f",
+   "sha256_v4.8.0": "d06a0b8fa01465c09ac218f94e2afc409b4ef3a65cf5782fc79cbe8a9d25e06f"
+  },
+  "phys/module_mp_thompson.F": {
+   "sha256": "fabf19e2a9073cff886e882b187080bfdf089d3fd40c0fce1d19bc93b1e5e802",
+   "sha256_v4.8.0": "fabf19e2a9073cff886e882b187080bfdf089d3fd40c0fce1d19bc93b1e5e802"
+  },
+  "phys/module_mp_udm.F": {
+   "sha256": "287c62dd42c3180c44719ca1ae38c110e34b3a627ef67091582dc7dff641c5b0",
+   "sha256_v4.8.0": "c76e37d6ad81dd0fd86064857fc8a352bc9075b1370262713a6b4abb53ef50b4",
+   "changes": [
+    "P10"
+   ]
+  },
+  "phys/module_mp_wdm5.F": {
+   "sha256": "367f4f38ba9b16c67f11e53489c1c0cf4078f1085ba77f08044a69a040f7d042",
+   "sha256_v4.8.0": "367f4f38ba9b16c67f11e53489c1c0cf4078f1085ba77f08044a69a040f7d042"
+  },
+  "phys/module_mp_wdm6.F": {
+   "sha256": "ad8935ffa2059f36f7419d7c0d7ab79311798cde4e27566afe0e4cf8fed4e293",
+   "sha256_v4.8.0": "ad8935ffa2059f36f7419d7c0d7ab79311798cde4e27566afe0e4cf8fed4e293"
+  },
+  "phys/module_mp_wdm7.F": {
+   "sha256": "816c2325d7055fb6197da35758d11d02d8aee88d9bad1e86ddfe9009e732b5be",
+   "sha256_v4.8.0": "37f6245126d0c3f37aeea1d949185ea9efa935ff5b73155030221643da96b5ac",
+   "changes": [
+    "P11"
+   ]
+  },
+  "phys/module_mp_wsm3.F": {
+   "sha256": "cad07480fd611fe6486b59f89db66f061f629a3bb09d1ce81846cbd8a037236e",
+   "sha256_v4.8.0": "cad07480fd611fe6486b59f89db66f061f629a3bb09d1ce81846cbd8a037236e"
+  },
+  "phys/module_mp_wsm5.F": {
+   "sha256": "5849cbe045213c0ce6c85fd484f1fa2cbe63e16403243d0c4016bed0ac4ed3d6",
+   "sha256_v4.8.0": "5849cbe045213c0ce6c85fd484f1fa2cbe63e16403243d0c4016bed0ac4ed3d6"
+  },
+  "phys/module_mp_wsm6.F": {
+   "sha256": "e3a64726db04e84a57eba19dc6976790c62d9db12b65f3480f8becc0f80a4add",
+   "sha256_v4.8.0": "e3a64726db04e84a57eba19dc6976790c62d9db12b65f3480f8becc0f80a4add"
+  },
+  "phys/module_mp_wsm6r.F": {
+   "sha256": "d81c2f5c13792e6d3ec5c2531d2a25db7269d6e45c1cce691e09f61caf5b5ac8",
+   "sha256_v4.8.0": "d81c2f5c13792e6d3ec5c2531d2a25db7269d6e45c1cce691e09f61caf5b5ac8"
+  },
+  "phys/module_mp_wsm7.F": {
+   "sha256": "2124461e8fc75eba737cb8333a034a2f539b9588837966fa661d4c109d3d1dc6",
+   "sha256_v4.8.0": "2124461e8fc75eba737cb8333a034a2f539b9588837966fa661d4c109d3d1dc6"
+  },
+  "phys/module_pbl_driver.F": {
+   "sha256": "a4e15dbe0f3b39defb18b6052a9b134f7452a85b3bee4736079e430fe70d0551",
+   "sha256_v4.8.0": "a4e15dbe0f3b39defb18b6052a9b134f7452a85b3bee4736079e430fe70d0551"
+  },
+  "phys/module_physics_addtendc.F": {
+   "sha256": "80e0746ab83c1c12585f781580bbdf98ebf253bb7ae2fe828379ab971dfad8cc",
+   "sha256_v4.8.0": "51f0b8f84c2ea7c4f436b3ad996ee22a3ea48c788fc888076695576d24a1e1af",
+   "changes": [
+    "W2"
+   ]
+  },
+  "phys/module_physics_init.F": {
+   "sha256": "df49fe763e3458f5c01a6e29504fd77bb2419d267527a89092ae9623fb664ff1",
+   "sha256_v4.8.0": "df49fe763e3458f5c01a6e29504fd77bb2419d267527a89092ae9623fb664ff1"
+  },
+  "phys/module_progtm.F": {
+   "sha256": "6d6c411638011f92f21764418bc7993ac7eefe8f05cfe79e0df05a5ab58d1b47",
+   "sha256_v4.8.0": "6d6c411638011f92f21764418bc7993ac7eefe8f05cfe79e0df05a5ab58d1b47"
+  },
+  "phys/module_ra_aerosol.F": {
+   "sha256": "57c7e7e50a2be0a6ab169fa376da077b2b4251bf9c20fa6a06446934379c8870",
+   "sha256_v4.8.0": "57c7e7e50a2be0a6ab169fa376da077b2b4251bf9c20fa6a06446934379c8870"
+  },
+  "phys/module_ra_cam.F": {
+   "sha256": "b0484d38338d9c7925d8011889f5a57280870febe451cfdce843b1e9ae669e32",
+   "sha256_v4.8.0": "b0484d38338d9c7925d8011889f5a57280870febe451cfdce843b1e9ae669e32"
+  },
+  "phys/module_ra_cam_support.F": {
+   "sha256": "005291e1c1da8d58045fbdedbfe0eb7309a7c6f8b5e5670816a95ea6028df6aa",
+   "sha256_v4.8.0": "005291e1c1da8d58045fbdedbfe0eb7309a7c6f8b5e5670816a95ea6028df6aa"
+  },
+  "phys/module_ra_clWRF_support.F": {
+   "sha256": "b249f472550dd2d8e594fb5d2474e280f423e5e339a9ff393d42c261098d5182",
+   "sha256_v4.8.0": "b249f472550dd2d8e594fb5d2474e280f423e5e339a9ff393d42c261098d5182"
+  },
+  "phys/module_ra_eclipse.F": {
+   "sha256": "c18f6bebf1f8090f1dd36a95c3513824de4f522f3f35c83a96cc987eaf618381",
+   "sha256_v4.8.0": "c18f6bebf1f8090f1dd36a95c3513824de4f522f3f35c83a96cc987eaf618381"
+  },
+  "phys/module_ra_effective_radius.F": {
+   "sha256": "67a09fa42b2d00ca76d8aa65405a5f1891a7ce21d859c579d577679de00032a5",
+   "sha256_v4.8.0": "67a09fa42b2d00ca76d8aa65405a5f1891a7ce21d859c579d577679de00032a5"
+  },
+  "phys/module_ra_farms.F": {
+   "sha256": "1b9e060d71dd7218c39e5a5724a7886307507a7cb85d7db33cd3ed52c0034a60",
+   "sha256_v4.8.0": "1b9e060d71dd7218c39e5a5724a7886307507a7cb85d7db33cd3ed52c0034a60"
+  },
+  "phys/module_ra_flg.F": {
+   "sha256": "c4977cdf2ddf3f2279c9be7e1fc659ef23bbb37376e5cf11f9a98a73d33b0266",
+   "sha256_v4.8.0": "c4977cdf2ddf3f2279c9be7e1fc659ef23bbb37376e5cf11f9a98a73d33b0266"
+  },
+  "phys/module_ra_gfdleta.F": {
+   "sha256": "b6b2e9e006eff0b61f637a30e31a70f21b3c2bd8275182acb3c49aaf3fac0b4a",
+   "sha256_v4.8.0": "b6b2e9e006eff0b61f637a30e31a70f21b3c2bd8275182acb3c49aaf3fac0b4a"
+  },
+  "phys/module_ra_goddard.F": {
+   "sha256": "0917531726cbed5a128e05c45e70ee292c209dbcd1ae2bad17db6e46b8d3a5ad",
+   "sha256_v4.8.0": "0917531726cbed5a128e05c45e70ee292c209dbcd1ae2bad17db6e46b8d3a5ad"
+  },
+  "phys/module_ra_gsfcsw.F": {
+   "sha256": "da257cf060c385c3aa4d6c3a737ec8c10773bd52034786d954bab0a0dc290766",
+   "sha256_v4.8.0": "da257cf060c385c3aa4d6c3a737ec8c10773bd52034786d954bab0a0dc290766"
+  },
+  "phys/module_ra_hs.F": {
+   "sha256": "7a83582205dedd31071a8fbb3307e227be7e244f282db278c84368e6ae232e3e",
+   "sha256_v4.8.0": "7a83582205dedd31071a8fbb3307e227be7e244f282db278c84368e6ae232e3e"
+  },
+  "phys/module_ra_rrtm.F": {
+   "sha256": "9f54e70db6258a521921d89ada864857a45c7b0cd134e25f498350f5aa49428e",
+   "sha256_v4.8.0": "9f54e70db6258a521921d89ada864857a45c7b0cd134e25f498350f5aa49428e"
+  },
+  "phys/module_ra_rrtmg_aero_optical_util_cmaq.F": {
+   "sha256": "0c721b0d0195ddc62f36a84987f121aad12408f29bec91ca29e667254d350d8e",
+   "sha256_v4.8.0": "0c721b0d0195ddc62f36a84987f121aad12408f29bec91ca29e667254d350d8e"
+  },
+  "phys/module_ra_rrtmg_lw.F": {
+   "sha256": "c7a5238612aa8a4213c8d3af6708ec6a5248e6701e19758a80e563905d306de3",
+   "sha256_v4.8.0": "c7a5238612aa8a4213c8d3af6708ec6a5248e6701e19758a80e563905d306de3"
+  },
+  "phys/module_ra_rrtmg_lwk.F": {
+   "sha256": "088cb30e7b113ac97e300592ed15159b183421029c453ab61974fdb6c9ff007f",
+   "sha256_v4.8.0": "088cb30e7b113ac97e300592ed15159b183421029c453ab61974fdb6c9ff007f"
+  },
+  "phys/module_ra_rrtmg_sw.F": {
+   "sha256": "7f8af1da0ca1d25ce784a917bc68600300a7c569881c57e7de8501cd53496b59",
+   "sha256_v4.8.0": "7f8af1da0ca1d25ce784a917bc68600300a7c569881c57e7de8501cd53496b59"
+  },
+  "phys/module_ra_rrtmg_swk.F": {
+   "sha256": "30f9eb5f03f5208517b91851ddc7ee205733c56e462b82779126c7a7bd3b59eb",
+   "sha256_v4.8.0": "30f9eb5f03f5208517b91851ddc7ee205733c56e462b82779126c7a7bd3b59eb"
+  },
+  "phys/module_ra_sw.F": {
+   "sha256": "cd7e1c89a962c9b62f042a8f24ee7d8892c0428866f7a44ec36df0d06705a4c0",
+   "sha256_v4.8.0": "cd7e1c89a962c9b62f042a8f24ee7d8892c0428866f7a44ec36df0d06705a4c0"
+  },
+  "phys/module_radiation_driver.F": {
+   "sha256": "5e92bef51e06fb40c6f7191ec93c898b7a5144dc8df2d465b610651d6f6bde1d",
+   "sha256_v4.8.0": "5e92bef51e06fb40c6f7191ec93c898b7a5144dc8df2d465b610651d6f6bde1d"
+  },
+  "phys/module_sf_3dpwp.F": {
+   "sha256": "74956896174043bbfbaf6bb9a65b2da452c36eefd7d431462b83c1fdef5dce4c",
+   "sha256_v4.8.0": "74956896174043bbfbaf6bb9a65b2da452c36eefd7d431462b83c1fdef5dce4c"
+  },
+  "phys/module_sf_bem.F": {
+   "sha256": "7bc761ee592feadbaeb974b4271b956044eb02c5a4f3bf0e77af4fbabf0de8eb",
+   "sha256_v4.8.0": "7bc761ee592feadbaeb974b4271b956044eb02c5a4f3bf0e77af4fbabf0de8eb"
+  },
+  "phys/module_sf_bep.F": {
+   "sha256": "c51ddd86871f81d5f132e63ddab2240e23886891356a7964debd4eafda9e500f",
+   "sha256_v4.8.0": "c51ddd86871f81d5f132e63ddab2240e23886891356a7964debd4eafda9e500f"
+  },
+  "phys/module_sf_bep_bem.F": {
+   "sha256": "42fe129dde0ccba24b84a64c1393e582204a7ced938568527beeb0c4f2a20b36",
+   "sha256_v4.8.0": "42fe129dde0ccba24b84a64c1393e582204a7ced938568527beeb0c4f2a20b36"
+  },
+  "phys/module_sf_fogdes.F": {
+   "sha256": "a44dfbd9cb910edc47239dfbe592e597cbc3a42c887408e3e61e6677a82b3aab",
+   "sha256_v4.8.0": "a44dfbd9cb910edc47239dfbe592e597cbc3a42c887408e3e61e6677a82b3aab"
+  },
+  "phys/module_sf_gecros.F": {
+   "sha256": "ad2864562e95678a25276df82ef96395cca61c3a1bd0ab48ddfb8402902cf2f6",
+   "sha256_v4.8.0": "ad2864562e95678a25276df82ef96395cca61c3a1bd0ab48ddfb8402902cf2f6"
+  },
+  "phys/module_sf_gfs.F": {
+   "sha256": "10eb3f3b47deb8f33d10e13a5b274db89a59cf5fb8c86a92f353205b9e73440e",
+   "sha256_v4.8.0": "10eb3f3b47deb8f33d10e13a5b274db89a59cf5fb8c86a92f353205b9e73440e"
+  },
+  "phys/module_sf_idealscmsfclay.F": {
+   "sha256": "92b91396c9d168e8b3e327420dcafb079fb6d4657accea816f436e46dc1c667d",
+   "sha256_v4.8.0": "92b91396c9d168e8b3e327420dcafb079fb6d4657accea816f436e46dc1c667d"
+  },
+  "phys/module_sf_lake.F": {
+   "sha256": "b173ad8328ecc0aa6bb6e6306a9c6af4dc876b39dc5d304fe221122983214b98",
+   "sha256_v4.8.0": "b173ad8328ecc0aa6bb6e6306a9c6af4dc876b39dc5d304fe221122983214b98"
+  },
+  "phys/module_sf_myjsfc.F": {
+   "sha256": "7ae02680a9f2f781fd5c13c55b102cc86fa216f72de08ce6e58c1b012efa29f3",
+   "sha256_v4.8.0": "7ae02680a9f2f781fd5c13c55b102cc86fa216f72de08ce6e58c1b012efa29f3"
+  },
+  "phys/module_sf_noah_seaice.F": {
+   "sha256": "7a98113351f79ef746383402230a3552518a105be0b21cbd96718c43b0bccf78",
+   "sha256_v4.8.0": "7a98113351f79ef746383402230a3552518a105be0b21cbd96718c43b0bccf78"
+  },
+  "phys/module_sf_noah_seaice_drv.F": {
+   "sha256": "be92b5f605f8dfe26a7a790a263de106ebb34f2414864a81d933cc6713da86ea",
+   "sha256_v4.8.0": "be92b5f605f8dfe26a7a790a263de106ebb34f2414864a81d933cc6713da86ea"
+  },
+  "phys/module_sf_noahdrv.F": {
+   "sha256": "0d50b7c6ff6f6c862296a125b9fe40b5d6c3ee2684a8de73dc570c74dcbee7c7",
+   "sha256_v4.8.0": "0d50b7c6ff6f6c862296a125b9fe40b5d6c3ee2684a8de73dc570c74dcbee7c7"
+  },
+  "phys/module_sf_noahlsm.F": {
+   "sha256": "034bf1d5f48b0b734702f200e3bcefe67db441b170cdcec8592992eb7d358e8c",
+   "sha256_v4.8.0": "034bf1d5f48b0b734702f200e3bcefe67db441b170cdcec8592992eb7d358e8c"
+  },
+  "phys/module_sf_noahlsm_glacial_only.F": {
+   "sha256": "f43c6482c17c5dff132921c0909ed5d706d5c7b0921902744eea17ef82a1d99f",
+   "sha256_v4.8.0": "f43c6482c17c5dff132921c0909ed5d706d5c7b0921902744eea17ef82a1d99f"
+  },
+  "phys/module_sf_ocean_driver.F": {
+   "sha256": "04d77d5aeeb65e8e07fb811f643d034398a5896991b0a15da8c82de739f54c7b",
+   "sha256_v4.8.0": "04d77d5aeeb65e8e07fb811f643d034398a5896991b0a15da8c82de739f54c7b"
+  },
+  "phys/module_sf_oml.F": {
+   "sha256": "a4a41a1593ef1d9bb4bc9cf4863fefea6dc67c3815bafbb897cb2a948e76a39f",
+   "sha256_v4.8.0": "a4a41a1593ef1d9bb4bc9cf4863fefea6dc67c3815bafbb897cb2a948e76a39f"
+  },
+  "phys/module_sf_pxlsm.F": {
+   "sha256": "d26b663d087a5414b0639d6c5725283b1d74f2643496afd8ac516f96581ecf10",
+   "sha256_v4.8.0": "d26b663d087a5414b0639d6c5725283b1d74f2643496afd8ac516f96581ecf10"
+  },
+  "phys/module_sf_pxlsm_data.F": {
+   "sha256": "c89d7b9fa4a925539189dadb0174c593ffc69cfbedc3a128b3ea94de39f2fa0d",
+   "sha256_v4.8.0": "c89d7b9fa4a925539189dadb0174c593ffc69cfbedc3a128b3ea94de39f2fa0d"
+  },
+  "phys/module_sf_pxsfclay.F": {
+   "sha256": "cd1b2095f8e093d4bc423ebbc4a3bfbce58a7d17b34f1f41d770c6061b68d0a4",
+   "sha256_v4.8.0": "cd1b2095f8e093d4bc423ebbc4a3bfbce58a7d17b34f1f41d770c6061b68d0a4"
+  },
+  "phys/module_sf_qnsesfc.F": {
+   "sha256": "7bf8453672022736e3ee67a43c53d1551ad2e2a7127ef005b01112ba7821405b",
+   "sha256_v4.8.0": "7bf8453672022736e3ee67a43c53d1551ad2e2a7127ef005b01112ba7821405b"
+  },
+  "phys/module_sf_ruclsm.F": {
+   "sha256": "2e4e94255a841c72459522bb4d7462280b295f6a7ddb7622611a35cdb753666e",
+   "sha256_v4.8.0": "3265f810d08dcbddfaf198371dc7f652e78e8d3a788f703a515c555a3bbb2a12",
+   "changes": [
+    "P12"
+   ]
+  },
+  "phys/module_sf_sfcdiags.F": {
+   "sha256": "c12f2ce27323e315142fadc311477befe18250e8988de11c7e3e41e1e28cdd1b",
+   "sha256_v4.8.0": "c12f2ce27323e315142fadc311477befe18250e8988de11c7e3e41e1e28cdd1b"
+  },
+  "phys/module_sf_sfcdiags_ruclsm.F": {
+   "sha256": "573ba5c996b4e78a0c140cf478d1e36390c8100f329e1aa3f69cc6df8ec9b563",
+   "sha256_v4.8.0": "573ba5c996b4e78a0c140cf478d1e36390c8100f329e1aa3f69cc6df8ec9b563"
+  },
+  "phys/module_sf_sfclay.F": {
+   "sha256": "dfd7aae5ef1f0bd979246480af5276a1ee956bc216ec8dc6e82eb963ded761dc",
+   "sha256_v4.8.0": "dfd7aae5ef1f0bd979246480af5276a1ee956bc216ec8dc6e82eb963ded761dc"
+  },
+  "phys/module_sf_sfclayrev.F": {
+   "sha256": "64da720d495f6eb801bbd03c21ea69554ed3b9953a0cc2a6e1e9044111c9b691",
+   "sha256_v4.8.0": "64da720d495f6eb801bbd03c21ea69554ed3b9953a0cc2a6e1e9044111c9b691"
+  },
+  "phys/module_sf_slab.F": {
+   "sha256": "c44f26777b163234da249373b09a02fa92cb953209bd35a6fe3c30c2158200cb",
+   "sha256_v4.8.0": "c44f26777b163234da249373b09a02fa92cb953209bd35a6fe3c30c2158200cb"
+  },
+  "phys/module_sf_ssib.F": {
+   "sha256": "2b83b39640fd5d53859f1f281be59a9866baf97924e5d03d9964ec5d69bd5c73",
+   "sha256_v4.8.0": "2b83b39640fd5d53859f1f281be59a9866baf97924e5d03d9964ec5d69bd5c73"
+  },
+  "phys/module_sf_sstskin.F": {
+   "sha256": "214328c30a6f542aed0e6e77eeeea4152174738977e7b6460eff3a7001fb9630",
+   "sha256_v4.8.0": "214328c30a6f542aed0e6e77eeeea4152174738977e7b6460eff3a7001fb9630"
+  },
+  "phys/module_sf_temfsfclay.F": {
+   "sha256": "70f2ed6bc48aad5b1bf68be4e01753a132f2ecdb4fa6d95c0ecce5d5554fcd94",
+   "sha256_v4.8.0": "70f2ed6bc48aad5b1bf68be4e01753a132f2ecdb4fa6d95c0ecce5d5554fcd94"
+  },
+  "phys/module_sf_tmnupdate.F": {
+   "sha256": "ed3a09c6f71f1b500a45d64317eaea78fa9126c7b7df923546f90196a3d584db",
+   "sha256_v4.8.0": "ed3a09c6f71f1b500a45d64317eaea78fa9126c7b7df923546f90196a3d584db"
+  },
+  "phys/module_sf_urban.F": {
+   "sha256": "1be801c3e11aad59be8e0e23612bbe71ba4fa29cefc930520fb4c6e2e1169f6a",
+   "sha256_v4.8.0": "1be801c3e11aad59be8e0e23612bbe71ba4fa29cefc930520fb4c6e2e1169f6a"
+  },
+  "phys/module_shallowcu_driver.F": {
+   "sha256": "068cf22b8c93cfac74a6223a72d61f4a2f890bc44e212da5d2c2a131c5ae271a",
+   "sha256_v4.8.0": "068cf22b8c93cfac74a6223a72d61f4a2f890bc44e212da5d2c2a131c5ae271a"
+  },
+  "phys/module_shcu_camuwshcu.F": {
+   "sha256": "fa9e114354f08028a7b4ecad35fe179370faebe34fb789477dfe44e32e7bf30f",
+   "sha256_v4.8.0": "fa9e114354f08028a7b4ecad35fe179370faebe34fb789477dfe44e32e7bf30f"
+  },
+  "phys/module_shcu_camuwshcu_driver.F": {
+   "sha256": "8754b99cd940feec32ad85a3a24f38d0a20e98b0a3d557e47d93cd2c8e42d97e",
+   "sha256_v4.8.0": "8754b99cd940feec32ad85a3a24f38d0a20e98b0a3d557e47d93cd2c8e42d97e"
+  },
+  "phys/module_shcu_deng.F": {
+   "sha256": "d03fd43559e1562bde415eb7a50906b993c6da3f5dc3e501f957b48031629645",
+   "sha256_v4.8.0": "d03fd43559e1562bde415eb7a50906b993c6da3f5dc3e501f957b48031629645"
+  },
+  "phys/module_shcu_grims.F": {
+   "sha256": "2b56ceb8d8c806179bb1e60b29174fd62ca8c4149fc487ecafa613ff937b131d",
+   "sha256_v4.8.0": "2b56ceb8d8c806179bb1e60b29174fd62ca8c4149fc487ecafa613ff937b131d"
+  },
+  "phys/module_shcu_nscv.F": {
+   "sha256": "d244722bce55d85a519edd305d78d575ecc8bd1309780cd4ed9c1c4b323067c7",
+   "sha256_v4.8.0": "d244722bce55d85a519edd305d78d575ecc8bd1309780cd4ed9c1c4b323067c7"
+  },
+  "phys/module_surface_driver.F": {
+   "sha256": "e2308f8e95007548040ec8249075dcacd1a05ed37dce262571a41ec056ad6ff3",
+   "sha256_v4.8.0": "8eb9e3414d7acbfdb51395257a3f972c3b99c14f9f9bfac5d54836ab986c7f71",
+   "changes": [
+    "P13"
+   ]
+  },
+  "phys/module_wind_fitch.F": {
+   "sha256": "0857dc9e74cea8f231e2456d12a45bb3d6d4e00fca4945c73b1455263d78cd1b",
+   "sha256_v4.8.0": "0857dc9e74cea8f231e2456d12a45bb3d6d4e00fca4945c73b1455263d78cd1b"
+  },
+  "phys/module_wind_mav.F": {
+   "sha256": "e68e3392ec9a24340483263c07581ecc8e75753ccf85bd25fa151c48779bb01d",
+   "sha256_v4.8.0": "e68e3392ec9a24340483263c07581ecc8e75753ccf85bd25fa151c48779bb01d"
+  },
+  "phys/physics_mmm/bl_gwdo.F90": {
+   "sha256": "3b784428f10bd38b4437b3f6d23dffcdcb2f92526661dee4d9949930b551c14a",
+   "sha256_v4.8.0": "d6211b838422ff3fe9ddadf1466a2da985feb21ffbb0e8eedd4eb412ee9812f0",
+   "changes": [
+    "P4"
+   ]
+  },
+  "phys/physics_mmm/bl_shinhong.F90": {
+   "sha256": "3ccc0f2322e5d1f637ca22d97b3950a0ec9c51a86f61c47fb07ce3d996f7f936",
+   "sha256_v4.8.0": "7d2588364d95519024d4914273e6a4953f1baa393261e0035f9a7198fbc9d961",
+   "changes": [
+    "P3"
+   ]
+  },
+  "phys/physics_mmm/bl_ysu.F90": {
+   "sha256": "15d76892fc6ffa5c9f8f7ebecfeb6eaa5c23d71b44e8c53a8832f49ff711ea7e",
+   "sha256_v4.8.0": "15d76892fc6ffa5c9f8f7ebecfeb6eaa5c23d71b44e8c53a8832f49ff711ea7e"
+  },
+  "phys/physics_mmm/cu_ntiedtke.F90": {
+   "sha256": "e762101f04d4acd2d19047a92d0b7cd4e244df930f9f9ef7aabae54bfe9a9fd1",
+   "sha256_v4.8.0": "e762101f04d4acd2d19047a92d0b7cd4e244df930f9f9ef7aabae54bfe9a9fd1"
+  },
+  "phys/physics_mmm/module_libmassv.F90": {
+   "sha256": "262630e14a9c70ba5074dac04c6f53ebe59c6f1cf27989d1b6c7c1850d7860f3",
+   "sha256_v4.8.0": "262630e14a9c70ba5074dac04c6f53ebe59c6f1cf27989d1b6c7c1850d7860f3"
+  },
+  "phys/physics_mmm/mp_radar.F90": {
+   "sha256": "f349afc8f5068173320856f11e9b4b1f769761803ce282f2832340b96e6f90b3",
+   "sha256_v4.8.0": "f349afc8f5068173320856f11e9b4b1f769761803ce282f2832340b96e6f90b3"
+  },
+  "phys/physics_mmm/mp_wsm6.F90": {
+   "sha256": "83012eedbe67a94e6cc0883b29c5658432d97fc99cad9eb326a1a5fd0f8146de",
+   "sha256_v4.8.0": "83012eedbe67a94e6cc0883b29c5658432d97fc99cad9eb326a1a5fd0f8146de"
+  },
+  "phys/physics_mmm/mp_wsm6_effectRad.F90": {
+   "sha256": "abaf69c2abbe8974d790ea1b650dbf14daf990617856c1ee49c255d534706842",
+   "sha256_v4.8.0": "abaf69c2abbe8974d790ea1b650dbf14daf990617856c1ee49c255d534706842"
+  },
+  "phys/physics_mmm/sf_sfclayrev.F90": {
+   "sha256": "1bff41ec6d8d2bf73a07a40c5a6dfac2565b46601c9ee3a9b0f6aa6fe85ed698",
+   "sha256_v4.8.0": "1bff41ec6d8d2bf73a07a40c5a6dfac2565b46601c9ee3a9b0f6aa6fe85ed698"
+  },
+  "share/dfi.F": {
+   "sha256": "c7b94989ccdf637ebe756b9dcdff26d5b9ba798852ec74c3415a853a32a4ae0f",
+   "sha256_v4.8.0": "c7b94989ccdf637ebe756b9dcdff26d5b9ba798852ec74c3415a853a32a4ae0f"
+  },
+  "share/input_wrf.F": {
+   "sha256": "691aa24a47684a251946be49eeb9a2025a958644785a8d1dea31f506d9664998",
+   "sha256_v4.8.0": "54f646fb6a36c919db3d6869c14943b2cc32e9d360628092dff81f1721981f12",
+   "changes": [
+    "W2"
+   ]
+  },
+  "share/interp_fcn.F": {
+   "sha256": "680881db48904396f38856ca1dd2578a84e8eb0a9cdd05d49f4c63cd8ce9bdaa",
+   "sha256_v4.8.0": "680881db48904396f38856ca1dd2578a84e8eb0a9cdd05d49f4c63cd8ce9bdaa"
+  },
+  "share/mediation_feedback_domain.F": {
+   "sha256": "1618988f65e6a950720c679e27c6eac78685ea8edd78836d107b7ee241cc0baf",
+   "sha256_v4.8.0": "1618988f65e6a950720c679e27c6eac78685ea8edd78836d107b7ee241cc0baf"
+  },
+  "share/mediation_force_domain.F": {
+   "sha256": "aaef43f69eb810809eb890688b840ce894aea9ae1ae99f8266e4fa8c3b9f5518",
+   "sha256_v4.8.0": "aaef43f69eb810809eb890688b840ce894aea9ae1ae99f8266e4fa8c3b9f5518"
+  },
+  "share/mediation_integrate.F": {
+   "sha256": "65e869293142706c7b7d56b814ab9ba5706b457d163f6bd1ef5d784584505be1",
+   "sha256_v4.8.0": "65e869293142706c7b7d56b814ab9ba5706b457d163f6bd1ef5d784584505be1"
+  },
+  "share/mediation_interp_domain.F": {
+   "sha256": "a14e6074343ea81dabd37b449885e1b0199b0ad7e8963a70f00afe754870845e",
+   "sha256_v4.8.0": "a14e6074343ea81dabd37b449885e1b0199b0ad7e8963a70f00afe754870845e"
+  },
+  "share/mediation_nest_move.F": {
+   "sha256": "a373a0c64ad258e781208277521d1d154224ce3d0dfa91017cc542d9e4914c43",
+   "sha256_v4.8.0": "a373a0c64ad258e781208277521d1d154224ce3d0dfa91017cc542d9e4914c43"
+  },
+  "share/mediation_wrfmain.F": {
+   "sha256": "86284dee0b246a985db40c0019f43c3f0bf1fc3af053def96c3b7c87a612513e",
+   "sha256_v4.8.0": "86284dee0b246a985db40c0019f43c3f0bf1fc3af053def96c3b7c87a612513e"
+  },
+  "share/module_bc.F": {
+   "sha256": "61b9235004b2a7799faabaa928276af8a7ef2e4672619c8ad120c857461301ad",
+   "sha256_v4.8.0": "61b9235004b2a7799faabaa928276af8a7ef2e4672619c8ad120c857461301ad"
+  },
+  "share/module_check_a_mundo.F": {
+   "sha256": "1af80bd0b608746401ce2a34ccd1b9b6259d93518ad76b08f695df643974a469",
+   "sha256_v4.8.0": "1af80bd0b608746401ce2a34ccd1b9b6259d93518ad76b08f695df643974a469"
+  },
+  "share/module_chem_share.F": {
+   "sha256": "652bd9445691456ccb21e5dbe9a03997b6031ba74a4badc123e0427272bc4eef",
+   "sha256_v4.8.0": "652bd9445691456ccb21e5dbe9a03997b6031ba74a4badc123e0427272bc4eef"
+  },
+  "share/module_ctrans_aqchem.F": {
+   "sha256": "d05be6980eb871e429ea5c9df1a0a9bda4c91f3fb0fcfd6bf0e0fafc5c20c321",
+   "sha256_v4.8.0": "d05be6980eb871e429ea5c9df1a0a9bda4c91f3fb0fcfd6bf0e0fafc5c20c321"
+  },
+  "share/module_date_time.F": {
+   "sha256": "d8916f29cb84f889ef38ff9f9cf70a8d8b9195a918b9412772cd76e7561bd9f4",
+   "sha256_v4.8.0": "d8916f29cb84f889ef38ff9f9cf70a8d8b9195a918b9412772cd76e7561bd9f4"
+  },
+  "share/module_io_domain.F": {
+   "sha256": "1dde269826435be2935883a0a477e9aa30cb852b67bc5b6b931c98e080dbe5ad",
+   "sha256_v4.8.0": "1dde269826435be2935883a0a477e9aa30cb852b67bc5b6b931c98e080dbe5ad"
+  },
+  "share/module_llxy.F": {
+   "sha256": "0c777e66ffbb0602479cadcc0ab484769a140c4cb2b3e9a8f757597086f0c76b",
+   "sha256_v4.8.0": "0c777e66ffbb0602479cadcc0ab484769a140c4cb2b3e9a8f757597086f0c76b"
+  },
+  "share/module_model_constants.F": {
+   "sha256": "5b80377fecdc18a5f0ad38d3b6c15cfc86ad5d76701adbbbb08a08698d0f7062",
+   "sha256_v4.8.0": "5b80377fecdc18a5f0ad38d3b6c15cfc86ad5d76701adbbbb08a08698d0f7062"
+  },
+  "share/module_optional_input.F": {
+   "sha256": "99dab3a5c498dd7492ad1a989457c1000f148ae39e1b9235b19352dfaeaa5dca",
+   "sha256_v4.8.0": "99dab3a5c498dd7492ad1a989457c1000f148ae39e1b9235b19352dfaeaa5dca"
+  },
+  "share/module_soil_pre.F": {
+   "sha256": "f981a2cce2cd1a8ca5b8ced100bf2d34eb2725d1d0bc7c42daf05fd05aa2c074",
+   "sha256_v4.8.0": "f981a2cce2cd1a8ca5b8ced100bf2d34eb2725d1d0bc7c42daf05fd05aa2c074"
+  },
+  "share/module_trajectory.F": {
+   "sha256": "de63008a5a5dc179692ae79266f2729425d5e6b5422c4f4a60aa4e2310661b12",
+   "sha256_v4.8.0": "de63008a5a5dc179692ae79266f2729425d5e6b5422c4f4a60aa4e2310661b12"
+  },
+  "share/output_wrf.F": {
+   "sha256": "741f627ffba1a8743a0be01dae695daea5bc845d096e166fcb63ff1f29089e71",
+   "sha256_v4.8.0": "741f627ffba1a8743a0be01dae695daea5bc845d096e166fcb63ff1f29089e71"
+  },
+  "share/set_timekeeping.F": {
+   "sha256": "89089f2b2c0f3e8b7ee58a4bdf702fbce498b62507a4ba056770cfbe1aa5e26f",
+   "sha256_v4.8.0": "89089f2b2c0f3e8b7ee58a4bdf702fbce498b62507a4ba056770cfbe1aa5e26f"
+  },
+  "share/sint.F": {
+   "sha256": "5df841aea44c53c745a90fe96d2b9b8404097b457cceb1321faed592b727af1c",
+   "sha256_v4.8.0": "5df841aea44c53c745a90fe96d2b9b8404097b457cceb1321faed592b727af1c"
+  },
+  "share/solve_interface.F": {
+   "sha256": "83a5f376cfb82b7fbf31a163153d41afbb879b60cc40979f09d503a8b5fee025",
+   "sha256_v4.8.0": "83a5f376cfb82b7fbf31a163153d41afbb879b60cc40979f09d503a8b5fee025"
+  },
+  "share/track_driver.F": {
+   "sha256": "4618d3ac67df5576ff6baa69935335267fd7f1e4eff8bf9edee6e81262cb10c6",
+   "sha256_v4.8.0": "4618d3ac67df5576ff6baa69935335267fd7f1e4eff8bf9edee6e81262cb10c6"
+  },
+  "share/wrf_fddaobs_in.F": {
+   "sha256": "65d89c5bb0a7d9d808d56618c765da4a90fa57541543a807595778988ff80abb",
+   "sha256_v4.8.0": "65d89c5bb0a7d9d808d56618c765da4a90fa57541543a807595778988ff80abb"
+  },
+  "share/wrf_timeseries.F": {
+   "sha256": "01d011ffef929885758b93f10f2862664a0dc7ea8e1e578a4d6464cfc28aa10e",
+   "sha256_v4.8.0": "01d011ffef929885758b93f10f2862664a0dc7ea8e1e578a4d6464cfc28aa10e"
+  },
+  "share/wrf_tsin.F": {
+   "sha256": "9710a33ce72a053df0b97ee5790c4df535608b0563ce6cffa65d8e1c6d124fea",
+   "sha256_v4.8.0": "9710a33ce72a053df0b97ee5790c4df535608b0563ce6cffa65d8e1c6d124fea"
+  },
+  "var/da/da_main/da_solve.inc": {
+   "sha256": "e5ad67f87af1c82a0b5c549718098ca7ddf4ded742416e59b346b264929eda6d",
+   "sha256_v4.8.0": "e5ad67f87af1c82a0b5c549718098ca7ddf4ded742416e59b346b264929eda6d"
+  },
+  "var/da/da_minimisation/da_minimise_cg.inc": {
+   "sha256": "399ca2a92427692064144fead3169985d4b58fd327cfb0554ce2fddb2db9c0df",
+   "sha256_v4.8.0": "399ca2a92427692064144fead3169985d4b58fd327cfb0554ce2fddb2db9c0df"
+  },
+  "var/da/da_minimisation/da_transform_vtoy.inc": {
+   "sha256": "52680befc7af16c4a8fb5379a03ef7e02979b2c7898e0f9a4948b72ccf51caa5",
+   "sha256_v4.8.0": "52680befc7af16c4a8fb5379a03ef7e02979b2c7898e0f9a4948b72ccf51caa5"
+  },
+  "var/da/da_obs/da_add_noise_to_ob.inc": {
+   "sha256": "c55d302feb82908992538db31b22d652a19307f0102728a7908a82d1d7cf3507",
+   "sha256_v4.8.0": "c55d302feb82908992538db31b22d652a19307f0102728a7908a82d1d7cf3507"
+  },
+  "var/da/da_physics/da_pt_to_rho_lin.inc": {
+   "sha256": "636ebe1e5d6c89ce065b3a8f43b9afa413e3f54aa539bce094f5a6510887a5d9",
+   "sha256_v4.8.0": "636ebe1e5d6c89ce065b3a8f43b9afa413e3f54aa539bce094f5a6510887a5d9"
+  },
+  "var/da/da_physics/da_tp_to_qs.inc": {
+   "sha256": "0c383d94f11e03b9f3376cbf1cd70ad0e5bb96ff097f1fb6005d9b0a37cc5874",
+   "sha256_v4.8.0": "0c383d94f11e03b9f3376cbf1cd70ad0e5bb96ff097f1fb6005d9b0a37cc5874"
+  },
+  "var/da/da_setup_structures/da_setup_firstguess.inc": {
+   "sha256": "0b2d319380e5b13da82a66a73891bc11f099684d406705cc10dd00a738d0295b",
+   "sha256_v4.8.0": "0b2d319380e5b13da82a66a73891bc11f099684d406705cc10dd00a738d0295b"
+  },
+  "var/da/da_tools/da_add_noise.inc": {
+   "sha256": "6c6c0aba1fcb3bfa584b4ca446a5f8091dfbf80b14f299ff8007cc26a40f76f0",
+   "sha256_v4.8.0": "6c6c0aba1fcb3bfa584b4ca446a5f8091dfbf80b14f299ff8007cc26a40f76f0"
+  },
+  "var/da/da_tools/da_get_time_slots.inc": {
+   "sha256": "66060607785c3a16c9299d7a2da566a460e30bb0fededd1c4641eb0e7d1f23e2",
+   "sha256_v4.8.0": "66060607785c3a16c9299d7a2da566a460e30bb0fededd1c4641eb0e7d1f23e2"
+  },
+  "var/da/da_transfer_model/da_transfer_wrftoxb.inc": {
+   "sha256": "53b1375091ece38eef6b55ca9f1bc17f800ab4509b2c3f31a1127e27d54c54b6",
+   "sha256_v4.8.0": "53b1375091ece38eef6b55ca9f1bc17f800ab4509b2c3f31a1127e27d54c54b6"
+  },
+  "var/da/da_transfer_model/da_transfer_xatowrftl.inc": {
+   "sha256": "8b32754659bc6c0481275738bc93ce825e90aa6925c3c90cbb986ab93774ea7b",
+   "sha256_v4.8.0": "8b32754659bc6c0481275738bc93ce825e90aa6925c3c90cbb986ab93774ea7b"
+  },
+  "var/da/da_vtox_transforms/da_transform_xtoxa.inc": {
+   "sha256": "846e07f68da470b17a9085fe65adb8eb1355bcf76fb3c2a14e1ad0eb45cfbe0f",
+   "sha256_v4.8.0": "846e07f68da470b17a9085fe65adb8eb1355bcf76fb3c2a14e1ad0eb45cfbe0f"
+  },
+  "var/gen_be_v3/gen_be_v3.F90": {
+   "sha256": "733afa75e75cdc99c4efd485e333a0edc45c644793a67c8485616c9f3e1a0711",
+   "sha256_v4.8.0": "733afa75e75cdc99c4efd485e333a0edc45c644793a67c8485616c9f3e1a0711"
+  },
+  "wrftladj/module_bc_tl.F": {
+   "sha256": "fd7564cb37f64277f3672de626fec25f88a4bde9a2548b26f1fb03475fd4c858",
+   "sha256_v4.8.0": "fd7564cb37f64277f3672de626fec25f88a4bde9a2548b26f1fb03475fd4c858"
+  },
+  "wrftladj/start_em_tl.F": {
+   "sha256": "2ccc738f645f578bba32a4c669ed1b6368477ac52a8617b1dbe2887ca18483e1",
+   "sha256_v4.8.0": "2ccc738f645f578bba32a4c669ed1b6368477ac52a8617b1dbe2887ca18483e1"
+  }
+ }
+}
