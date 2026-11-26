@@ -1703,10 +1703,22 @@ def open_limited_area_dycore(arguments, layout, mesh, grid, profiles, state, ref
         raise ValueError(f'--lbc-dir {lbc_dir} holds no lbc.*.nc: the limited-area run has no boundary series')
     start_time = datetime.strptime(start, '%Y-%m-%d_%H:%M:%S')
     scalar_names, native_order = native_lbc_scalar_order(layout, config, names)
-    if native_order:
-        print(json.dumps({'exact_mode_native_lbc_order': native_order}), flush=True)
     from ..dycore_variants import dycore_regional_constructor
     from ..cuda_regional_forecast_v841 import open_regional_forecast_v841 as _shared_regional
+    if getattr(arguments, 'undriven_species_boundary_mode', None) is not None:
+        # --undriven-species-boundary wrf-flow-dependent (woof.hex.undriven_species_boundary): drive only the
+        # species the boundary files hold, as WRF does (have_bcs_moist); runtime_v842 binds WRF's flow-dependent
+        # rule for the rest after the dycore opens.
+        if dycore_config is not None and getattr(dycore_config, 'dycore_variant', None) is not None:
+            # The door leaves the rule off on a fork-dycore row and refuses the flag there; this is the backstop.
+            raise ValueError('--undriven-species-boundary wrf-flow-dependent acts in the MPAS-A v8.4.2 regional '
+                             'dycore; a fork-dycore row runs its own driver, which does not stage the mass flux '
+                             'the rule reads')
+        from ..undriven_species_boundary import lbc_driven_prefix
+        # native_order is set only for the RRFS fork Registry, whose fork-dycore row is refused above.
+        scalar_names = tuple(scalar_names[:len(lbc_driven_prefix(paths, names))])
+    if native_order:
+        print(json.dumps({'exact_mode_native_lbc_order': native_order}), flush=True)
     # A fork dycore with its own regional driver builds it here. A variant on the shared regional driver (the
     # NOAA v8.4.1 row) resolves through the regional configuration below, which carries the regional fields.
     if (dycore_config is not None and getattr(dycore_config, 'dycore_variant', None) is not None
@@ -2278,12 +2290,15 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
         # and regional runtime.  Off (the default) builds nothing and leaves every word as it was.
         w_crit_cfl = getattr(arguments, 'w_damping_crit_cfl', None)
         inflow_options = getattr(arguments, 'inflow_perturbation_options', None)
-        if w_crit_cfl is not None or inflow_options:
+        undriven_mode = getattr(arguments, 'undriven_species_boundary_mode', None)
+        if w_crit_cfl is not None or inflow_options or undriven_mode is not None:
             if moves or rank_execution:
                 # The door refuses the cases it can see (forecast_door.suite_route_seat_refusal); this is the
                 # backstop for an executor or move hook built elsewhere.
                 flags = ' and '.join(flag for flag, on in (('--w-damping', w_crit_cfl is not None),
-                                                           ('--inflow-perturbation', bool(inflow_options))) if on)
+                                                           ('--inflow-perturbation', bool(inflow_options)),
+                                                           ('--undriven-species-boundary wrf-flow-dependent',
+                                                            undriven_mode is not None)) if on)
                 raise ValueError(f'{flags} act(s) in the one-card resident dycore and regional runtime; '
                                  + ('a moving run remaps onto other meshes' if moves else
                                     f"this run's {type(execution).__name__} executor is not that seat")
@@ -2300,6 +2315,11 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
             if seeding is not None:
                 receipt['inflow_perturbation'] = seeding
                 print(json.dumps({'inflow_perturbation': seeding}), flush=True)
+            if undriven_mode is not None:
+                from ..undriven_species_boundary import attach_v842 as attach_undriven
+                undriven = attach_undriven(dycore, names, undriven_mode)
+                receipt['undriven_species_boundary'] = undriven
+                print(json.dumps({'undriven_species_boundary': undriven}), flush=True)
         # --nn (woof.nn.hex_seat, WOOF_NN_CONFIG): the opt-in NN column seat on the held sources.  Without it nothing
         # from woof.nn is imported; a resume refuses a carrier an applying seat sealed (it would splice trajectories).
         nn_carried = moving.carrier.get('nn') if resumed else None
@@ -2746,6 +2766,10 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
         if seeding is not None:
             # The attach-time receipt has no draws yet; the closing one carries each face's totals.
             receipt['inflow_perturbation'] = seeding.receipt()
+        undriven = getattr(getattr(dycore, 'regional_v841', None), 'undriven_species_boundary', None)
+        if undriven is not None:
+            # The closing receipt carries the applications the run made.
+            receipt['undriven_species_boundary'] = undriven.receipt()
     if fullstep_shadow is not None:
         receipt['fullstep_lts_treatment']=fullstep_shadow.receipt()
     # A ported framework records the lookup files its scheme initialization read (RRFS TEMPO).
