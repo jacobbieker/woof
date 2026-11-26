@@ -4865,7 +4865,7 @@
    },
    {
     "file": "woof/core/kernels/topo_radiation.cu",
-    "sha256": "eed766ccaa9cd8e856423c407750cffb829a9e8e01c0b28c5ef91b9d16861de8"
+    "sha256": "145a2b00987962a221488b17dd3dfba9fdd26a3d809a208e8aea86340a146102"
    },
    {
     "file": "woof/core/kernels/tracer_pblmix.cu",
@@ -5867,7 +5867,7 @@
    },
    {
     "file": "woof/core/physics.py",
-    "sha256": "0fc0fab5b441e73ea8af841032be55c4076c43f3dda2a7d063f394451faeb17e"
+    "sha256": "077449e5f358f280d1d51999b9f60e7beaacb1388cd24a90ab8cacd8ed813267"
    },
    {
     "file": "woof/core/preflight.py",
@@ -25837,15 +25837,15 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "e7a2b7afd44274a6dff351e5251b6fe984b404cdcef78902c2db0de29c001826",
+    "sha256": "c7e1b99b5beb61f44cc8932a94c36da0fcba956a2f7d6218c314f6d52a8accd4",
     "sites": {
-     "100": 244
+     "100": 396
     }
    },
    "native_differences": {
-    "sha256": "632fdda1d931270daa17e24915b6df533fdebab73a590c487558efcef7f82cbe",
+    "sha256": "df88163e2db99c2011a1da90139ade9a43d361bdf419e7b0450bb9729294b83d",
     "sites": {
-     "100": 35
+     "100": 39
     }
    },
    "native_errors": {},
@@ -25865,7 +25865,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "fb62e6d96805a76c41fdc1eca3f5e10a6e2af9d883fcb4912d5461841d8f9533"
+   "source_sha256": "9b11daa09b7f128ab42ffb43cc077a1bde2ae0d754194d50477b92d7b9c78072"
   },
   "kernels:tracer_pblmix": {
    "assessment": "static_diagnostic_only",
