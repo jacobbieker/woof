@@ -3,8 +3,10 @@
 Status (2026-11-26): 4D.1 (`transfer4d.py`, #737), 4D.2
 (`FourDObsTerm`, `IdentityModel`, `analyse(var4d=)`, #741) and 4D.3
 (`WindowModel`, #742) are merged. 4D.3b makes `WindowModel` advect `g_qv`
-on a moist window (`moisture="advect"`). Not done: 4D.0 (the oracle lanes'
-first runs), 4D.4 (outer loops and `woof var --4dvar`), the checkpoint
+on a moist window (`moisture="advect"`). 4D.0 has run: the lanes L-id, L1
+and L0 converge on pb with per-slot TL, adjoint-forcing and gradient files
+(`tools/wrfda_oracle/run_4dvar.sh`). Not done: 4D.4 (outer loops and
+`woof var --4dvar`, #867), the checkpoint
 policy and its G3 receipt, and 4D.5 (L0, after P3a item 6). It is the
 second half of V5 in
 [WRFDA-3DVAR-PLAN.md](WRFDA-3DVAR-PLAN.md) section 7 (V5.2 and the
