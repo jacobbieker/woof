@@ -211,3 +211,31 @@ def test_a_pre_key_kfcup_checkpoint_ran_without_the_floor():
     with pytest.raises(restart.RestartMismatchError) as refused:
         restart._require_config_match(header, _run(cu_physics=10, **_KF_CUP), "pre-key.npz")
     assert KEY in str(refused.value)
+
+
+@pytest.mark.parametrize("cu", [1, 11])
+@pytest.mark.parametrize("umbrella, named, floor", [
+    ("all", {}, True),
+    ("none", {}, False),
+    ("none", {KEY: True}, True),
+])
+def test_the_umbrella_resolves_before_the_absent_rule(cu, umbrella, named, floor):
+    """woof_quirk_corrections resolves to an explicit key (a key named next
+    to 'none' wins); the echo and a pre-key KF/MSKF checkpoint then read
+    that value against absent-is-on, whatever the umbrella was."""
+    from woof.io import restart
+    if correct_mode.STRICT and floor:
+        pytest.skip("a strict process refuses correct mode")
+    live = _run(cu_physics=cu, woof_quirk_corrections=umbrella, **named)
+    assert getattr(live, KEY) is floor
+    echo = restart.configuration_echo(live)
+    assert (KEY in echo) is (not floor)
+    header = restart.configuration_echo(_run(cu_physics=cu, **{KEY: False}))
+    header.pop(KEY)      # a pre-key checkpoint: its floor was on
+    if floor:
+        restart._require_config_match(header, live, "pre-key.npz")
+    else:
+        assert echo[KEY] is False
+        with pytest.raises(restart.RestartMismatchError) as refused:
+            restart._require_config_match(header, live, "pre-key.npz")
+        assert KEY in str(refused.value)

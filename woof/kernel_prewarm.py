@@ -276,7 +276,23 @@ def static_jobs(experiment, *, columns: bool = False, hydro: bool = False) -> li
         if name in _COMPOSED_LOADERS:
             jobs.append((name, _warm_composed, (name,)))
         elif name in _DEVICE_LOADERS:
-            jobs.append((name, _warm_device_loader, (name,)))
+            if name == "thompson_fork_unit":
+                # FQ5 / FQ7: the fork column's (closure, lamc) variants the
+                # runs launch (thompson_fork._module(device, closure, lamc));
+                # the stock one (both off) is always warmed.
+                variants = {(False, False)} | {
+                    (bool(_reads(dc.run, "thompson_rain_snow_closure")),
+                     bool(_reads(dc.run, "thompson_lamc_updated_rc")))
+                    for dc in getattr(experiment, "domains", ())
+                    if hasattr(dc, "run")
+                    and int(getattr(dc.run, "mp_physics", 0) or 0) == 28
+                    and getattr(dc.run, "thompson_version", "") == "wrf_39_noaa"}
+                for flags in sorted(variants):
+                    jobs.append((name if flags == (False, False) else
+                                 f"{name}[closure={int(flags[0])},lamc={int(flags[1])}]",
+                                 _warm_device_loader, (name,) + flags))
+            else:
+                jobs.append((name, _warm_device_loader, (name,)))
         elif name in _KF_TRIGGERS:
             # FQ11 (on in correct mode): the unit with the capped-downdraft
             # rain floor define where a KF-eta domain reads it
@@ -375,6 +391,16 @@ _THOMPSON_CLOSURE_UNITS = ("thompson", "thompson_classic",
                            "thompson_aerosol_cold", "thompson_aerosol_warm")
 
 
+def _hail_aware(run) -> bool:
+    """Whether ``run``'s mp_physics is the hail-aware Thompson (mp = 38)."""
+    from woof.config import THOMPSON_AEROSOL_FAMILY
+    try:
+        member = THOMPSON_AEROSOL_FAMILY.get(int(getattr(run, "mp_physics", 0) or 0))
+    except (TypeError, ValueError):
+        return False
+    return bool(member is not None and member.hail_aware)
+
+
 def _variant_jobs(experiment, modules):
     """Compile selector and dimension variants before their first launch.
 
@@ -384,7 +410,8 @@ def _variant_jobs(experiment, modules):
     """
     from woof.core import kernels
     from woof.core.kernel_shape import FUNCTIONS, shape_defines
-    from woof.core.thompson_aerosol_launch import AEROSOL_KERNEL_MODULES, WRF39_DEFINES
+    from woof.core.thompson_aerosol_launch import (
+        AEROSOL_KERNEL_MODULES, LAMC_MODULES, WRF39_DEFINES)
     from woof.ingest.lateral_bc import relaxation_shapes
     from woof.core.mynn_sfclay import MYNN_SFCLAY_DEFINES, mynn_surface_defines
 
@@ -451,15 +478,34 @@ def _variant_jobs(experiment, modules):
                 # (woof.core.gf._gf_module), the module the run launches.
                 from woof.core.gf import gf_kernel_capacity
                 tiers.append((("GF_KMAX", gf_kernel_capacity(int(run.nz))), ("GF_DEEP_EVAP_BOOKING", 1)))
-            if (name in _THOMPSON_CLOSURE_UNITS
-                    and _reads(run, "thompson_rain_snow_closure")):
+            closure = _reads(run, "thompson_rain_snow_closure")
+            lamc = _reads(run, "thompson_lamc_updated_rc")
+            if name in AEROSOL_KERNEL_MODULES and _hail_aware(run):
+                # mp = 38 launches the hail image (thompson_aerosol_launch.
+                # _hail_module), never the plain unit: warm that one, with the
+                # FQ5 / FQ7 defines the run's launch composes on its units.
+                from woof.core.thompson_aerosol_launch import (
+                    CLOSURE_MODULES, _hail_module, hail_variant_tag)
+                flags = (bool(closure and name in CLOSURE_MODULES),
+                         bool(lamc and name in LAMC_MODULES))
+                if (name, "hail", flags) not in seen:
+                    seen.add((name, "hail", flags))
+                    jobs.append((name + hail_variant_tag(*flags),
+                                 _hail_module.__wrapped__, (name,) + flags))
+            elif name in _THOMPSON_CLOSURE_UNITS and (closure or lamc):
                 # FQ5 (on in correct mode): the unit with the rain-snow
                 # closure define, after the generation defines as
-                # thompson_aerosol_launch.aerosol_kernel orders them.  The
-                # hail-aware image (mp = 38) compiles at its first call.
-                from woof.core.thompson import RAIN_SNOW_CLOSURE_DEFINES
-                tiers.append((defines if name in AEROSOL_KERNEL_MODULES else ())
-                             + RAIN_SNOW_CLOSURE_DEFINES)
+                # thompson_aerosol_launch.aerosol_kernel orders them.  FQ7: the
+                # warm unit composes the lamc define after it, and a run that
+                # reads both launches only that composed unit.
+                from woof.core.thompson import (
+                    LAMC_UPDATED_RC_DEFINES, RAIN_SNOW_CLOSURE_DEFINES)
+                tier = ((defines if name in AEROSOL_KERNEL_MODULES else ())
+                        + (RAIN_SNOW_CLOSURE_DEFINES if closure else ())
+                        + (LAMC_UPDATED_RC_DEFINES
+                           if lamc and name in LAMC_MODULES else ()))
+                if tier != defines:
+                    tiers.append(tier)
             if name == "kfcup" and _reads(run, _KF_RAIN_FLOOR_KEY):
                 # FQ11 (on in correct mode): KF-CuP's column with the
                 # capped-downdraft rain floor define
@@ -567,15 +613,16 @@ def _warm_composed(name):
     return factory()
 
 
-def _warm_device_loader(name):
-    """A chained unit whose loader is keyed by device, on the current one."""
+def _warm_device_loader(name, *flags):
+    """A chained unit whose loader is keyed by device, on the current one;
+    ``flags`` are the loader's variant booleans after the device."""
     import importlib
 
     import cupy as cp
 
     module_name, factory_name = _DEVICE_LOADERS[name]
     module = importlib.import_module("woof.core." + module_name)
-    return getattr(module, factory_name)(cp.cuda.runtime.getDevice())
+    return getattr(module, factory_name)(cp.cuda.runtime.getDevice(), *flags)
 
 
 # These chained units share a production factory, with a selector argument.

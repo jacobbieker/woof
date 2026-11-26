@@ -7,6 +7,13 @@ releases and is kept as upstream wrote it.
 
 ## Unreleased
 
+- `diff_metrics_seam_slope` (correct-mode finding FQ12, read where WRF's
+  mixing package runs on a periodic axis): WRF's `compute_diff_metrics` leaves the top w level's slope at a
+  periodic seam at zero. On (correct mode, the engine's previous
+  arithmetic) the slope is filled; off (exact mode) the smag kernels and
+  the WRFPLUS diffusion TL/AD take WRF's cold seam word for word, and the
+  WRFPLUS diffusion fixture grades the seam words it used to mask.
+
 Merged upstream WOOF 1.1.5 (with 1.1.4). Where upstream built a feature the
 fork already had, upstream's keys and flags are now the only ones:
 
@@ -32,12 +39,20 @@ fork already had, upstream's keys and flags are now the only ones:
 New:
 
 - The WRF dry-step adjoint's step (`woof.grad.wrfplus.model`) now covers
+  diff_opt 1 / km_opt 4 mixing on a moist state as well: the qv, qc and
+  qr rows of the time-t species with the time-t Kh and the first
+  acoustic loop's muts (`add_scalar_coordinate_wrf`), held as each
+  species' source on every stage, and qv's boundary capture starting from
+  its row on a specified domain. The binary32 base reproduces
+  `dycore.step` word for word. The forecast path is unchanged.
+
+- The WRF dry-step adjoint's step (`woof.grad.wrfplus.model`) now covers
   diff_opt 1 / km_opt 4 horizontal mixing on a dry state, periodic or
   specified: the deformation, smag2d_km and the u, v, w and theta rows
   of the time-t fields into the held tendencies, their map-factor
   coupling (after the folded relaxation on a specified domain) and their
   add on every stage. The binary32 base reproduces `dycore.step` word
-  for word. Other mixing packages, moist states with mixing and a
+  for word. Other mixing packages and a
   resumed diff_opt 1 state without its initial theta
   (`diff1_theta_initial`) are refused, and so are passive tracers
   (tracer_opt, madwrf_opt 2) on any step. The forecast path is unchanged.
@@ -54,8 +69,8 @@ New:
   (`woof.grad.wrfplus.diffusion.hd_tl/hd_ad`): u, v, w, theta (its
   departure from the initial field) and scalar tendencies of the field,
   the coefficient and the column mass, tangent-linear and adjoint,
-  checked against WRFPLUS 4.7.1. The step binding above binds the u, v,
-  w and theta rows; the scalar row waits for the moist mixing rows.
+  checked against WRFPLUS 4.7.1. The step bindings above bind them: the
+  u, v, w and theta rows, and the scalar row for qv, qc and qr.
 
 - The WRF dry-step adjoint gains the diff_opt 1 / km_opt 4 coefficients
   (`woof.grad.wrfplus.diffusion`): the deformation and `smag2d_km`'s

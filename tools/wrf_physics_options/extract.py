@@ -121,7 +121,8 @@ def _sha(path: Path) -> str:
 
 #: The release each packaged table was read from; ``--tag`` picks one.
 RELEASES = {"v4.7.1": "f52c197ed39d12e087d02c50f412d90d418f6186",
-            "v4.8.0": "06d4240ae989cc3e50af412bb472df3d9048783c"}
+            "v4.8.0": "06d4240ae989cc3e50af412bb472df3d9048783c",
+            "v4.8.1": "e209f84a1a811424990a8f2f373a0b77c0d35f0d"}
 
 
 def main(argv: list[str]) -> int:

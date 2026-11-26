@@ -408,7 +408,8 @@ and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
     cu_physics  shcu_physics  icloud_bl  cudt_minutes  bmj_rad_feedback  clos_choice
     ishallow  cugd_avedx  gf_deep_rain_evaporation_booking  ysu_surface_heat_exner
     noah_smc_floor_booking  thompson_rain_snow_closure  rrtmg_lw_model_top
-    kf_capped_downdraft_rain_floor  woof_quirk_corrections  mynn_sfclay_psih_zolzt
+    thompson_lamc_updated_rc  kf_capped_downdraft_rain_floor  diff_metrics_seam_slope
+    woof_quirk_corrections  mynn_sfclay_psih_zolzt
     urban_param_file  obstacle_opt  obstacle_file  obstacle_solid_fraction
     obstacle_relax_factor  obstacle_drag_coefficient  obstacle_wall_z0  kf_edrates
     maxiens  maxens  maxens2  maxens3  ensdim  cu_diag  convtrans_avglen_m
@@ -628,6 +629,31 @@ layer's (from `t3d`) and anchors the profile at the interface below the top.
 With `true` both are kept and the profile is anchored at the model-top
 interface. Not read by RTE+RRTMGP. Off, and in exact mode, the arithmetic
 is WRF's word for word. It is not a WRF namelist key; set it in the TOML.
+`diff_metrics_seam_slope` (default `true`; finding FQ12) is a correction to
+the diffusion metrics where WRF's mixing package runs on a periodic axis, per
+domain on the same terms. WRF's `compute_diff_metrics`
+(`module_diffusion_em.F`) fills the slopes `zx` / `zy` at a periodic seam
+for `k = 1..ktf` only, so the top w level at the seam keeps its initial
+zero while every other column carries its slope. With `true` the top level
+is filled too, which is what the engine ran before the option existed; off,
+and in exact mode, the seam is WRF's word for word. Bounded axes and other
+`diff_opt` values do not read it. It is not a WRF namelist key; set it in
+the TOML.
+
+`thompson_lamc_updated_rc` (default `true`; finding FQ7) is a correction to
+the aerosol-aware Thompson's cloud-water balance (`mp_physics = 28` or `38`,
+every `thompson_version`), per domain on the same terms. WRF's
+`module_mp_thompson.F` (:3003) forms the cloud slope `lamc` from the entry
+cloud mass `rc(k)` after the sources have updated it to `xrc`. The sources
+only remove cloud water, so `xrc <= rc(k)` and the mean size comes out too
+large: the clamp, and the cloud number it rediagnoses, answer a mass the
+cloud no longer holds (a spurious clamp at `2*D0r`, or a missed one at
+`D0c`). With `true`, `lamc` is formed from `xrc`; the WRF 3.9 fork's column
+(strict `GPUWM_WRF_EXACT=1` only) carries the same correction, in effect there
+only when the key is set `true` by hand. The classic Thompson
+(`mp_physics = 8`) holds a fixed droplet number that no output carries and
+does not read it. Off, and in exact mode, the arithmetic is WRF's word for
+word. It is not a WRF namelist key; set it in the TOML.
 
 `kf_capped_downdraft_rain_floor` (default `true`; finding FQ11) is a
 correction to the Kain-Fritsch family (`cu_physics = 1` KF-eta, `10` KF-CuP,
@@ -650,7 +676,7 @@ mode (the default) where its scheme runs, and off in exact mode, where the
 run is the WRF / MPAS oracle's arithmetic word for word (parity tests run
 there). On the WRF route exact mode is a strict `GPUWM_WRF_EXACT=1`
 process, or every correct-mode key set `false` (the seven WRF-route keys
-below are correct-mode findings FQ1-FQ6 and FQ11, in the table under "Correct
+below are correct-mode findings FQ1-FQ7, FQ11 and FQ12, in the table under "Correct
 mode"); on the hex door it is `--physics-mode exact`; in an MPAS-Ocean,
 MALI or MPAS-Seaice config dict it is `config_physics_mode = 'exact'`.
 A correction's own key, when set, wins over the mode, which is how one is
@@ -671,12 +697,17 @@ likewise. In correct mode, or under `"all"`, these are on:
   `noah_smc_floor_booking = true` (`sf_surface_physics = 2`),
   `thompson_rain_snow_closure = true` (`mp_physics = 8`, `28` or `38`),
   `rrtmg_lw_model_top = true` (`ra_lw_physics = 4` with
-  `ra_rrtmg_variant = "rrtmg_legacy"`) and
-  `kf_capped_downdraft_rain_floor = true` (`cu_physics = 1`, `10` or `11`).
+  `ra_rrtmg_variant = "rrtmg_legacy"`), `thompson_lamc_updated_rc = true`
+  (`mp_physics = 28` or `38`), `kf_capped_downdraft_rain_floor = true`
+  (`cu_physics = 1`, `10` or `11`) and `diff_metrics_seam_slope = true`
+  (where WRF's mixing package runs on a periodic axis).
 - Hex regional route: `--undriven-species-boundary wrf-flow-dependent`
   (a regional run, `--lbc-dir`, on the WOOF-physics one-card drivers; it
-  stays off on the MPAS suite route, local time stepping, partial nest and
-  the partitioned same-host executor, which do not carry it). The door's
+  stays off on local time stepping, partial nest and the partitioned
+  same-host executor, which do not carry it). The MPAS v8.4.2 suite route
+  carries it on one card only when the flag is given, and then drives only
+  the species the boundary files hold, as WRF does; the umbrella leaves
+  that route native. The door's
   `--quirk-corrections all` sets only this flag: the RunConfig keys above
   are not hex flags.
 - MPAS-Ocean: `woof_land_ice_isomip_freezing_salinity =
@@ -690,7 +721,7 @@ likewise. In correct mode, or under `"all"`, these are on:
   `set_sfcflux_order`, `ice_velocity_at_cell`,
   `ccsm3_absorbed_solar_layers`, `dedd_zero_volume_ice`,
   `zbgc_c2n_proteins`, `bgc_inactive_diagnostics`, `zsal_solve`,
-  `bgc_snow_new_category` and `subcycle_snow_ice_tracers`.
+  `bgc_snow_new_category`, `subcycle_snow_ice_tracers` and `zap_snow_area`.
 - MPAS-Seaice velocity solver set-up (the time step's
   `basis_corrections` / `weak_corrections` names): `planar_metric_terms`
   and `periodic_local_coords` (variational basis; each acts only on a
@@ -906,7 +937,7 @@ for the retained proof and the limits of the forecast evidence.
 ### Correct mode (`[shared]`)
 
 Correct mode is the default. It fixes defects that WRF itself carries
-(water budgets, and the fork's quirk ledger FQ1-FQ6 and FQ11, see
+(water budgets, and the fork's quirk ledger FQ1-FQ7, FQ11 and FQ12, see
 `woof_quirk_corrections`), one key per scheme, each `true` by default and read only by the
 schemes named in its row. Setting a key to `false` in `[shared]` runs that
 scheme's WRF-matched arithmetic. Strict WRF mode (`GPUWM_WRF_EXACT=1`)
@@ -930,7 +961,9 @@ configuration has no `[physics]` table; `physics.mode` is not an engine key.
 | `noah_smc_floor_booking` | Noah (`sf_surface_physics = 2`), not with WRF-Hydro | FQ4 | the water Noah adds at its 0.02 soil-moisture floor comes from the layer below or the drainage |
 | `thompson_rain_snow_closure` | Thompson (`mp_physics = 8, 28, 38`) | FQ5 | below 0 C the rain-snow collection's graupel gain equals what rain and snow lose after their limiters |
 | `rrtmg_lw_model_top` | legacy RRTMG longwave (`ra_lw_physics = 4`, `ra_rrtmg_variant = "rrtmg_legacy"`) | FQ6 | the model-top interface and top layer temperatures are kept, and the standard profile above them is anchored at the model-top interface |
+| `thompson_lamc_updated_rc` | aerosol-aware Thompson (`mp_physics = 28, 38`) | FQ7 | the cloud-water balance forms the cloud slope from the updated cloud mass, not the entry mass |
 | `kf_capped_downdraft_rain_floor` | Kain-Fritsch eta, KF-CuP and MSKF (`cu_physics = 1, 10, 11`) | FQ11 | the capped downdraft's rain flux `TRPPT - TDER` is floored at zero, so `RAINCV` is never negative |
+| `diff_metrics_seam_slope` | WRF's mixing package on a periodic axis | FQ12 | the top w level's coordinate slope at a periodic seam is filled like every other column's, not left at zero |
 
 A checkpoint resumes only under the arithmetic it was written with; a
 mismatch is refused, and the refusal names the key to set.

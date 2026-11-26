@@ -9,13 +9,13 @@
     "cupy.ReductionKernel",
     "cupy.cuda.compiler.compile_using_nvrtc"
   ],
-  "site_count": 742,
+  "site_count": 743,
   "site_count_by_kind": {
     "cupy.ElementwiseKernel": 48,
     "cupy.RawKernel": 124,
     "cupy.RawModule": 317,
     "cupy.ReductionKernel": 22,
-    "cupy.cuda.compiler.compile_using_nvrtc": 231
+    "cupy.cuda.compiler.compile_using_nvrtc": 232
   },
   "site_count_by_surface": {
     "other": {
@@ -29,7 +29,7 @@
       "cupy.RawKernel": 42,
       "cupy.RawModule": 114,
       "cupy.ReductionKernel": 9,
-      "cupy.cuda.compiler.compile_using_nvrtc": 155
+      "cupy.cuda.compiler.compile_using_nvrtc": 156
     },
     "tests": {
       "cupy.ElementwiseKernel": 7,
@@ -2968,7 +2968,7 @@
     },
     {
       "file": "tests/test_mp8_frozen.py",
-      "line": 3374,
+      "line": 3384,
       "column": 8,
       "surface": "tests",
       "constructor": "cp.RawModule",
@@ -7348,7 +7348,7 @@
     },
     {
       "file": "woof/core/dycore.py",
-      "line": 327,
+      "line": 338,
       "column": 11,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -7368,7 +7368,7 @@
     },
     {
       "file": "woof/core/dycore.py",
-      "line": 358,
+      "line": 369,
       "column": 11,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -9158,7 +9158,7 @@
     },
     {
       "file": "woof/core/thompson_aerosol_launch.py",
-      "line": 167,
+      "line": 203,
       "column": 19,
       "surface": "package",
       "constructor": "nvrtc_ptx_cache.compile_using_nvrtc",
@@ -9174,7 +9174,7 @@
     },
     {
       "file": "woof/core/thompson_fork.py",
-      "line": 117,
+      "line": 123,
       "column": 20,
       "surface": "package",
       "constructor": "compiler.compile_using_nvrtc",
@@ -9862,83 +9862,83 @@
     },
     {
       "file": "woof/grad/wrfplus/acoustic.py",
-      "line": 91,
-      "column": 11,
+      "line": 94,
+      "column": 13,
       "surface": "package",
       "constructor": "cp.RawModule",
       "constructor_kind": "cupy.RawModule",
       "enclosing": "_device_module",
       "takes_caller_options": true,
       "options_argument_present": true,
-      "options_expression": "(\"--fmad=false\", f\"-DWRFPLUS_REAL={real}\")\n                        + tuple(f\"-D{k}={v}\" for k, v in defines) + build",
+      "options_expression": "options",
       "options": null,
       "options_element_expressions": null,
       "options_are_literal": false,
-      "text": "return cp.RawModule(code=source,"
+      "text": "module = cp.RawModule(code=source, options=options)"
     },
     {
       "file": "woof/grad/wrfplus/advect.py",
-      "line": 99,
-      "column": 11,
+      "line": 101,
+      "column": 13,
       "surface": "package",
       "constructor": "cp.RawModule",
       "constructor_kind": "cupy.RawModule",
       "enclosing": "_device_module",
       "takes_caller_options": true,
       "options_argument_present": true,
-      "options_expression": "(\n        \"--fmad=false\", f\"-DWRFPLUS_REAL={real}\", f\"-DADV_H={horder}\") + build",
+      "options_expression": "options",
       "options": null,
       "options_element_expressions": null,
       "options_are_literal": false,
-      "text": "return cp.RawModule(code=source, options=("
+      "text": "module = cp.RawModule(code=source, options=options)"
     },
     {
       "file": "woof/grad/wrfplus/bigstep.py",
-      "line": 47,
-      "column": 11,
+      "line": 49,
+      "column": 13,
       "surface": "package",
       "constructor": "cp.RawModule",
       "constructor_kind": "cupy.RawModule",
       "enclosing": "_device_module",
       "takes_caller_options": true,
       "options_argument_present": true,
-      "options_expression": "(\"--fmad=false\", f\"-DWRFPLUS_REAL={real}\") + build",
+      "options_expression": "options",
       "options": null,
       "options_element_expressions": null,
       "options_are_literal": false,
-      "text": "return cp.RawModule(code=source,"
+      "text": "module = cp.RawModule(code=source, options=options)"
     },
     {
       "file": "woof/grad/wrfplus/lbc.py",
-      "line": 61,
-      "column": 11,
+      "line": 63,
+      "column": 13,
       "surface": "package",
       "constructor": "cp.RawModule",
       "constructor_kind": "cupy.RawModule",
       "enclosing": "_device_module",
       "takes_caller_options": true,
       "options_argument_present": true,
-      "options_expression": "(\"--fmad=false\", f\"-DWRFPLUS_REAL={real}\") + build",
+      "options_expression": "options",
       "options": null,
       "options_element_expressions": null,
       "options_are_literal": false,
-      "text": "return cp.RawModule(code=source,"
+      "text": "module = cp.RawModule(code=source, options=options)"
     },
     {
       "file": "woof/grad/wrfplus/stage.py",
-      "line": 36,
-      "column": 11,
+      "line": 39,
+      "column": 13,
       "surface": "package",
       "constructor": "cp.RawModule",
       "constructor_kind": "cupy.RawModule",
       "enclosing": "_device_module",
       "takes_caller_options": true,
       "options_argument_present": true,
-      "options_expression": "(\n        \"--fmad=false\", f\"-DWRFPLUS_REAL={real}\", f\"-DRK_KCHUNK={AD_KCHUNK}\") + build",
+      "options_expression": "options",
       "options": null,
       "options_element_expressions": null,
       "options_are_literal": false,
-      "text": "return cp.RawModule(code=source, options=("
+      "text": "module = cp.RawModule(code=source, options=options)"
     },
     {
       "file": "woof/hex/ad/record/tools/make_layout_source.py",
@@ -10893,6 +10893,22 @@
       "text": "image, _ = compile_using_nvrtc(module_source(precision), options, None,"
     },
     {
+      "file": "woof/hex/mpas_ocean/cvmix_v842.py",
+      "line": 113,
+      "column": 15,
+      "surface": "package",
+      "constructor": "compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "_module_on",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "options",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "image, _ = compile_using_nvrtc(module_source(precision), options, None, f\"ocn_cvmix_v842_{precision}.cu\")"
+    },
+    {
       "file": "woof/hex/mpas_ocean/diagnostics_v842.py",
       "line": 88,
       "column": 15,
@@ -11022,7 +11038,7 @@
     },
     {
       "file": "woof/hex/mpas_ocean/split_step_v842.py",
-      "line": 95,
+      "line": 96,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
@@ -11118,7 +11134,7 @@
     },
     {
       "file": "woof/hex/mpas_ocean/vmix_v842.py",
-      "line": 76,
+      "line": 82,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
@@ -11150,7 +11166,7 @@
     },
     {
       "file": "woof/hex/mpas_seaice/column_itd_v842.py",
-      "line": 181,
+      "line": 188,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
@@ -11214,7 +11230,7 @@
     },
     {
       "file": "woof/hex/mpas_seaice/column_v842.py",
-      "line": 914,
+      "line": 920,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
@@ -12032,7 +12048,7 @@
     },
     {
       "file": "woof/hex/obs_nudging.py",
-      "line": 394,
+      "line": 434,
       "column": 17,
       "surface": "package",
       "constructor": "cp.RawModule",
@@ -12048,7 +12064,7 @@
     },
     {
       "file": "woof/hex/obs_nudging.py",
-      "line": 631,
+      "line": 671,
       "column": 28,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",

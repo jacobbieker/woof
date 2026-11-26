@@ -18,11 +18,16 @@ docs/dev/WRFDA-4DVAR-PLAN.md, PR 4D.3).
   :meth:`Window.ad` and restricts with
   :func:`~woof.grad.wrfplus.window.wrfda_tl_start_ad`.
 
-The window is dry: it carries no moisture.  The ``qv`` perturbation is held
-constant over the window (``moisture="persist"``, the only option; its
-adjoint sums the slots' forcings).  WRFDA's TL model advects ``g_qv``, so
-this is not the L1 lane for moisture; it is meant for the dry OSSE (L2)
-until the window carries moisture.
+**Moisture.**  On a moist window (``Window.inputs`` holds qv, qc and qr:
+P3a's moist binding, mp_physics 0) ``moisture="advect"`` (the default there)
+starts the window's ``qv`` from ``g_qv`` and reads each slot's ``g_qv``
+back, as WRFDA's TL model advects ``g_moist``; qc and qr start at zero
+(``cloud_cv_options = 0``: WRFDA's transfer gives them no perturbation) and
+nothing observes them.  On a dry window ``moisture="persist"`` (the default
+there, and the only option) holds the ``qv`` perturbation constant over the
+window (its adjoint sums the slots' forcings): not WRFDA's moist TL, meant
+for the dry OSSE (L2).  Each option is refused on the other kind of
+window.
 
 **Two trajectories.**  The window is linearised about ITS OWN base (its
 start state run forward by :meth:`Window.forward`), but each slot's ``H'``
@@ -52,6 +57,10 @@ __all__ = ["WindowModel", "to_window", "from_window"]
 #: WRFDA's TL names -> the window's names (the slot read-back; the start
 #: goes through ``wrfda_tl_start``).
 _NAMES = {"u_2": "u", "v_2": "v", "w_2": "w", "t_2": "thp", "mu_2": "mup", "ph_2": "php"}
+
+#: ``moisture``: ``advect`` (a moist window carries g_qv) or ``persist`` (a dry
+#: window: g_qv held over the window).
+_MOISTURE = ("advect", "persist")
 
 #: ``halo_start``: ``wrfplus`` (WRFPLUS's start_domain: the primal mu halo
 #: reset to the edge row, its tangent seeded from g_mu) or ``carried`` (the
@@ -124,11 +133,21 @@ class WindowModel:
     and their adjoint is dropped.
     """
 
-    def __init__(self, window, steps_per_slot: int, *, moisture: str = "persist", to_device=None, to_host=None,
+    def __init__(self, window, steps_per_slot: int, *, moisture: str | None = None, to_device=None, to_host=None,
                  base: Sequence | None = None, base_rtol: float = 1e-5, base_end: dict | None = None,
                  halo_start: str = "wrfplus"):
-        if moisture != "persist":
-            raise NotImplementedError(f"moisture={moisture!r}: the window is dry; only 'persist' is ported")
+        moist = "qv" in tuple(getattr(window, "inputs", None) or ())
+        if moisture is None:
+            moisture = "advect" if moist else "persist"
+        if moisture not in _MOISTURE:
+            raise ValueError(f"moisture must be one of {_MOISTURE}, not {moisture!r}")
+        if moisture == "advect" and not moist:
+            raise NotImplementedError("moisture='advect': the window is dry (no qv among its inputs); "
+                                      "only 'persist' holds on a dry window")
+        if moisture == "persist" and moist:
+            raise ValueError("moisture='persist' on a moist window: its qv tangent moves with the flow, "
+                             "so the slots' g_qv are the window's ('advect')")
+        self.moisture = moisture
         if steps_per_slot < 1:
             raise ValueError(f"steps_per_slot must be >= 1, not {steps_per_slot}")
         self.window = window
@@ -251,13 +270,16 @@ class WindowModel:
                "p": g0["p"]}
         dx0 = self._tl_start({k: self._dev(to_window(v)) for k, v in dev.items()})
         dx0["php"] = self._dev(to_window(g0["ph_2"]))
+        if self.moisture == "advect":
+            dx0["qv"] = self._dev(to_window(g0["qv"]))
         out = self.window.tl(dx0, save_at=states, partial=True)
         res = []
         for k in states:
             d = out[k]
             g = {tl: from_window(self._host(d[w])) for tl, w in _NAMES.items()}
             g["p"] = from_window(self._host(d["p_pert"]))
-            g["qv"] = np.array(g0["qv"], dtype=np.float64)
+            g["qv"] = (from_window(self._host(d["qv"])) if self.moisture == "advect"
+                       else np.array(g0["qv"], dtype=np.float64))
             res.append(g)
         return res
 
@@ -276,8 +298,10 @@ class WindowModel:
                     dk[w] = self._dev(to_window(f[tl]))
             if "p" in f:
                 dk["p_pert"] = self._dev(to_window(f["p"]))
+            if self.moisture == "advect" and "qv" in f:
+                dk["qv"] = self._dev(to_window(f["qv"]))
             forcing[k] = dk
-            if "qv" in f:
+            if self.moisture == "persist" and "qv" in f:
                 qv = np.array(f["qv"], dtype=np.float64) if qv is None else qv + f["qv"]
         a = self.window.ad(None, forcing)
         a0 = self._tl_start_ad(a)
@@ -286,6 +310,8 @@ class WindowModel:
         # no php: its adjoint is the window's own, a["php"]
         out = {"u_2": a0["u"], "v_2": a0["v"], "w_2": a0["w"], "t_2": a0["thp"], "mu_2": a0["mup"],
                "p": a0["p"], "ph_2": a["php"]}
+        if self.moisture == "advect":
+            out["qv"] = a["qv"]   # not one of wrfda_tl_start's fields either
         out = {k: from_window(self._host(v)) for k, v in out.items()}
         if qv is not None:
             out["qv"] = qv

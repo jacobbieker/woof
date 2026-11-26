@@ -2868,6 +2868,39 @@ GPUWM_HEX_LEARNED_CORRECTION) is project code; it ships with no weights.
 A checkpoint a user names is the user's own, under its own terms.
 
 
+==========================================================================
+18. CVMix (the CVMix developers) -- Apache-2.0 WITH LLVM-exception
+==========================================================================
+
+woof/hex/mpas_ocean/cvmix_v842.cu (and its Python wrapper cvmix_v842.py)
+transcribe the CVMix routines that MPAS-Ocean v8.4.2's
+mpas_ocn_vmix_cvmix.F reaches: KPP (cvmix_kpp.F90), the shear and
+convection mixing (cvmix_shear.F90, cvmix_convection.F90) and the
+polynomial and cubic-root helpers (cvmix_math.F90). CVMix-src is licensed
+under the Apache License 2.0 with the LLVM exception, as at commit
+fce422195a0c58f15a55946b5ed517ba4365e232 (github.com/CVMix/CVMix-src); its
+sources carry no copyright line beyond that grant (the authors are NCAR/UCAR
+staff and contributors). The full text, with the exception, is at
+licenses/LICENSE-CVMix-Apache-2.0-LLVM.txt. This is a modified derivative,
+not the version available from the CVMix developers.
+
+The words are held to CVMix v0.84-beta (commit
+d83f582714e7f0f98d20efd8fac8fab01fa3bfe6), the version MPAS-Model v8.4.2
+builds. That tag ships no licence file, and CVMix was relicensed to the
+LGPL in 2021 before the Apache-2.0 grant above. Each transcribed routine
+was compared with its form at the Apache-licensed commit: on the paths
+MPAS-Ocean v8.4.2 configures, they compute the same thing, so the
+transcription is taken under the Apache-2.0 grant. Two behaviours differ
+between v0.84-beta and the Apache tree (the Ekman depth limit,
+config_cvmix_kpp_EkmanOBL = .true., and the enhanced diffusivity turned
+off, config_cvmix_kpp_use_enhanced_diff = .false.). Neither is ported, and
+both are refused by name. tests/data/oracles/mpas_ocean_cvmix/PROVENANCE.md
+records the comparison routine by routine. No LGPL-licensed CVMix code is in
+this distribution. The test oracle (tools/mpas_ocean_oracle/build.sh)
+downloads and compiles v0.84-beta at build time, checks it against
+tools/mpas_ocean_oracle/CVMIX_SOURCES.sha256, and commits none of it.
+
+
 Licence texts the hex model's components ship, by their path in this tree:
   licenses/LICENSE-AER-RRTMG-BSD-3-Clause-hex.txt
   licenses/LICENSE-CORE-MATH-MIT-hex.txt
