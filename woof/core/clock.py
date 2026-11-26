@@ -590,7 +590,8 @@ def resolve_clock(exp: ExperimentConfig, *,
     # pure-CPU config machinery.
     from woof.core.physics import _physics_interval_steps
     from woof.config import radiation_enabled
-    from woof.experiment import validate_boundary_timing
+    from woof.experiment import (delayed_start_root_step_error,
+                                 validate_boundary_timing)
 
     if lbc_interval_s is not None:
         if (not float(lbc_interval_s).is_integer()
@@ -641,6 +642,12 @@ def resolve_clock(exp: ExperimentConfig, *,
             raise ValueError(
                 f"start_time for grid_id={dc.grid_id} is not a whole "
                 f"number of ticks (tick = 1/{tick_den} s).")
+        # The executor births a nest only at a root-step boundary; a start
+        # inside a root step is never born (woof.experiment
+        # .delayed_start_root_step_error says why and what WRF does).
+        root_step_error = delayed_start_root_step_error(exp, dc.grid_id)
+        if root_step_error is not None:
+            raise ValueError(root_step_error)
         start_ticks = int(start_f)
         step_f = dt_ex * tick_den
         if step_f.denominator != 1:  # unreachable: tick_den is the LCM
