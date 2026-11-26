@@ -179,6 +179,7 @@ _WRF_SCHEMES = {
     "thompson_rain_snow_closure": dict(mp_physics=8, moist=True),
     "rrtmg_lw_model_top": dict(ra_physics=4, ra_rrtmg_variant="rrtmg_legacy"),
     "thompson_lamc_updated_rc": dict(mp_physics=28, moist=True),
+    "diff_metrics_seam_slope": dict(diff_opt=2, km_opt=2),
 }
 
 

@@ -2159,10 +2159,16 @@ FROZEN_MODULE_DIGESTS = {
         # 6ee9ec60's on sm_86, fast and WRF-exact).  The tier's tensors equal
         # wrf_smag_deform's (tests/test_smag_deform_hat.py, CUDA and Metal,
         # every mode).  Previously 6ee9ec60/64164164.
-        '379c2013faaaa3df1ae7fbdbc68cc15cf9f6334d55bf2511083287d126b88b0f',
+        # RE-PINNED by RunConfig.diff_metrics_seam_slope (correct-mode FQ12):
+        # boundary flag 2 (periodic, WRF's cold top seam) decodes in wrf_grid
+        # and wrf_zx/wrf_zy return the cold zero at a seam's top w level; flags
+        # 0 and 1 take the previous arithmetic (tests/test_grad_wrfplus_
+        # diffusion.py, the strict primal against the WRFPLUS fixture).
+        # Previously 379c2013/31b03d4d.
+        '854ee250c242baa7d9fd6aba459d6e5f460261f51070d61a420fc9442c6d9dc1',
         # smag2d's default composition keeps 2.9.1's glibc_flt32 text
         # (glibc_flt32_default.cuh); the exact chain's header is strict-only.
-        '31b03d4dae7e29b0aa327c2b7d016f18d8eb5a47e0449f2896bfcb2d5efb5d0e'),
+        '5d1a1e57828f23f3f1f2d9bc16c57e892746f9c48aed5f54df4fbd7b01a5ac83'),
     'spec_bdy': (
         'bcc7090fbbb8ea307bd6dd6c65ab9b8a3f56948c4752ae3d744127b450d20161',
         'bc03ed595bacc546d8e041fbb1d11b5bb3b3b90760ef06ea1dd1f0f18b4de931'),

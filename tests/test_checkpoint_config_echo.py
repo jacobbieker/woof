@@ -143,6 +143,11 @@ MOVED = {
     "rrtmg_lw_model_top": (
         dict(ra_lw_physics=4, ra_sw_physics=4, ra_rrtmg_variant="rrtmg_legacy"),
         {"rrtmg_lw_model_top"}),
+    # Correct-mode FQ12 (on by default): echoed where the mixing package
+    # runs under diff_opt 1 or 2 on a periodic axis.
+    "diff_metrics_seam_slope": (
+        dict(diff_metrics_seam_slope=True, km_opt=4),
+        {"diff_metrics_seam_slope"}),
     # The gridded urban morphology rides the single-layer UCM.
     "urban_param_file": (dict(sf_surface_physics=2, sf_urban_physics=1,
                               urban_param_file="geo_em.d01.nc"),
@@ -301,6 +306,9 @@ DEFAULT_OFF = frozenset({
     # The Thompson cloud slope from the updated mass (FQ7), absent while the
     # aerosol-aware Thompson does not run.
     "thompson_lamc_updated_rc",
+    # The diffusion-metrics seam correction (FQ12), absent while off or
+    # while no mixing package runs on a periodic axis under diff_opt 1, 2.
+    "diff_metrics_seam_slope",
     # WRF v4.8.0 MYNN-SFC roughness keys, absent at their Registry defaults.
     "sf_mynn_sfcflux_land", "sf_mynn_sfcflux_water", "shalwater_z0",
     # The upstream MYNN v6.1 fixes (correct-mode MY1): default on, echoed

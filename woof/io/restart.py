@@ -3564,6 +3564,11 @@ def _drop_default_off_run_keys(values: dict) -> None:
     # which every earlier header ran.
     if values.get("thompson_lamc_updated_rc", False) is False:
         values.pop("thompson_lamc_updated_rc", None)
+    # The diffusion-metrics periodic seam correction (FQ12): absent while
+    # off, as every correction key (the loop above); a checkpoint from
+    # another commit is refused by the runtime identity whatever it echoes.
+    if values.get("diff_metrics_seam_slope", False) is False:
+        values.pop("diff_metrics_seam_slope", None)
     # The opt-in resolved obstacles (woof.core.obstacles): every key at its
     # default is what every earlier header ran, so each is echoed only when
     # it differs; obstacle_opt = 1 always echoes with its file.
@@ -5858,6 +5863,7 @@ _RESTART_ABSENT_RUN_DEFAULTS = {
     'thompson_rain_snow_closure': False,
     'rrtmg_lw_model_top': False,
     'thompson_lamc_updated_rc': False,
+    'diff_metrics_seam_slope': False,
     'obstacle_opt': 0,
     'obstacle_file': '',
     'obstacle_solid_fraction': 0.5,
@@ -6514,6 +6520,7 @@ ECHO_ABSENT_RUN_VALUES = {"nest_accumulation_archive": False,
                           "thompson_rain_snow_closure": False,
                           "rrtmg_lw_model_top": False,
                           "thompson_lamc_updated_rc": False,
+                          "diff_metrics_seam_slope": False,
                           "obstacle_opt": 0, "obstacle_file": "",
                           "obstacle_solid_fraction": 0.5,
                           "obstacle_relax_factor": 10.0,

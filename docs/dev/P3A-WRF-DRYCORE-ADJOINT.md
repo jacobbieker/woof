@@ -984,8 +984,11 @@ Each step is one small PR, taken to merged before the next widens.
      - WRFPLUS findings. `compute_diff_metrics` (WRF's too) fills a
        periodic axis's seam slope (zx at ids/ide, zy at jds/jde) for
        levels 1..ktf only, so the top w level's seam slope keeps its cold
-       zero, where woof's primal takes the true slope: the fixture leaves
-       those deformation words out (and zeroes their adjoint seeds).
+       zero, where woof's primal takes the true slope. The correction
+       `diff_metrics_seam_slope` (finding FQ12, on in correct mode) keeps
+       the true slope; off (exact mode) both the primal smag kernels and
+       the TL/AD (`DFGeometry.seam_cold`, boundary flag 2) take WRF's cold
+       top seam, so the fixture grades every deformation word.
        `a_cal_deform_and_div` sizes its y tapes (Tmpv400-403) from
        max(jds+1, jts) but fills them from j_start = jts on a periodic y
        axis, so it overruns them there: the fully periodic case is TL

@@ -2968,7 +2968,7 @@
     },
     {
       "file": "tests/test_mp8_frozen.py",
-      "line": 3371,
+      "line": 3377,
       "column": 8,
       "surface": "tests",
       "constructor": "cp.RawModule",
@@ -7348,7 +7348,7 @@
     },
     {
       "file": "woof/core/dycore.py",
-      "line": 327,
+      "line": 338,
       "column": 11,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -7368,7 +7368,7 @@
     },
     {
       "file": "woof/core/dycore.py",
-      "line": 358,
+      "line": 369,
       "column": 11,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
