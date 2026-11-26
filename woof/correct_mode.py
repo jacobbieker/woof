@@ -431,6 +431,13 @@ KEY_SCOPE: Mapping[str, tuple[str, tuple[int, ...]]] = {
     "diff_metrics_seam_slope": ("diff_opt", (1, 2)),
 }
 
+#: A launch setting, not a RunConfig field, that :data:`KEY_UNREAD` reads
+#: as a selector: whether this process couples WRF-Hydro
+#: (woof.wrf_hydro_route.configured).  It is stated only in the values
+#: :func:`launch_values` builds (what ran: run_reads, :func:`uncorrected`);
+#: identities and echoes read the configuration alone.
+WRF_HYDRO_SELECTOR = "wrf_hydro_coupled"
+
 #: Key -> ``(selector, values)``: selections inside :data:`KEY_SCOPE` under
 #: which the key is still not read, because that code path has no build of
 #: the correction.  A finding whose carrier runs there is listed as
@@ -441,6 +448,11 @@ KEY_UNREAD: Mapping[str, tuple[str, tuple[object, ...]]] = {
     # (bepswitch = 1), so the HFX/pi(1) correction would reach only the PBL
     # diagnosis: the key is not read there.
     "ysu_surface_heat_exner": ("sf_urban_physics", (2, 3)),
+    # A WRF-Hydro coupling does not carry Noah's floor booking (its
+    # drainage may go negative): woof.core.physics keeps FQ4 off there, so
+    # the receipt lists the finding as uncorrected and the echo does not
+    # bind the key.
+    "noah_smc_floor_booking": (WRF_HYDRO_SELECTOR, (True,)),
 }
 
 
@@ -537,6 +549,15 @@ SCOPE_SELECTORS: tuple[str, ...] = tuple(dict.fromkeys(
     + ["ra_physics"]
     # FQ12's read predicate (KEY_READ_WHEN)
     + list(_SEAM_FIELDS)))
+
+
+def launch_values(cfg) -> dict:
+    """:func:`_scope_values` with this launch's settings that decide what
+    runs (:data:`WRF_HYDRO_SELECTOR`): for the questions "is the correction
+    applied" (woof.quirk_corrections.run_reads) and the receipt
+    (:func:`uncorrected`), never for a configuration's identity."""
+    from woof.wrf_hydro_route import configured
+    return {**_scope_values(cfg), WRF_HYDRO_SELECTOR: configured() is not None}
 
 
 def _scope_values(cfg) -> dict:
@@ -715,7 +736,7 @@ def uncorrected(cfg) -> list[str]:
     if resolution.mode != PHYSICS_MODE_CORRECT:
         return []
     out: list[str] = []
-    values = _scope_values(cfg)
+    values = launch_values(cfg)
     for c in CORRECTIONS:
         if c.finding in resolution.skipped:
             continue

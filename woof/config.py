@@ -78,15 +78,21 @@ def validate_surface_radiation_policy(policy: str) -> str:
 class RunConfig:
     def __post_init__(self):
         # woof_quirk_corrections = 'all' / 'none' (woof.quirk_corrections):
-        # every RunConfig correction on / off, however the RunConfig was
-        # built.  A key is read only where its scheme runs
-        # (correct_mode.KEY_SCOPE).  The TOML readers refuse an explicit
-        # conflicting key before this point (apply_run_corrections).
+        # every RunConfig correction on / off.  A RunConfig built from
+        # named keywords has already been resolved as on the TOML route
+        # (_umbrella_resolved_as_in_toml: under 'none' a named key wins and
+        # the umbrella arrives as None); what reaches this point is a full
+        # restatement (replace(), asdict) or a subclass.  A key is read only
+        # where its scheme runs (correct_mode.KEY_SCOPE).
         if self.woof_quirk_corrections in ("all", "none"):
             from woof.quirk_corrections import run_corrections_under
             for key, value in run_corrections_under(
                     self.woof_quirk_corrections).items():
                 object.__setattr__(self, key, value)
+            # resolved under either umbrella: every key explicit, so a
+            # later replace() of one key keeps it, under 'all' as under
+            # 'none' (the umbrella is a meta key, inert in the identity)
+            object.__setattr__(self, "woof_quirk_corrections", None)
         if self._legacy_h_sca is None:
             object.__setattr__(self, "_legacy_h_sca", self.h_sca_adv_order is None)
         if self.h_sca_adv_order is None:
@@ -2637,10 +2643,13 @@ class RunConfig:
     # The umbrella over the quirk corrections (woof.quirk_corrections).
     # Unset (None, the default), each correction key keeps its own value,
     # whose default follows the physics mode (correct: on; exact or a
-    # strict WRF process: off).  'all' turns every RunConfig correction on
-    # and 'none' turns every one off (__post_init__); the TOML readers
-    # (load_config, build_experiment) refuse a key set the other way next
-    # to it, by name.
+    # strict WRF process: off).  'all' turns every RunConfig correction on;
+    # a key set false next to it is refused by name.  'none' turns off
+    # every correction not named, and a named key wins.  Under either, the
+    # RunConfig then holds it resolved (None, every key explicit), so a
+    # replace() of one key keeps that key.  The same rule on every
+    # route: the TOML readers and RunConfig(...) both resolve through
+    # woof.quirk_corrections.apply_run_corrections.
     woof_quirk_corrections: str | None = _config_field(default=None, kw_only=True)
     # Opt-in correction of a WRF 4.7.1 quirk (quirk pass 2026-11-21),
     # appended off.  The MYNN surface layer (sf_sfclay_physics = 5)
@@ -2710,6 +2719,40 @@ class RunConfig:
     # finding FQ12: on by default, off in physics.mode = 'exact'.
     diff_metrics_seam_slope: bool = _config_field(
         default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
+
+
+def _umbrella_resolved_as_in_toml(init):
+    """RunConfig.__init__, wrapped so that a RunConfig built in Python with
+    an explicit ``woof_quirk_corrections`` resolves it as the TOML readers
+    do (woof.quirk_corrections.apply_run_corrections): under 'none' a
+    correction key passed by name wins, under 'all' one passed false where
+    its scheme runs is refused by name.  __post_init__ cannot tell a key
+    passed True from its default (True in correct mode), so the names are
+    read here.  A call that passes every field (``dataclasses.replace``,
+    ``RunConfig(**asdict(cfg), ...)``) restates a resolved configuration:
+    __post_init__ applies the umbrella to all of it, with no refusal, since
+    a restatement cannot tell a key named in the call from one carried in
+    (``replace(cfg, woof_quirk_corrections='all', key=False)`` gives
+    key=True; in exact mode every key arrives False and 'all' must still
+    turn them on).  A dataclass subclass
+    (_DfiBackwardRunConfig, built from an admitted configuration) has its
+    own __init__ and takes __post_init__'s rule only."""
+    import functools
+
+    @functools.wraps(init)
+    def __init__(self, *args, **kwargs):
+        if (kwargs.get("woof_quirk_corrections") is not None
+                and not kwargs.keys() >= _RUN_CONFIG_INIT_FIELDS):
+            from woof.quirk_corrections import apply_run_corrections
+            kwargs = apply_run_corrections(kwargs)
+        init(self, *args, **kwargs)
+    return __init__
+
+
+_RUN_CONFIG_INIT_FIELDS = frozenset(f.name for f in fields(RunConfig) if f.init)
+
+
+RunConfig.__init__ = _umbrella_resolved_as_in_toml(RunConfig.__init__)
 
 
 def _validate_solar_tsi(cfg) -> None:
