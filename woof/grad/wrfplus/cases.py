@@ -1366,7 +1366,7 @@ def h2_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False) ->
     the slopes are nonzero) and ph' of 20, map factors near 1, the
     fnm/fnp/dn/dnw of stretched levels (``hybrid`` only stretches them;
     the row has no column mass) and a nonzero starting tendency."""
-    from .diffusion import H2_PASSIVE, H2_STATE, h2_active, h2_shapes
+    from .diffusion import H2_STATE, h2_active, h2_passive, h2_shapes
     rng = np.random.default_rng(seed)
     sh = h2_shapes(geom)
     v = _vertical(geom.nz, rng, hybrid)
@@ -1385,14 +1385,20 @@ def h2_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False) ->
     out["u"] = 10.0 + 5.0 * rng.standard_normal(sh["u"])
     out["v"] = -4.0 + 5.0 * rng.standard_normal(sh["v"])
     out["w"] = 0.5 * rng.standard_normal(sh["w"])
-    mean, noise = (5.0, 2.0) if geom.row == "t" else (1.0e-2, 3.0e-3)
+    mean, noise = (5.0, 2.0) if geom.row in ("t", "vt") else (1.0e-2, 3.0e-3)
     out["field"] = mean + noise * rng.standard_normal(sh["field"])
     out["php"] = 20.0 * rng.standard_normal(sh["php"])
     k = np.arange(geom.nz + 1)[:, None, None]
     out["phb"] = 4.0e3 * k + 50.0 * rng.standard_normal(sh["phb"])
     for n in ("msft", "msfu", "msfv"):
         out[n] = 1.0 + 0.02 * rng.standard_normal(sh[n])
-    keep = H2_STATE + h2_active(geom) + H2_PASSIVE
+    # the vertical rows' surface fields: USTM near 0.4 m/s, HFX near 100
+    # W/m2, QFX near 1e-4 kg/m2/s and a base theta rising 3 K per level
+    out["ustm"] = 0.4 + 0.1 * rng.standard_normal(sh["ustm"])
+    out["hfx"] = 100.0 + 30.0 * rng.standard_normal(sh["hfx"])
+    out["qfx"] = 1e-4 + 3e-5 * rng.standard_normal(sh["qfx"])
+    out["thb"] = 290.0 + 3.0 * k[:-1] + 0.5 * rng.standard_normal(sh["thb"])
+    keep = H2_STATE + h2_active(geom) + h2_passive(geom)
     return {n: np.ascontiguousarray(out[n], dtype=dtype) for n in keep}
 
 
@@ -1402,6 +1408,6 @@ def h2_perturbation(geom, seed: int, dtype=np.float64) -> dict:
     sh = h2_shapes(geom)
     scale = {"defor11": 2e-4, "defor22": 2e-4, "defor12": 2e-4, "xk": 10.0, "alt": 0.01,
              "qv": 1e-3, "u": 1.0, "v": 1.0, "w": 0.1, "php": 5.0,
-             "field": 0.4 if geom.row == "t" else 6e-4}
+             "field": 0.4 if geom.row in ("t", "vt") else 6e-4}
     return {n: np.ascontiguousarray(scale[n] * rng.standard_normal(sh[n]), dtype=dtype)
             for n in h2_active(geom)}

@@ -96,7 +96,7 @@ MY1  WRF 4.6.1's MYNN (and every MYNN-EDMF before NCAR/MYNN-EDMF f3c9d9e,
      MY1 as uncorrected; GSD MYNN 4.1 (gsd_41) adds the flux with its sign
      and does not carry it.
 
-FQ1-FQ7, FQ11 and FQ12 are the fork's quirk ledger on the WRF route (woof.quirk_corrections,
+FQ1-FQ8, FQ11 and FQ12 are the fork's quirk ledger on the WRF route (woof.quirk_corrections,
 ``woof_quirk_corrections``): corrections of WRF 4.7.1 arithmetic that
 contradicts itself, each with its own key.  Like the findings above they are
 on in correct mode and off in exact mode (and in a strict WRF process).
@@ -133,6 +133,11 @@ FQ7  Thompson's cloud-water mass/number balance forms the cloud slope lamc
      number tendency of the aerosol-aware schemes (mp_physics = 28, 38;
      the classic scheme's fixed droplet number never leaves the call)
      (``thompson_lamc_updated_rc``).
+FQ8  Noah (sf_surface_physics = 2) on a land-ice point keeps the liquid rain
+     in PRCPF and never reads it, and books only the snowmelt as runoff, so
+     the rain leaves the water budget; the key books it as surface runoff
+     (``noah_land_ice_rain_runoff``).  A WRF-Hydro coupling carries it (the
+     glacial arm writes SFCRUNOFF, never the routing planes).
 FQ11 The Kain-Fritsch family (cu_physics = 1, 10, 11) caps the downdraft
      with DDINC = TRPPT/TDER and forms the rain flux TRPPT - TDER with no
      floor; in binary32 TDER*DDINC can round above TRPPT, so RAINCV and
@@ -359,6 +364,14 @@ CORRECTIONS: tuple[Correction, ...] = (
         carriers=(("mp_physics", THOMPSON_CLOUD_BALANCE_MP),),
     ),
     Correction(
+        finding="FQ8",
+        keys=("noah_land_ice_rain_runoff",),
+        summary=(
+            "Noah books the liquid rain that falls on land ice as surface "
+            "runoff, where WRF drops it"),
+        carriers=(("sf_surface_physics", (2,)),),
+    ),
+    Correction(
         finding="FQ11",
         keys=("kf_capped_downdraft_rain_floor",),
         summary=(
@@ -430,7 +443,7 @@ KEY_SCOPE: Mapping[str, tuple[str, tuple[int, ...]]] = {
     "mynn_boulac_down_sign": ("bl_pbl_physics", (5,)),
     # ML1's second key: the BouLac (8) and k-epsilon (17) length kernels.
     "pbl_boulac_down_sign": ("bl_pbl_physics", (8, 17)),
-    # FQ1-FQ7, FQ11 and FQ12, the fork's quirk ledger (woof.quirk_corrections).
+    # FQ1-FQ8, FQ11 and FQ12, the fork's quirk ledger (woof.quirk_corrections).
     "gf_deep_rain_evaporation_booking": ("cu_physics", (3,)),
     "ysu_surface_heat_exner": ("bl_pbl_physics", (1,)),
     "mynn_sfclay_psih_zolzt": ("sf_sfclay_physics", (5,)),
@@ -441,6 +454,8 @@ KEY_SCOPE: Mapping[str, tuple[str, tuple[int, ...]]] = {
     "rrtmg_lw_model_top": ("ra_lw_physics", (4,)),
     # FQ7: the aerosol-aware Thompson, whose cloud number leaves the call.
     "thompson_lamc_updated_rc": ("mp_physics", THOMPSON_CLOUD_BALANCE_MP),
+    # FQ8: Noah's glacial arm (sf_surface_physics = 2, land-ice points).
+    "noah_land_ice_rain_runoff": ("sf_surface_physics", (2,)),
     # FQ11: KF-eta (kf.cu), KF-CuP (kfcup.cu) and MSKF (mskf.cu); the old
     # KF (99) has no capped-downdraft subtraction.
     "kf_capped_downdraft_rain_floor": ("cu_physics", (1, 10, 11)),

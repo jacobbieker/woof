@@ -753,13 +753,13 @@ Notes on the 1.1.7 sync:
     turns every one on / off whatever the mode (the hex door takes
     `--quirk-corrections all|none`); a key set false next to `"all"` is
     refused by name, and a key set next to `"none"` wins. On the WRF route
-    the keys are correct-mode findings FQ1-FQ7, FQ11 and FQ12, so the run
+    the keys are correct-mode findings FQ1-FQ8, FQ11 and FQ12, so the run
     receipt's `correct_mode` block names them.
     It covers `gf_deep_rain_evaporation_booking`, `ysu_surface_heat_exner`,
     `mynn_sfclay_psih_zolzt`, `noah_smc_floor_booking`,
     `thompson_rain_snow_closure`, `rrtmg_lw_model_top`,
-    `thompson_lamc_updated_rc`, `kf_capped_downdraft_rain_floor` and
-    `diff_metrics_seam_slope` (WRF route);
+    `thompson_lamc_updated_rc`, `noah_land_ice_rain_runoff`,
+    `kf_capped_downdraft_rain_floor` and `diff_metrics_seam_slope` (WRF route);
     `--undriven-species-boundary wrf-flow-dependent` (hex, regional, where its drivers carry it; the only
     flag `--quirk-corrections` sets); `woof_land_ice_isomip_freezing_salinity`,
     `woof_bottom_drag_dry_edges`, `woof_rayleigh_bottom_friction` and
@@ -820,6 +820,12 @@ Notes on the 1.1.7 sync:
     mass (finding FQ7). The classic Thompson (`mp_physics = 8`) holds a fixed
     droplet number that never leaves the call, so it does not read it; not
     yet scored against observations.
+  - `noah_land_ice_rain_runoff` (Noah, `sf_surface_physics = 2`, land-ice
+    points, WRF route). WRF's glacial arm keeps liquid rain in `PRCPF` and
+    never reads it, booking only the snowmelt as `RUNOFF1`, so rain on a
+    glacier leaves the water budget unbooked. The option adds it to the
+    surface runoff (finding FQ8); a WRF-Hydro coupling carries it. Not yet
+    scored against observations.
   - `kf_capped_downdraft_rain_floor` (Kain-Fritsch eta, KF-CuP and MSKF,
     `cu_physics = 1, 10, 11`, WRF route). When the scheme caps the
     downdraft (`DDINC = TRPPT/TDER`), binary32 `TDER*DDINC` can round
@@ -1579,8 +1585,8 @@ Notes on the 1.1.7 sync:
   WRFDA 4.7.1, background-error statistics from woof forecasts, and hybrid
   3DEnVar with the LETKF members. Radar, GOES and radiances come later;
   radiances need an opt-in CRTM. It also scopes opt-in gradient and
-  neural-network options inside the DA. 4D-Var waits for the adjoints in
-  the plan above. So far `woof.da.var` reads WRFDA's `be.dat` and has a
+  neural-network options inside the DA. 4D-Var (outer loops included) is
+  described below; its check against compiled WRFDA is still to come. So far `woof.da.var` reads WRFDA's `be.dat` and has a
   binary64 reference of the control-variable transform `U` and its
   adjoint; on WRFDA's tutorial case both equal a compiled WRFDA 4.7.1 word
   for word. `DeviceU` runs `U` and `U^T` as CUDA or Metal kernels: the
@@ -1633,6 +1639,17 @@ Notes on the 1.1.7 sync:
   with first guesses from a WRF 4.7.1 forecast, it takes WRFDA 4.7.1
   FGAT's 31 iterations to its final cost, and the analysis meets O7's
   tolerances.
+  4D-Var (experimental; `woof var --4dvar` with the FGAT slots runs one loop
+  with the identity TL). On the Python door it supports WRFDA's outer loops
+  (`max_ext_its`): each loop reruns a nonlinear model you supply, then
+  relinearises P3a's window TL/AD about the new run and recomputes every
+  slot's innovations. `Jb` is measured from the first guess and the
+  increments accumulate, as in `da_solve`. WRFDA's `var4d_bin` and
+  `time_step` rules are enforced, and `var4d_lbc`, `jcdfi_use` and
+  `multi_inc` are refused by name. On a dry OSSE, two outer loops lower
+  the nonlinear cost and pass the gradient, dot-product and TL-vs-FD
+  checks. It has not yet been checked against compiled WRFDA 4D-Var. The
+  window model is binary64 and refused on Metal.
   `woof.da.var.gen_be` (experimental, Python API, host binary64) makes a
   `be.dat` from woof or WRF history files (NMC 24 h minus 12 h pairs, or
   ensemble members minus their mean): WRFDA's gen_be stages for
@@ -1932,12 +1949,6 @@ on it:
   - the MPAS WSM6 unit of the water-budget gates (binary64) once had not
     finished its cold compile after 1 h 45 min; it now compiles cold in
     about 4 minutes, but its gates have not been re-run on Metal.
-- **WRF v4.8.0 Grell-Freitas-Li is refused on Metal for now.** `cu_physics = 3`
-  with the default `cu_gf_version = 'gfl_873b414'` (also the hex suites'
-  default cumulus) stops at setup on Metal with a message naming the
-  Metal-ready `cu_gf_version = 'wrf_461'` (WRF v4.6.1 GF). Nothing switches
-  to it silently. Its lane-interleaved CUDA unit does not translate to Metal
-  yet; the port is in progress.
 - **Virtual Macs are not supported.** GitHub's hosted macOS runners expose an
   "Apple Paravirtual device" that computes wrong answers (NaN) where an
   M-series GPU matches WRF, so CI runs the Metal parity gates only on real

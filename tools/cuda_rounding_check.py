@@ -389,6 +389,7 @@ def composed_units(root: Path) -> list[Unit]:
         return value
 
     from woof.core.kernels import module_source
+    from woof.core.noah import noah_define_prefix, noah_define_tier
     kdir = root / "woof" / "core" / "kernels"
     lw = module("rrtmg_lw")
     sw = module("rrtmg_sw")
@@ -444,6 +445,17 @@ def composed_units(root: Path) -> list[Unit]:
         Unit("composed:nest", module_source("nest", kernel_dir=kdir),
              ("-std=c++17", "-fmad=false")),
     ]
+    # noah_land_ice_rain_runoff (FQ8) alone and beside the booking: the mosaic
+    # units with the defines first (woof.core.noah_mosaic).
+    for floor in (False, True):
+        label = ",".join(f"{key}={value}" for key, value in noah_define_tier(floor, True))
+        prefix = noah_define_prefix(floor, True)
+        units.append(Unit(f"composed:noah_mosaic[{label}]",
+                          prefix + module_source("noah_mosaic", kernel_dir=kdir),
+                          tuple(mosaic.MOSAIC_NVRTC_OPTIONS)))
+        units.append(Unit(f"composed:noah_mosaic_ucm[{label}]",
+                          prefix + mosaic.mosaic_ucm_source(),
+                          tuple(mosaic.MOSAIC_NVRTC_OPTIONS)))
     # RRTMG-K's three units, as woof.core.rrtmgk._load compiles them.
     rk = module("rrtmgk")
     units.extend((

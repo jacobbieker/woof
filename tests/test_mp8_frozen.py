@@ -1385,14 +1385,20 @@ FROZEN_MODULE_DIGESTS = {
         # define the preprocessed program is the previous one byte for byte
         # (tests/test_noah_smc_floor_booking.py strips the block and checks the
         # previous digest).  Previously 96e0b62e/908ffc16.
+        # RE-PINNED 2026-11-23 by the correct-mode noah_land_ice_rain_runoff (FQ8): a
+        # NOAH_LAND_ICE_RAIN_RUNOFF #ifdef block in the glacial arm adds the
+        # rain SFLX_GLACIAL drops to RUNOFF1; without the define the program is
+        # the previous one byte for byte (tests/test_noah_land_ice_rain_runoff.py
+        # strips the block and checks the previous digest).  Previously
+        # 3736ba8f/d97d7894.
         # Upstream 1.1.7 RE-PINNED by fix/305-f31-private-names (2026-11-15), a COMMENT-ONLY
         # edit: one comment that named a lab host now names the card ("RTX
         # 4090 test host").  No code token changed, so the compiled kernel is
         # the same; only the file and compile-string digests move.
         # Previously ef57884c/42ed557f.
         # RE-PINNED for the upstream WOOF 1.1.7 merge: both edits above.
-        '3736ba8f07a6ff915255159e6fec8b29a617e76465364d99d276c0795470e17d',
-        'd97d7894899756adbae9cfbc6e388c6fedc9e95292ae9515111f7819c3675aa2'),
+        'c812c93845340096214f805aa69fe999e2c8483d2b798671260c6151d59361d4',
+        '140a7f6588fa2123eb9785a5efbc77b194f6bbdc0f981b8d15d2339dbf7c4ebf'),
     # fix/noahmp-small-defects (2026-11-09): correct-mode SN1, the Noah-MP
     # snowmelt reset re-evaluating ESTG at the reset TG, compiled only under
     # GPUWM_NOAHMP_MELT_RESET_ESAT.  Without it the arithmetic is unchanged

@@ -377,7 +377,7 @@ consumed `RunConfig` field -- the knob-parity battery
 consuming kernel/module rather than being decorative -- and every one
 is importable from a WRF namelist.
 
-**Which keys a `[[domain]]` table may override.** Exactly these 472,
+**Which keys a `[[domain]]` table may override.** Exactly these 475,
 and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
 
     madwrf_opt  madwrf_cldinit  madwrf_dt_relax  madwrf_dt_nudge  ra_call_offset
@@ -408,13 +408,13 @@ and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
     cu_physics  shcu_physics  icloud_bl  cudt_minutes  bmj_rad_feedback  clos_choice
     ishallow  cugd_avedx  gf_deep_rain_evaporation_booking  ysu_surface_heat_exner
     noah_smc_floor_booking  thompson_rain_snow_closure  rrtmg_lw_model_top
-    thompson_lamc_updated_rc  kf_capped_downdraft_rain_floor  diff_metrics_seam_slope
-    woof_quirk_corrections  mynn_sfclay_psih_zolzt
-    urban_param_file  obstacle_opt  obstacle_file  obstacle_solid_fraction
-    obstacle_relax_factor  obstacle_drag_coefficient  obstacle_wall_z0  kf_edrates
-    maxiens  maxens  maxens2  maxens3  ensdim  cu_diag  convtrans_avglen_m
-    sas_pgcon  nsas_dx_factor  shalconv  radt  radt_minutes  bldt  grav_settling
-    ra_physics  ra_lw_physics  ra_sw_physics  ra_rrtmg_variant
+    thompson_lamc_updated_rc  noah_land_ice_rain_runoff
+    kf_capped_downdraft_rain_floor  diff_metrics_seam_slope  woof_quirk_corrections
+    mynn_sfclay_psih_zolzt  urban_param_file  obstacle_opt  obstacle_file
+    obstacle_solid_fraction  obstacle_relax_factor  obstacle_drag_coefficient
+    obstacle_wall_z0  kf_edrates  maxiens  maxens  maxens2  maxens3  ensdim  cu_diag
+    convtrans_avglen_m  sas_pgcon  nsas_dx_factor  shalconv  radt  radt_minutes
+    bldt  grav_settling  ra_physics  ra_lw_physics  ra_sw_physics  ra_rrtmg_variant
     wrf_rrtmg_compatibility  o3input  use_mp_re  swrad_scat  diff_6th_factor  epssm
     spec_exp  mp_physics  moist  moist_cq  nest_microphysics_transition  spp_conv
     spp_pbl  km_opt  bl_pbl_physics  sf_sfclay_physics  c_s  c_k  tke_adv_opt
@@ -655,6 +655,18 @@ only when the key is set `true` by hand. The classic Thompson
 does not read it. Off, and in exact mode, the arithmetic is WRF's word for
 word. It is not a WRF namelist key; set it in the TOML.
 
+`noah_land_ice_rain_runoff` (default `true`; finding FQ8) is a correction to
+Noah's land-ice arm (`sf_surface_physics = 2`, `SFLX_GLACIAL`), per domain
+on the same terms. WRF's `module_sf_noahlsm_glacial_only.F` keeps liquid rain
+in `PRCPF` (:287) and converts it to `PRCP1` (:912), which nothing reads,
+and books only the snowmelt as the surface runoff (`RUNOFF1 = SNOMLT/DT`,
+:406), so rain on a glacier leaves the water budget. With `true`, the rain
+is added to `RUNOFF1` (`sfcrunoff`). Snow and freezing rain, which WRF adds
+to the pack, are unchanged. A WRF-Hydro coupling carries it: the glacial arm
+writes only `sfcrunoff`, never the routing planes. Off, and in exact mode,
+the arithmetic is WRF's word for word. It is not a WRF namelist key; set it
+in the TOML.
+
 `kf_capped_downdraft_rain_floor` (default `true`; finding FQ11) is a
 correction to the Kain-Fritsch family (`cu_physics = 1` KF-eta, `10` KF-CuP,
 `11` MSKF), per domain on the same terms. When the scheme caps the
@@ -675,8 +687,8 @@ They follow the physics mode: unset, every correction is on in correct
 mode (the default) where its scheme runs, and off in exact mode, where the
 run is the WRF / MPAS oracle's arithmetic word for word (parity tests run
 there). On the WRF route exact mode is a strict `GPUWM_WRF_EXACT=1`
-process, or every correct-mode key set `false` (the seven WRF-route keys
-below are correct-mode findings FQ1-FQ7, FQ11 and FQ12, in the table under "Correct
+process, or every correct-mode key set `false` (the ten WRF-route keys
+below are correct-mode findings FQ1-FQ8, FQ11 and FQ12, in the table under "Correct
 mode"); on the hex door it is `--physics-mode exact`; in an MPAS-Ocean,
 MALI or MPAS-Seaice config dict it is `config_physics_mode = 'exact'`.
 A correction's own key, when set, wins over the mode, which is how one is
@@ -698,7 +710,8 @@ likewise. In correct mode, or under `"all"`, these are on:
   `thompson_rain_snow_closure = true` (`mp_physics = 8`, `28` or `38`),
   `rrtmg_lw_model_top = true` (`ra_lw_physics = 4` with
   `ra_rrtmg_variant = "rrtmg_legacy"`), `thompson_lamc_updated_rc = true`
-  (`mp_physics = 28` or `38`), `kf_capped_downdraft_rain_floor = true`
+  (`mp_physics = 28` or `38`), `noah_land_ice_rain_runoff = true`
+  (`sf_surface_physics = 2`), `kf_capped_downdraft_rain_floor = true`
   (`cu_physics = 1`, `10` or `11`) and `diff_metrics_seam_slope = true`
   (where WRF's mixing package runs on a periodic axis).
 - Hex regional route: `--undriven-species-boundary wrf-flow-dependent`
@@ -937,7 +950,7 @@ for the retained proof and the limits of the forecast evidence.
 ### Correct mode (`[shared]`)
 
 Correct mode is the default. It fixes defects that WRF itself carries
-(water budgets, and the fork's quirk ledger FQ1-FQ7, FQ11 and FQ12, see
+(water budgets, and the fork's quirk ledger FQ1-FQ8, FQ11 and FQ12, see
 `woof_quirk_corrections`), one key per scheme, each `true` by default and read only by the
 schemes named in its row. Setting a key to `false` in `[shared]` runs that
 scheme's WRF-matched arithmetic. Strict WRF mode (`GPUWM_WRF_EXACT=1`)
@@ -962,6 +975,7 @@ configuration has no `[physics]` table; `physics.mode` is not an engine key.
 | `thompson_rain_snow_closure` | Thompson (`mp_physics = 8, 28, 38`) | FQ5 | below 0 C the rain-snow collection's graupel gain equals what rain and snow lose after their limiters |
 | `rrtmg_lw_model_top` | legacy RRTMG longwave (`ra_lw_physics = 4`, `ra_rrtmg_variant = "rrtmg_legacy"`) | FQ6 | the model-top interface and top layer temperatures are kept, and the standard profile above them is anchored at the model-top interface |
 | `thompson_lamc_updated_rc` | aerosol-aware Thompson (`mp_physics = 28, 38`) | FQ7 | the cloud-water balance forms the cloud slope from the updated cloud mass, not the entry mass |
+| `noah_land_ice_rain_runoff` | Noah (`sf_surface_physics = 2`), land-ice points | FQ8 | liquid rain that falls on land ice is booked as surface runoff, where WRF drops it |
 | `kf_capped_downdraft_rain_floor` | Kain-Fritsch eta, KF-CuP and MSKF (`cu_physics = 1, 10, 11`) | FQ11 | the capped downdraft's rain flux `TRPPT - TDER` is floored at zero, so `RAINCV` is never negative |
 | `diff_metrics_seam_slope` | WRF's mixing package on a periodic axis | FQ12 | the top w level's coordinate slope at a periodic seam is filled like every other column's, not left at zero |
 

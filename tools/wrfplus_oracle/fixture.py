@@ -1,6 +1,6 @@
 """Make a WRFPLUS 4.7.1 oracle fixture for one TL/AD routine.
 
-    python tools/wrfplus_oracle/fixture.py advance_uv|advance_w|calc_coef_w|advance_mu_t|small_step|rk_stage|advect|bigstep|rhsph|coriolis|w_damp|lbc|lbc_final|diffusion|hdiff|diffusion2 \
+    python tools/wrfplus_oracle/fixture.py advance_uv|advance_w|calc_coef_w|advance_mu_t|small_step|rk_stage|advect|bigstep|rhsph|coriolis|w_damp|lbc|lbc_final|diffusion|hdiff|diffusion2|vdiffusion2 \
         --exe /mnt/NVME2/.../wrfplus_advance_uv \
         --runner "docker run --rm -v /mnt/NVME2/woof-work:/mnt/NVME2/woof-work wrf-oracle:u2404" \
         --out tests/data/wrfplus/advance_uv.npz
@@ -2324,7 +2324,8 @@ def hdiff(exe: str, runner: list[str], seed: int = 20261201) -> dict:
 #: moist case per row.  The TL and AD are fourth-order central
 #: differences of the WRF rows over every active woof word (its halo
 #: images move with it), so they hold to about 1e-9 of the scale.
-H2_ROW_CODE = {"u": 1, "v": 2, "w": 3, "t": 5, "s": 5}
+H2_ROW_CODE = {"u": 1, "v": 2, "w": 3, "t": 5, "s": 5, "vu": 6, "vv": 6, "vw": 6, "vt": 6,
+               "vs": 6}
 H2_FIELD_IDS = {"php": 1, "alt": 2, "qv": 3, "xk": 4, "defor11": 5, "defor22": 6,
                 "defor12": 7, "u": 8, "v": 9, "w": 10, "field": 11}
 H2_DIMS = dict(nz=4, ny=4, nx=5)
@@ -2335,6 +2336,31 @@ DIFF2_CASES = {f"h2_{row}_{kind}": dict(row=row, **over)
                                   ("spec_y", dict(boundary_y=1)),
                                   ("moist", dict(boundary_x=1, moist=1)))}
 DIFF2_CASES["h2_t_periodic"] = dict(row="t")
+
+#: vdiffusion2: vertical_diffusion_2 (diffusion2.F90 row 6) with its
+#: isfflx surface fluxes, every row on periodic, specified and channel
+#: axes and moist, with the surface options of each row (USTM, cd0; the
+#: prescribed heat flux, HFX, mix_full_fields; the qv row's QFX).
+VDIFF2_CASES = {}
+for _row, _kinds in (
+        ("vu", (("periodic", {}), ("spec_ustm", dict(boundary_x=1, boundary_y=1, surface="ustm")),
+                ("spec_y_cd0", dict(boundary_y=1, surface="cd0", cd0=2e-3)),
+                ("moist_ustm", dict(boundary_x=1, moist=1, surface="ustm")))),
+        ("vv", (("periodic", {}), ("spec_ustm", dict(boundary_x=1, boundary_y=1, surface="ustm")),
+                ("spec_y_cd0", dict(boundary_y=1, surface="cd0", cd0=2e-3)),
+                ("moist_ustm", dict(boundary_x=1, moist=1, surface="ustm")))),
+        ("vw", (("periodic", {}), ("spec", dict(boundary_x=1, boundary_y=1)),
+                ("spec_y", dict(boundary_y=1)), ("moist", dict(boundary_x=1, moist=1)))),
+        ("vt", (("periodic", {}), ("spec_const", dict(boundary_x=1, boundary_y=1, heat="const",
+                                                      heat_flux=0.1)),
+                ("spec_y_hfx", dict(boundary_y=1, heat="hfx")),
+                ("moist_hfx", dict(boundary_x=1, moist=1, heat="hfx")),
+                ("periodic_full", dict(heat="hfx", full_theta=1)))),
+        ("vs", (("periodic", {}), ("spec", dict(boundary_x=1, boundary_y=1)),
+                ("moist_qfx", dict(boundary_x=1, moist=1, qflux=1)),
+                ("spec_y_qfx", dict(boundary_y=1, moist=1, qflux=1))))):
+    for _kind, _over in _kinds:
+        VDIFF2_CASES[f"h2_{_row}_{_kind}"] = dict(row=_row, **_over)
 
 
 def _h2_end(name):
@@ -2363,6 +2389,17 @@ def _h2_record_head(geom, tr, nrec):
     blob += np.asarray(act, dtype="<f8").tobytes(order="F")
     # -0.0 marks the words the row leaves alone (-0.0 + x is x)
     blob += np.full(L.s3, -0.0, dtype="<f8").tobytes(order="F")
+    if geom.vertical:
+        vrow = {"vu": 1, "vv": 2, "vw": 3, "vt": 4}.get(geom.row, 5 if geom.qflux else 6)
+        isfflx = 0 if geom.surface == "cd0" or geom.heat == "const" else 1
+        blob += np.array([vrow, isfflx, int(geom.full_theta)], dtype=np.int32).tobytes()
+        blob += np.asarray([geom.cd0, geom.heat_flux], dtype="<f8").tobytes()
+        zero2 = np.zeros((geom.ny, geom.nx))
+        use = {"ustm": geom.surface == "ustm", "hfx": geom.heat == "hfx", "qfx": bool(geom.qflux)}
+        for n in ("ustm", "hfx", "qfx"):
+            blob += np.asarray(L.pad2(tr[n] if use[n] else zero2), dtype="<f8").tobytes(order="F")
+        thb = tr["thb"] if geom.full_theta else np.zeros((geom.nz, geom.ny, geom.nx))
+        blob += np.asarray(L.pad3(thb), dtype="<f8").tobytes(order="F")
     return blob, L
 
 
@@ -2379,9 +2416,17 @@ def _h2_images(L, shape, end):
 
 
 def diffusion2(exe: str, runner: list[str], seed: int = 20261210) -> dict:
+    return _h2_fixture(exe, runner, seed, DIFF2_CASES)
+
+
+def vdiffusion2(exe: str, runner: list[str], seed: int = 20261220) -> dict:
+    return _h2_fixture(exe, runner, seed, VDIFF2_CASES)
+
+
+def _h2_fixture(exe, runner, seed, table) -> dict:
     from woof.grad.wrfplus import diffusion as D
     out = {}
-    for n, (name, over) in enumerate(DIFF2_CASES.items()):
+    for n, (name, over) in enumerate(table.items()):
         dims = dict(H2_DIMS)
         dims.update(over)
         geom = cases.h2_geometry(**dims)
@@ -2416,10 +2461,15 @@ def diffusion2(exe: str, runner: list[str], seed: int = 20261210) -> dict:
         vals = np.frombuffer(result, dtype="<f8").reshape(len(recs) + 1, n3)
         base = L.take3(vals[0].reshape(L.s3, order="F"), sh["tend"])
         touched = ~((base == 0.0) & np.signbit(base))
-        if geom.code == 1 and not geom.boundary_x:
+        if geom.code in (1, 4) and not geom.boundary_x:
             touched[:, :, -1] = False
-        if geom.code == 2 and not geom.boundary_y:
+        if geom.code in (2, 5) and not geom.boundary_y:
             touched[:, -1, :] = False
+        if geom.vertical:
+            # vertical_diffusion_2's surface loops run on every column, its
+            # interior rows on WRF's loop region: grade the columns the
+            # interior reaches (level 1, interior for every row)
+            touched &= touched[1:2]
         f = lambda r: L.take3(vals[r].reshape(L.s3, order="F"), sh["tend"])[touched]  # noqa: E731
         jac = np.empty((int(touched.sum()), len(cols)))
         for c, (_, _, h) in enumerate(cols):
@@ -2454,7 +2504,7 @@ ROUTINES = {"advance_uv": advance_uv, "advance_w": advance_w,
             "advect": advect, "bigstep": bigstep, "rhsph": rhsph,
             "coriolis": coriolis, "w_damp": w_damp,
             "lbc": lbc, "lbc_final": lbc_final, "diffusion": diffusion,
-            "hdiff": hdiff, "diffusion2": diffusion2}
+            "hdiff": hdiff, "diffusion2": diffusion2, "vdiffusion2": vdiffusion2}
 
 
 def main(argv=None) -> int:
@@ -2467,7 +2517,9 @@ def main(argv=None) -> int:
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args(argv)
     data = ROUTINES[args.routine](args.exe, shlex.split(args.runner))
-    driver = ROOT / "tools/wrfplus_oracle" / f"{args.routine}.F90"
+    # vdiffusion2 runs diffusion2.F90's vertical_diffusion_2 row
+    stem = {"vdiffusion2": "diffusion2"}.get(args.routine, args.routine)
+    driver = ROOT / "tools/wrfplus_oracle" / f"{stem}.F90"
     data["provenance"] = np.array(
         f"WRFPLUS 4.7.1 (configure wrfplus 17, real*8, -O0 -ffp-contract=off); "
         f"source sha256 {args.wrfplus_digest}; driver sha256 "

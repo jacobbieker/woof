@@ -2707,18 +2707,6 @@ class RunConfig:
     thompson_lamc_updated_rc: bool = _config_field(
         default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
 
-    # Correction of a WRF 4.7.1 quirk (quirk pass 2026-11-26), appended.
-    # The Kain-Fritsch family (cu_physics = 1, 10, 11) caps the downdraft
-    # with DDINC = TRPPT/TDER and forms PPTFLX = TRPPT - TDER with no floor
-    # (module_cu_kfeta.F:1810-1821, module_cu_kfcup.F:2711-2721,
-    # module_cu_mskf.F:5840); in binary32 TDER*DDINC can round above TRPPT,
-    # so the flux, RAINCV and RAINC go a few ulp negative.  True floors
-    # the flux at zero (the float64 answer); False is WRF's arithmetic word
-    # for word.  Read only where KF, KF-CuP or MSKF runs.  Correct-mode
-    # finding FQ11: on by default, off in physics.mode = 'exact'.
-    kf_capped_downdraft_rain_floor: bool = _config_field(
-        default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
-
     # Correction of a WRF 4.7.1 quirk (P3a item 5 follow-up), appended.
     # compute_diff_metrics (module_diffusion_em.F:7037-7067, 7087-7117)
     # fills a periodic axis's seam slope (zx at ids and ide, zy at jds and
@@ -2730,6 +2718,27 @@ class RunConfig:
     # on a bounded axis.  Every earlier woof release ran True.  Correct-mode
     # finding FQ12: on by default, off in physics.mode = 'exact'.
     diff_metrics_seam_slope: bool = _config_field(
+        default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
+
+    # Noah's land-ice arm (SFLX_GLACIAL, sf_surface_physics = 2) keeps liquid
+    # rain in PRCPF/PRCP1 (module_sf_noahlsm_glacial_only.F:287, :912) and
+    # books only the snowmelt as RUNOFF1 (:406), so rain on a glacier point
+    # leaves the water budget unbooked.  True books it as surface runoff;
+    # False is WRF's arithmetic word for word.  Read only by Noah.
+    # Correct-mode finding FQ8: on by default, off in physics.mode = 'exact'.
+    noah_land_ice_rain_runoff: bool = _config_field(
+        default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
+
+    # Correction of a WRF 4.7.1 quirk (quirk pass 2026-11-26), appended.
+    # The Kain-Fritsch family (cu_physics = 1, 10, 11) caps the downdraft
+    # with DDINC = TRPPT/TDER and forms PPTFLX = TRPPT - TDER with no floor
+    # (module_cu_kfeta.F:1810-1821, module_cu_kfcup.F:2711-2721,
+    # module_cu_mskf.F:5840); in binary32 TDER*DDINC can round above TRPPT,
+    # so the flux, RAINCV and RAINC go a few ulp negative.  True floors
+    # the flux at zero (the float64 answer); False is WRF's arithmetic word
+    # for word.  Read only where KF, KF-CuP or MSKF runs.  Correct-mode
+    # finding FQ11: on by default, off in physics.mode = 'exact'.
+    kf_capped_downdraft_rain_floor: bool = _config_field(
         default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
 
 
@@ -3030,7 +3039,8 @@ CORRECT_MODE_RESTART_BREAK_NOTICE = (
     "gf_deep_rain_evaporation_booking, ysu_surface_heat_exner, "
     "mynn_sfclay_psih_zolzt, noah_smc_floor_booking, "
     "thompson_rain_snow_closure, rrtmg_lw_model_top, "
-    "thompson_lamc_updated_rc, kf_capped_downdraft_rain_floor); otherwise "
+    "thompson_lamc_updated_rc, noah_land_ice_rain_runoff, "
+    "kf_capped_downdraft_rain_floor); otherwise "
     "restart from t = 0.")
 
 #: The same accuracy for the 2.8.9 WRF-folder default (D8): a fixed-step
@@ -10267,9 +10277,11 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
             "kf_capped_downdraft_rain_floor must be true or false")
     if type(cfg.diff_metrics_seam_slope) is not bool:
         raise ConfigurationRefused("diff_metrics_seam_slope must be true or false")
+    if type(cfg.noah_land_ice_rain_runoff) is not bool:
+        raise ConfigurationRefused("noah_land_ice_rain_runoff must be true or false")
     from woof.quirk_corrections import check_run_config
     check_run_config(cfg)
-    # The quirk-ledger keys (correct-mode findings FQ1-FQ7, FQ11 and FQ12)
+    # The quirk-ledger keys (correct-mode findings FQ1-FQ8, FQ11 and FQ12)
     # are on by default and read only where their scheme runs (correct_mode.KEY_SCOPE,
     # KEY_GENERATIONS, KEY_UNREAD: YSU's not with BEP/BEM, MYNN's only at
     # wrf_461), so an unread one is inert, not refused.

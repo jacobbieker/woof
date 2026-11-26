@@ -342,6 +342,9 @@ _DOMAIN_RUN_OVERRIDES = (
     # The Thompson cloud slope from the updated mass (FQ7), on the same
     # terms: a [shared] value reaches the mp_physics = 28, 38 domains only.
     "thompson_lamc_updated_rc",
+    # The Noah land-ice rain runoff (FQ8), on the same terms as FQ4: a
+    # [shared] value reaches the sf_surface_physics = 2 domains only.
+    "noah_land_ice_rain_runoff",
     # The Kain-Fritsch capped-downdraft rain floor (FQ11), on the same
     # terms: a [shared] value reaches the cu_physics = 1, 10, 11 domains only.
     "kf_capped_downdraft_rain_floor",
@@ -5142,6 +5145,9 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
         if (tree_runs_noah and kw.get("sf_surface_physics", RunConfig.sf_surface_physics) != 2
                 and "noah_smc_floor_booking" not in dom):
             kw["noah_smc_floor_booking"] = False
+        if (tree_runs_noah and kw.get("sf_surface_physics", RunConfig.sf_surface_physics) != 2
+                and "noah_land_ice_rain_runoff" not in dom):
+            kw["noah_land_ice_rain_runoff"] = False
         if (tree_runs_thompson
                 and kw.get("mp_physics", RunConfig.mp_physics) not in THOMPSON_RAIN_SNOW_MP
                 and "thompson_rain_snow_closure" not in dom):
@@ -6583,6 +6589,7 @@ def _public_config_value(value):
                                   ("thompson_lamc_updated_rc", False),
                                   ("kf_capped_downdraft_rain_floor", False),
                                   ("diff_metrics_seam_slope", False),
+                                  ("noah_land_ice_rain_runoff", False),
                                   *OBSTACLE_RUN_DEFAULTS.items()):
                 value = run_document.get(name, default)
                 if isinstance(value, list):

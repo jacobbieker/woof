@@ -87,8 +87,11 @@ class FakeWindow:
         self._checkpoints = None
         self.forwards = 0
 
-    def forward(self):
-        """The base: the start plus ``k`` in every field at state ``k``."""
+    def forward(self, x0=None, *, trajectory=None):
+        """The base: the start plus ``k`` in every field at state ``k`` (or
+        ``trajectory``'s states, as ``Window.forward(trajectory=)``)."""
+        if trajectory is not None:
+            return self.use_trajectory(list(trajectory))
         self.forwards += 1
         self._checkpoints = {k: {n: v + k for n, v in self._start.items()}
                              for k in range(0, self.nsteps, self.every)}
