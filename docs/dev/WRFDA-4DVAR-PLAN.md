@@ -9,9 +9,11 @@ on a moist window (`moisture="advect"`). 4D.4 adds outer loops
 (`max_ext_its = 2`) is a skipped, data-gated test reading
 `WOOF_WRFDA471_4DVAR_L1_DIR`. Open questions for L1: the QC carry across
 loops, the var4d transfer's LBC perturbation, and per-loop `var_scaling`
-(docs/var.md). Not done: 4D.0 (the oracle lanes' first runs), the 4D.4 L1
-gate, the checkpoint policy and its G3 receipt, and 4D.5 (L0, after P3a
-item 6). It is the
+(docs/var.md). 4D.0 has run: the lanes L-id, L1 and L0 converge on pb with
+per-slot TL, adjoint-forcing and gradient files
+(`tools/wrfda_oracle/run_4dvar.sh`). Not done: the 4D.4 L1 gate, the
+checkpoint policy and its G3 receipt, and 4D.5 (L0, after P3a item 6).
+It is the
 second half of V5 in
 [WRFDA-3DVAR-PLAN.md](WRFDA-3DVAR-PLAN.md) section 7 (V5.2 and the
 differentiable plan's P4.2). The model TL/AD is P3a's

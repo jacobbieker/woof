@@ -984,11 +984,48 @@ def era5_last_hour() -> datetime:
     return stop
 
 
-def land_state_source(times, *, era5_through: datetime | None = None) -> str:
-    """``era5`` when ARCO holds the whole window, else ``gfs``."""
+def era5_hour_published(valid: datetime) -> bool:
+    """Whether ARCO holds ``valid``'s land state: its land_sea_mask chunk exists.
+
+    The bounds document does not prove every hour before its stop is
+    there: the copy has whole days missing inside it (2026-11-18 00-23Z,
+    measured 2026-11-26).  Only a 404 answers no; any other failure is left
+    for the read itself to report.
+    """
+
+    from urllib.request import Request
+    index = int((valid - ERA5_ORIGIN).total_seconds() // 3600)
+    url = f"{ERA5_STORE}/land_sea_mask/{index}.0.0"
+    for attempt in range(5):
+        try:
+            with urlopen(Request(url, method="HEAD"), timeout=60):
+                return True
+        except HTTPError as error:
+            if error.code == 404:
+                return False
+            if error.code not in (408, 429, 500, 502, 503, 504):
+                return True
+        except (URLError, TimeoutError, ConnectionError):
+            pass
+        time.sleep(min(4 * (attempt + 1), 20))
+    return True
+
+
+def land_state_source(times, *, era5_through: datetime | None = None,
+                      era5_holds=None) -> str:
+    """``era5`` when ARCO holds every hour of the window, else ``gfs``.
+
+    One land-state product serves a whole window, so an hour missing
+    inside ARCO's published span sends the window to GFS as an hour past
+    its end does.
+    """
 
     era5_through = era5_last_hour() if era5_through is None else era5_through
-    return "era5" if times[-1] <= era5_through else "gfs"
+    if times[-1] > era5_through:
+        return "gfs"
+    holds = era5_hour_published if era5_holds is None else era5_holds
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        return "era5" if all(pool.map(holds, times)) else "gfs"
 
 
 def read_era5(valid: datetime, latitude: np.ndarray, longitude: np.ndarray,
