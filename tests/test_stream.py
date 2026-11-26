@@ -2356,6 +2356,11 @@ def _shared_card(monkeypatch, tmp_path, *, cotenant_mib=30000):
                         lambda **kwargs: device["total"])
     monkeypatch.setattr(preflight, "device_wide_used_bytes",
                         lambda **kwargs: device["used"])
+    # The supervisor prices from a short-lived device-probe subprocess, which
+    # the subprocess.run stub below would turn into "unpriced": read it first.
+    probe = preflight.device_memory_probe_subprocess()
+    monkeypatch.setattr(preflight, "device_memory_probe_subprocess",
+                        lambda *args, **kwargs: probe)
     monkeypatch.setattr(stream.subprocess, "run",
                         lambda argv, **kwargs: None)
     return device
@@ -2400,6 +2405,10 @@ def test_stream_prices_its_card_from_the_function_gpuwm_run_prices_from(
     monkeypatch.setattr(supervisor, "GPUFileLock", _NoLock)
     monkeypatch.setattr(supervisor, "preflight_exclusive_gpu",
                         lambda uuid, **kwargs: calls.append(kwargs))
+    import woof.core.preflight as preflight
+    probe = preflight.device_memory_probe_subprocess()
+    monkeypatch.setattr(preflight, "device_memory_probe_subprocess",
+                        lambda *args, **kwargs: probe)
     monkeypatch.setattr(stream.subprocess, "run",
                         lambda argv, **kwargs: None)
 

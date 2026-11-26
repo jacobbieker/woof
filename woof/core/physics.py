@@ -8624,7 +8624,8 @@ def initialize_physics(
         ocean_initial=None, ocean_continuation=False, hydro_parent_geometry=None,
         thermal_inertia=None, wind_legacy_static=None, irrigation=None,
         irr_ph_field=None, seaice_inputs=None, noahmp_crop_inputs=None,
-        noahmp_groundwater_inputs=None) -> PhysicsDriver:
+        noahmp_groundwater_inputs=None, topo_slope=None,
+        topo_slope_azimuth=None) -> PhysicsDriver:
     """Allocate and attach persistent physics state and scheme callables.
 
     An mp-only configuration also receives a driver: microphysics itself is
@@ -8682,6 +8683,12 @@ def initialize_physics(
     :func:`woof.physics_compat.constant_longwave_refusal` and
     :func:`woof.physics_compat.radiation_off_land_surface_refusal` read
     at load -- two separate claims, two separate tokens.
+
+    ``topo_slope`` / ``topo_slope_azimuth`` are slope_rad's SLOPE and
+    SLP_AZI (radians, ``(ny,nx)``) for a caller whose columns are not a
+    structured grid (the hex mesh, woof.hex.slope_statics): given, they
+    replace the grid stencil of :func:`woof.core.topo_radiation.
+    slope_geometry`; given without slope_rad active they are refused.
     """
     dfi_inputs = None
     if getattr(state, '_dfi_remember_physics', bool(cfg.dfi_opt)):
@@ -10004,6 +10011,18 @@ def initialize_physics(
     from woof.core.topo_radiation import (TopoShortwave,
                                            request_surface_diffuse,
                                            topo_shortwave_active)
+    slope_statics = None
+    if (topo_slope is None) != (topo_slope_azimuth is None):
+        raise ValueError(
+            "topo_slope and topo_slope_azimuth go together: slope_rad reads "
+            "both SLOPE and SLP_AZI")
+    if topo_slope is not None:
+        if not topo_shortwave_active(cfg):
+            raise ValueError(
+                "topo_slope/topo_slope_azimuth are read only by slope_rad = 1 "
+                "(with a longwave, a shortwave and a land surface on); here "
+                "they would be accepted and never read")
+        slope_statics = (topo_slope, topo_slope_azimuth)
     if topo_shortwave_active(cfg):
         if radiation_latitude is None or radiation_longitude is None:
             raise ValueError(
@@ -10012,7 +10031,8 @@ def initialize_physics(
                 "and the shadow search read the local solar geometry")
         driver.topo_shortwave = TopoShortwave(
             state=state, cfg=cfg, fields=f, latitude=radiation_latitude,
-            longitude=radiation_longitude, start_time=radiation_start_time)
+            longitude=radiation_longitude, start_time=radiation_start_time,
+            slope_statics=slope_statics)
         request_surface_diffuse(driver.radiation_callable)
     elif radiation_enabled(cfg):
         # SWNORM is a core history row even with slope_rad=0. Its initialized

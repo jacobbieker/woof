@@ -57,9 +57,13 @@ LB_KINDS = {"u": 0, "v": 1, "theta": 2, "phi": 3, "mu": 4, "qv": 5, "w": 6}
 @lru_cache(maxsize=None)
 def _device_module(real: str, device: int, build: tuple = ()):
     import cupy as cp
+    from woof.certify.kernel_manifest import record_module
     source = (KERNELS / "lbc.cu").read_text(encoding="utf-8")
-    return cp.RawModule(code=source,
-                        options=("--fmad=false", f"-DWRFPLUS_REAL={real}") + build)
+    options = ("--fmad=false", f"-DWRFPLUS_REAL={real}") + build
+    module = cp.RawModule(code=source, options=options)
+    record_module("woof.grad.wrfplus.lbc", source=source, options=options,
+                  module=module)
+    return module
 
 
 def _kernel(name: str, dtype):
