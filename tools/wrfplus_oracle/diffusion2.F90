@@ -62,7 +62,7 @@ program wrfplus_diffusion2
   real :: vsc(2)
   real, allocatable, dimension(:,:) :: ust, hfx, qfx
   real, allocatable, dimension(:,:,:) :: thb, ru, rv, rw, rt, tket, thp, theta
-  real, allocatable, dimension(:,:,:,:) :: mt, sct, moist, scal, chem, chemt, trac, tract
+  real, allocatable, dimension(:,:,:,:) :: mt, sct, mq, scal, chem, chemt, trac, tract
   integer, allocatable :: fid(:), word(:)
   character(len=512) :: fin, fout
 
@@ -110,7 +110,7 @@ program wrfplus_diffusion2
     allocate(thb, ru, rv, rw, rt, tket, thp, theta, mold=phb)
     read(iu) thb
     allocate(mt(ims:ime, kms:kme, jms:jme, 2), sct(ims:ime, kms:kme, jms:jme, 2))
-    allocate(moist(ims:ime, kms:kme, jms:jme, 2), scal(ims:ime, kms:kme, jms:jme, 2))
+    allocate(mq(ims:ime, kms:kme, jms:jme, 2), scal(ims:ime, kms:kme, jms:jme, 2))
     allocate(chem(ims:ime, kms:kme, jms:jme, 1), chemt(ims:ime, kms:kme, jms:jme, 1))
     allocate(trac(ims:ime, kms:kme, jms:jme, 1), tract(ims:ime, kms:kme, jms:jme, 1))
   end if
@@ -209,9 +209,9 @@ contains
     real :: zb(kms:kme)
     ru = 0; rv = 0; rw = 0; rt = 0; tket = 0; mt = 0; sct = 0
     chem = 0; chemt = 0; trac = 0; tract = 0; zb = 0
-    moist = 0; scal = 0
-    moist(:,:,:,P_qv) = act(:,:,:,3)
-    if (vrow == 5) moist(:,:,:,P_qv) = act(:,:,:,11)
+    mq = 0; scal = 0
+    mq(:,:,:,P_qv) = act(:,:,:,3)
+    if (vrow == 5) mq(:,:,:,P_qv) = act(:,:,:,11)
     if (vrow == 6) scal(:,:,:,2) = act(:,:,:,11)
     thp = act(:,:,:,11)
     if (cf%mix_full_fields) thp = act(:,:,:,11) + thb
@@ -226,7 +226,7 @@ contains
     end select
     call vertical_diffusion_2(ru, rv, rw, rt, tket, mt, 2, chemt, 1, sct, 2, tract, 1, &
          act(:,:,:,8), act(:,:,:,9), thp, zb, zb, zb, zb, tket, theta, &
-         cf, e13, e23, e33, nba, 1, div, moist, chem, scal, trac, &
+         cf, e13, e23, e33, nba, 1, div, mq, chem, scal, trac, &
          act(:,:,:,4), act(:,:,:,4), act(:,:,:,4), 4, &
          fnm, fnp, dn, dnw, rdz, rdzw, hfx, qfx, ust, rho, &
          ids, ide, jds, jde, kds, kde, ims, ime, jms, jme, kms, kme, &
