@@ -251,7 +251,8 @@ def test_the_forecast_parser_and_the_partitioned_executor():
     got = parser.parse_args(["--obstacle-opt", "1", "--obstacle-file", "b.nc", "--obstacle-wall-z0", "0.1"])
     assert got.obstacle_opt == 1 and got.obstacle_file == Path("b.nc") and got.obstacle_wall_z0 == 0.1
     request = SimpleNamespace(nudging=None, obs_nudging=None, tc_climate=None, w_damping=None,
-                              inflow_perturbation=None, obstacles=None)
+                              inflow_perturbation=None, obstacles=None,
+                              undriven_species_boundary=None)
     assert door._partitioned_samehost_refusal(request) is None
     request.obstacles = {"obstacle_opt": 1}
     assert "--obstacle-opt" in door._partitioned_samehost_refusal(request)

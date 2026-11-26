@@ -593,12 +593,12 @@ def test_the_restart_only_driver_slot_is_in_neither_digest(monkeypatch):
         "carrier_manifest pops this slot, so no store can hold it -- if one "
         "can, the asymmetry is on the other side and this test is wrong")
 
-    monkeypatch.setattr(restart_io, "_driver_manifest", lambda driver: {})
+    monkeypatch.setattr(restart_io, "_driver_manifest", lambda driver, **_: {})
     plain = canonical_state_digest(state, _Clock())
 
     # The same domain, same weather, with the legacy adapter's o33d grid.
     monkeypatch.setattr(restart_io, "_driver_manifest",
-                        lambda driver: {slot: _ramp((NZ, NY, NX), 21)})
+                        lambda driver, **_: {slot: _ramp((NZ, NY, NX), 21)})
     legacy = canonical_state_digest(state, _Clock())
 
     assert slot not in legacy["field_order"]
@@ -684,7 +684,7 @@ def test_the_driver_scalar_block_matches_the_resident_one(monkeypatch):
                       "driver/rthratenlw": _ramp((NZ, NY, NX), 22),
                       "cumulus/w0avg": _ramp((NZ, NY, NX), 23)}
     monkeypatch.setattr(restart_io, "_driver_manifest",
-                        lambda driver: dict(driver_members))
+                        lambda driver, **_: dict(driver_members))
 
     class _Driver:
         call_counts = {"radiation": 3, "cumulus": 11}

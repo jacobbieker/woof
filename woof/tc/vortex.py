@@ -42,6 +42,12 @@ def _module():
     return module
 
 
+def frame_module():
+    """``(module, source)`` for the frame reading (preflight's production-unit list)."""
+    path = Path(__file__).parents[1] / "core/kernels/vortex_init.cu"
+    return _module(), path.read_text()
+
+
 def _field(value, grid):
     import cupy as cp
     grid.validate()
