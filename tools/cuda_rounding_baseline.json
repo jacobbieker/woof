@@ -2609,7 +2609,7 @@
     "call_sha256": "e93297b3ce305dea51a60e2317af2ff1f23df7dd4f0b16b9e545452c21cc16e7",
     "constructor": "RawModule",
     "factory": "_mosaic_module",
-    "factory_sha256": "1141ed37b1cdfde26c955453dd27dcc531eb26edf527451a4742ad38738317df",
+    "factory_sha256": "2bb126194438f719513dcef701ca2377d01e5c21ea7eb3eb0c069f22c5ad5b2c",
     "file": "woof/core/noah_mosaic.py",
     "status": "unresolved"
    },
@@ -2617,7 +2617,7 @@
     "call_sha256": "e93297b3ce305dea51a60e2317af2ff1f23df7dd4f0b16b9e545452c21cc16e7",
     "constructor": "RawModule",
     "factory": "_mosaic_ucm_module",
-    "factory_sha256": "87a333e1f179e08422b2c463658e9c3a30cdd8529678f7821078dc77b4afe938",
+    "factory_sha256": "ae9562894c747838b9e1cc5f861028300eab3fbe5e5fcde192bb133e9c3c6769",
     "file": "woof/core/noah_mosaic.py",
     "status": "unresolved"
    },
@@ -3889,7 +3889,7 @@
    },
    {
     "file": "woof/core/kernels/noah.cu",
-    "sha256": "3736ba8f07a6ff915255159e6fec8b29a617e76465364d99d276c0795470e17d"
+    "sha256": "c812c93845340096214f805aa69fe999e2c8483d2b798671260c6151d59361d4"
    },
    {
     "file": "woof/core/kernels/noah_fractional.cu",
@@ -3901,7 +3901,7 @@
    },
    {
     "file": "woof/core/kernels/noah_mosaic.cu",
-    "sha256": "5c09214c29f2c9f6b01bec651281778b8d759facfc6c755cbb9cd02bd7237b00"
+    "sha256": "6c208d40e19e5ceb1804eedb2d3c4deebee0cdcfb7b4a3e10a18991e6e9d60c9"
    },
    {
     "file": "woof/core/kernels/noah_mosaic_ua.cu",
@@ -5795,7 +5795,7 @@
    },
    {
     "file": "woof/core/noah_mosaic.py",
-    "sha256": "d3f99e05cfc4755e952045707d2ec8de4c70674b6834281a41cedcaa9262ba21"
+    "sha256": "593e1418285ad69603dcd03d41d7aa61878055285bfb0d15eb7b21071d770535"
    },
    {
     "file": "woof/core/noah_sfcdiags.py",
@@ -5867,7 +5867,7 @@
    },
    {
     "file": "woof/core/physics.py",
-    "sha256": "92019c7f0694e846e7e290e922633422e8c5df94a02881b84db8f7c9dad048ba"
+    "sha256": "2e8be8ef61a09b0ce9ddc34af06dcf212e4f4ea08b41811c874cf7f67d65f937"
    },
    {
     "file": "woof/core/preflight.py",
@@ -6079,7 +6079,7 @@
    },
    {
     "file": "woof/ensemble/batch_physics.py",
-    "sha256": "b008f1d25d53db023f688792770d3989124ff2fdb606298cb7b7cb5396795918"
+    "sha256": "6471019ed576095820db01b5066d8c7db3d5ae4f399a983d8bf6035418422805"
    },
    {
     "file": "woof/ensemble/batch_physics_init.py",
