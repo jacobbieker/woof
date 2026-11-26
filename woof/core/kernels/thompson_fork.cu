@@ -1577,6 +1577,16 @@ __device__ bool tf_mp_thompson(
                 nu_c = min(15, tf_nint(1000.E6f / xnc) + 2);
                 lamc = (double)tf_powf(xnc * TF_am_r * CCG(2, nu_c)
                                        * OCG1(nu_c) / rc[k], TF_obmr);
+#ifdef THOMPSON_LAMC_UPDATED_RC
+                // RunConfig.thompson_lamc_updated_rc (FQ7): the fork forms
+                // lamc from the entry cloud mass rc(k) (:2839) although the
+                // balance's mass is the updated xrc (:2830); this divides by
+                // xrc.  xrc <= rc(k) (qcten holds only sinks), so the entry
+                // mass gives xDc too large, never too small (prw_vcd joins
+                // qcten only at :3237, after this balance).
+                lamc = (double)tf_powf(xnc * TF_am_r * CCG(2, nu_c)
+                                       * OCG1(nu_c) / xrc, TF_obmr);
+#endif
                 const float xDcb = (float)((double)(TF_bm_r + (float)nu_c
                                                     + 1.0f) / lamc);
                 if (xDcb < TF_D0c) {

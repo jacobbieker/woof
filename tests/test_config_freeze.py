@@ -373,6 +373,10 @@ def test_new_fields_are_reviewed_defaults_appended_last():
     assert names.pop() == "mynn_sfclay_q2_land_cap"
     assert RunConfig.__dataclass_fields__["mynn_sfclay_q2_land_cap"].default is _cm.CORRECT_KEYS_DEFAULT
     assert RunConfig.__dataclass_fields__["mynn_sfclay_q2_land_cap"].kw_only
+    # The Thompson cloud slope from the updated mass (quirk pass, finding FQ7), appended.
+    assert names.pop() == "thompson_lamc_updated_rc"
+    assert RunConfig.__dataclass_fields__["thompson_lamc_updated_rc"].default is _cm.CORRECT_KEYS_DEFAULT
+    assert RunConfig.__dataclass_fields__["thompson_lamc_updated_rc"].kw_only
     # The RRTMG longwave model-top correction (quirk pass, finding FQ6), appended.
     assert names.pop() == "rrtmg_lw_model_top"
     assert RunConfig.__dataclass_fields__["rrtmg_lw_model_top"].default is _cm.CORRECT_KEYS_DEFAULT
@@ -1143,6 +1147,8 @@ def _check_frozen_defaults(actual):
                          ("thompson_rain_snow_closure", __import__("woof.correct_mode", fromlist=["x"]).CORRECT_KEYS_DEFAULT),
                          # the RRTMG longwave model-top correction (FQ6)
                          ("rrtmg_lw_model_top", __import__("woof.correct_mode", fromlist=["x"]).CORRECT_KEYS_DEFAULT),
+                         # the Thompson cloud slope from the updated mass (FQ7)
+                         ("thompson_lamc_updated_rc", __import__("woof.correct_mode", fromlist=["x"]).CORRECT_KEYS_DEFAULT),
                          # the MYNN surface-layer Q2 land cap (FQ10)
                          ("mynn_sfclay_q2_land_cap", __import__("woof.correct_mode", fromlist=["x"]).CORRECT_KEYS_DEFAULT),
                          # the opt-in resolved obstacles, off

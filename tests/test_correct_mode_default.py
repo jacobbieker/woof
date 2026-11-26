@@ -28,12 +28,12 @@ from woof import correct_mode
 from woof.config import RunConfig, validate_run_config
 
 ROOT = Path(__file__).resolve().parents[1]
-#: the fork's quirk ledger on the WRF route (woof.quirk_corrections), FQ1-FQ6
-_FQ = ("FQ1", "FQ2", "FQ3", "FQ4", "FQ5", "FQ6", "FQ10")
+#: the fork's quirk ledger on the WRF route (woof.quirk_corrections), FQ1-FQ7 and FQ10
+_FQ = ("FQ1", "FQ2", "FQ3", "FQ4", "FQ5", "FQ6", "FQ7", "FQ10")
 _FQ_KEYS = ("gf_deep_rain_evaporation_booking", "ysu_surface_heat_exner",
             "mynn_sfclay_psih_zolzt", "noah_smc_floor_booking",
             "thompson_rain_snow_closure", "rrtmg_lw_model_top",
-            "mynn_sfclay_q2_land_cap")
+            "thompson_lamc_updated_rc", "mynn_sfclay_q2_land_cap")
 
 # -------------------------------------------------------------- the switch --
 def test_exact_mode_authors_every_key_off():
@@ -256,9 +256,10 @@ def test_run_receipt_says_which_corrections_reached_the_run():
         ({"mp_physics": 8}, ["WB1", "HN1", "FQ5"], ["thompson_cloud_surface_booking",
                                              "hydrometeor_handover_numbers",
                                              "thompson_rain_snow_closure"]),
-        ({"mp_physics": 28}, ["WB1", "HN1", "FQ5"], ["thompson_cloud_surface_booking",
+        ({"mp_physics": 28}, ["WB1", "HN1", "FQ5", "FQ7"], ["thompson_cloud_surface_booking",
                                               "hydrometeor_handover_numbers",
-                                              "thompson_rain_snow_closure"]),
+                                              "thompson_rain_snow_closure",
+                                              "thompson_lamc_updated_rc"]),
         ({"mp_physics": 3}, ["WB5"], ["wsm3_conservative_surface"]),
         ({"mp_physics": 4}, ["WB5"], ["wsm5_conservative_surface"]),
         ({"mp_physics": 24}, ["WB5"], ["wsm7_conservative_surface"]),

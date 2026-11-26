@@ -178,6 +178,7 @@ _WRF_SCHEMES = {
     "noah_smc_floor_booking": dict(sf_surface_physics=2, bl_pbl_physics=1, sf_sfclay_physics=1),
     "thompson_rain_snow_closure": dict(mp_physics=8, moist=True),
     "rrtmg_lw_model_top": dict(ra_physics=4, ra_rrtmg_variant="rrtmg_legacy"),
+    "thompson_lamc_updated_rc": dict(mp_physics=28, moist=True),
     "mynn_sfclay_q2_land_cap": dict(bl_pbl_physics=5, sf_sfclay_physics=5),
 }
 

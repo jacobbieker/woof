@@ -96,7 +96,7 @@ MY1  WRF 4.6.1's MYNN (and every MYNN-EDMF before NCAR/MYNN-EDMF f3c9d9e,
      MY1 as uncorrected; GSD MYNN 4.1 (gsd_41) adds the flux with its sign
      and does not carry it.
 
-FQ1-FQ6 are the fork's quirk ledger on the WRF route (woof.quirk_corrections,
+FQ1-FQ7 are the fork's quirk ledger on the WRF route (woof.quirk_corrections,
 ``woof_quirk_corrections``): corrections of WRF 4.7.1 arithmetic that
 contradicts itself, each with its own key.  Like the findings above they are
 on in correct mode and off in exact mode (and in a strict WRF process).
@@ -127,6 +127,12 @@ FQ6  WRF's RRTMG longwave (ra_lw_physics = 4 with ra_rrtmg_variant =
      and the top layer's; the key keeps both and anchors the profile at the
      top interface (``rrtmg_lw_model_top``).  The RTE+RRTMGP adapter does not
      carry it.
+FQ7  Thompson's cloud-water mass/number balance forms the cloud slope lamc
+     from the entry cloud mass rc(k) rather than the updated xrc (WRF
+     4.7.1 :3003); the key forms it from xrc, which changes the cloud
+     number tendency of the aerosol-aware schemes (mp_physics = 28, 38;
+     the classic scheme's fixed droplet number never leaves the call)
+     (``thompson_lamc_updated_rc``).
 FQ10 The wrf_461 MYNN surface layer (sf_sfclay_physics = 5) caps its 2 m
      mixing ratio at 1.05*qv(1) at every point, water included, where the
      surface driver's own cap of that limit runs over land only; the key
@@ -188,6 +194,11 @@ class Correction:
         read one key per finding."""
         return self.keys[0]
 
+
+#: The Thompson schemes whose cloud number leaves the call (aerosol-aware 28
+#: and hail-aware 38); RCON (29) is in THOMPSON_AEROSOL_FAMILY but not here.
+#: RunConfig.thompson_lamc_updated_rc (FQ7) is read under these.
+THOMPSON_CLOUD_BALANCE_MP = (28, 38)
 
 #: Every correction this engine carries.  Order is the receipt order.
 CORRECTIONS: tuple[Correction, ...] = (
@@ -334,6 +345,14 @@ CORRECTIONS: tuple[Correction, ...] = (
         carriers=(("ra_lw_physics", (4,)),),
     ),
     Correction(
+        finding="FQ7",
+        keys=("thompson_lamc_updated_rc",),
+        summary=(
+            "Thompson's cloud-water mass/number balance forms the cloud "
+            "slope from the updated cloud mass, not the entry mass"),
+        carriers=(("mp_physics", THOMPSON_CLOUD_BALANCE_MP),),
+    ),
+    Correction(
         finding="FQ10",
         keys=("mynn_sfclay_q2_land_cap",),
         summary=(
@@ -400,7 +419,7 @@ KEY_SCOPE: Mapping[str, tuple[str, tuple[int, ...]]] = {
     "mynn_boulac_down_sign": ("bl_pbl_physics", (5,)),
     # ML1's second key: the BouLac (8) and k-epsilon (17) length kernels.
     "pbl_boulac_down_sign": ("bl_pbl_physics", (8, 17)),
-    # FQ1-FQ6, the fork's quirk ledger (woof.quirk_corrections).
+    # FQ1-FQ7, the fork's quirk ledger (woof.quirk_corrections).
     "gf_deep_rain_evaporation_booking": ("cu_physics", (3,)),
     "ysu_surface_heat_exner": ("bl_pbl_physics", (1,)),
     "mynn_sfclay_psih_zolzt": ("sf_sfclay_physics", (5,)),
@@ -409,6 +428,8 @@ KEY_SCOPE: Mapping[str, tuple[str, tuple[int, ...]]] = {
     # FQ6: the longwave scheme (the aggregate ra_physics resolves to it,
     # _selector_int), at the legacy variant (KEY_GENERATIONS).
     "rrtmg_lw_model_top": ("ra_lw_physics", (4,)),
+    # FQ7: the aerosol-aware Thompson, whose cloud number leaves the call.
+    "thompson_lamc_updated_rc": ("mp_physics", THOMPSON_CLOUD_BALANCE_MP),
     # FQ10: the MYNN surface layer, at wrf_461 (KEY_GENERATIONS), as FQ3.
     "mynn_sfclay_q2_land_cap": ("sf_sfclay_physics", (5,)),
 }

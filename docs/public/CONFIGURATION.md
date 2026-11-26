@@ -377,7 +377,7 @@ consumed `RunConfig` field -- the knob-parity battery
 consuming kernel/module rather than being decorative -- and every one
 is importable from a WRF namelist.
 
-**Which keys a `[[domain]]` table may override.** Exactly these 472,
+**Which keys a `[[domain]]` table may override.** Exactly these 473,
 and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
 
     madwrf_opt  madwrf_cldinit  madwrf_dt_relax  madwrf_dt_nudge  ra_call_offset
@@ -408,12 +408,12 @@ and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
     cu_physics  shcu_physics  icloud_bl  cudt_minutes  bmj_rad_feedback  clos_choice
     ishallow  cugd_avedx  gf_deep_rain_evaporation_booking  ysu_surface_heat_exner
     noah_smc_floor_booking  thompson_rain_snow_closure  rrtmg_lw_model_top
-    mynn_sfclay_q2_land_cap  woof_quirk_corrections  mynn_sfclay_psih_zolzt
-    urban_param_file  obstacle_opt  obstacle_file  obstacle_solid_fraction
-    obstacle_relax_factor  obstacle_drag_coefficient  obstacle_wall_z0  kf_edrates
-    maxiens  maxens  maxens2  maxens3  ensdim  cu_diag  convtrans_avglen_m
-    sas_pgcon  nsas_dx_factor  shalconv  radt  radt_minutes  bldt  grav_settling
-    ra_physics  ra_lw_physics  ra_sw_physics  ra_rrtmg_variant
+    thompson_lamc_updated_rc  mynn_sfclay_q2_land_cap  woof_quirk_corrections
+    mynn_sfclay_psih_zolzt  urban_param_file  obstacle_opt  obstacle_file
+    obstacle_solid_fraction  obstacle_relax_factor  obstacle_drag_coefficient
+    obstacle_wall_z0  kf_edrates  maxiens  maxens  maxens2  maxens3  ensdim  cu_diag
+    convtrans_avglen_m  sas_pgcon  nsas_dx_factor  shalconv  radt  radt_minutes
+    bldt  grav_settling  ra_physics  ra_lw_physics  ra_sw_physics  ra_rrtmg_variant
     wrf_rrtmg_compatibility  o3input  use_mp_re  swrad_scat  diff_6th_factor  epssm
     spec_exp  mp_physics  moist  moist_cq  nest_microphysics_transition  spp_conv
     spp_pbl  km_opt  bl_pbl_physics  sf_sfclay_physics  c_s  c_k  tke_adv_opt
@@ -638,14 +638,29 @@ cap runs where `XLAND < 1.5` only; Q2 is the only output that moves. Off, and
 in exact mode, the arithmetic is WRF's word for word. It is not a WRF
 namelist key; set it in the TOML.
 
+`thompson_lamc_updated_rc` (default `true`; finding FQ7) is a correction to
+the aerosol-aware Thompson's cloud-water balance (`mp_physics = 28` or `38`,
+every `thompson_version`), per domain on the same terms. WRF's
+`module_mp_thompson.F` (:3003) forms the cloud slope `lamc` from the entry
+cloud mass `rc(k)` after the sources have updated it to `xrc`. The sources
+only remove cloud water, so `xrc <= rc(k)` and the mean size comes out too
+large: the clamp, and the cloud number it rediagnoses, answer a mass the
+cloud no longer holds (a spurious clamp at `2*D0r`, or a missed one at
+`D0c`). With `true`, `lamc` is formed from `xrc`; the WRF 3.9 fork's column
+(strict `GPUWM_WRF_EXACT=1` only) carries the same correction, in effect there
+only when the key is set `true` by hand. The classic Thompson
+(`mp_physics = 8`) holds a fixed droplet number that no output carries and
+does not read it. Off, and in exact mode, the arithmetic is WRF's word for
+word. It is not a WRF namelist key; set it in the TOML.
+
 `woof_quirk_corrections` (default unset) is the umbrella over the
 corrections of WRF 4.7.1 / MPAS v8.4.2 quirks (`woof/quirk_corrections.py`).
 They follow the physics mode: unset, every correction is on in correct
 mode (the default) where its scheme runs, and off in exact mode, where the
 run is the WRF / MPAS oracle's arithmetic word for word (parity tests run
 there). On the WRF route exact mode is a strict `GPUWM_WRF_EXACT=1`
-process, or every correct-mode key set `false` (the six WRF-route keys
-below are correct-mode findings FQ1-FQ6, in the table under "Correct
+process, or every correct-mode key set `false` (the seven WRF-route keys
+below are correct-mode findings FQ1-FQ7, in the table under "Correct
 mode"); on the hex door it is `--physics-mode exact`; in an MPAS-Ocean,
 MALI or MPAS-Seaice config dict it is `config_physics_mode = 'exact'`.
 A correction's own key, when set, wins over the mode, which is how one is
@@ -666,7 +681,8 @@ likewise. In correct mode, or under `"all"`, these are on:
   `noah_smc_floor_booking = true` (`sf_surface_physics = 2`),
   `thompson_rain_snow_closure = true` (`mp_physics = 8`, `28` or `38`) and
   `rrtmg_lw_model_top = true` (`ra_lw_physics = 4` with
-  `ra_rrtmg_variant = "rrtmg_legacy"`) and `mynn_sfclay_q2_land_cap = true`
+  `ra_rrtmg_variant = "rrtmg_legacy"`), `thompson_lamc_updated_rc = true`
+  (`mp_physics = 28` or `38`) and `mynn_sfclay_q2_land_cap = true`
   (`sf_sfclay_physics = 5` with `mynn_sfclay_variant = "wrf_461"`).
 - Hex regional route: `--undriven-species-boundary wrf-flow-dependent`
   (a regional run, `--lbc-dir`, on the WOOF-physics one-card drivers; it
@@ -904,7 +920,7 @@ for the retained proof and the limits of the forecast evidence.
 ### Correct mode (`[shared]`)
 
 Correct mode is the default. It fixes defects that WRF itself carries
-(water budgets, and the fork's quirk ledger FQ1-FQ6, see
+(water budgets, and the fork's quirk ledger FQ1-FQ7, see
 `woof_quirk_corrections`), one key per scheme, each `true` by default and read only by the
 schemes named in its row. Setting a key to `false` in `[shared]` runs that
 scheme's WRF-matched arithmetic. Strict WRF mode (`GPUWM_WRF_EXACT=1`)
@@ -928,6 +944,7 @@ configuration has no `[physics]` table; `physics.mode` is not an engine key.
 | `noah_smc_floor_booking` | Noah (`sf_surface_physics = 2`), not with WRF-Hydro | FQ4 | the water Noah adds at its 0.02 soil-moisture floor comes from the layer below or the drainage |
 | `thompson_rain_snow_closure` | Thompson (`mp_physics = 8, 28, 38`) | FQ5 | below 0 C the rain-snow collection's graupel gain equals what rain and snow lose after their limiters |
 | `rrtmg_lw_model_top` | legacy RRTMG longwave (`ra_lw_physics = 4`, `ra_rrtmg_variant = "rrtmg_legacy"`) | FQ6 | the model-top interface and top layer temperatures are kept, and the standard profile above them is anchored at the model-top interface |
+| `thompson_lamc_updated_rc` | aerosol-aware Thompson (`mp_physics = 28, 38`) | FQ7 | the cloud-water balance forms the cloud slope from the updated cloud mass, not the entry mass |
 | `mynn_sfclay_q2_land_cap` | MYNN surface layer (`sf_sfclay_physics = 5`, `mynn_sfclay_variant = "wrf_461"`) | FQ10 | the 1.05 times lowest-level cap on the 2 m mixing ratio runs over land only, as the surface driver's does, not over water |
 
 A checkpoint resumes only under the arithmetic it was written with; a

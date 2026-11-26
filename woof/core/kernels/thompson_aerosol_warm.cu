@@ -2466,6 +2466,29 @@ extern "C" __global__ void thompson_aa_ncten_balance(
                     THOMPSON_AA_OCG1[nu_c]),
                 rc),
             THOMPSON_AA_OBMR);
+#ifdef THOMPSON_LAMC_UPDATED_RC
+        // RunConfig.thompson_lamc_updated_rc (FQ7): WRF forms lamc from the
+        // ENTRY cloud mass rc(k) (:3003, a copy of :1833) although the
+        // balance's mass is the updated xrc; the correction divides by xrc,
+        // the same mass the clamp branches below rediagnose xnc from.
+        // The comments elsewhere in this unit that call the rc / xrc split
+        // "load-bearing" or "deliberate" describe WRF's program, which exact
+        // mode keeps; this block is the one place the correction departs.
+        // qcten holds only sinks, so xrc <= rc: the entry mass gives a mean
+        // size xDc that is too large, never too small, so the stale form
+        // clamps spuriously at 2*D0r or misses the D0c clamp.  (The
+        // condensation rate prw_vcd joins qcten only after this balance, at
+        // WRF :3480; the balance sees the sinks alone.)
+        lamc = (double)thompson_aa_powf(
+            thompson_aa_div(
+                thompson_aa_mul(
+                    thompson_aa_mul(
+                        thompson_aa_mul(xnc, am_r),
+                        THOMPSON_AA_CCG2[nu_c]),
+                    THOMPSON_AA_OCG1[nu_c]),
+                xrc),
+            THOMPSON_AA_OBMR);
+#endif
         const float xdc = (float)(
             (double)((THOMPSON_AA_BM_R + (float)nu_c) + 1.0f) / lamc);
         bool clamped = false;
