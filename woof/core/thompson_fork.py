@@ -131,12 +131,9 @@ def _module(device: int, rain_snow_closure: bool = False,
 
 def _kernel(rain_snow_closure: bool = False, lamc_updated_rc: bool = False):
     import cupy as cp
-    if lamc_updated_rc:
-        return _module(cp.cuda.runtime.getDevice(), rain_snow_closure,
-                       True).get_function(KERNEL)
-    if rain_snow_closure:
-        return _module(cp.cuda.runtime.getDevice(), True).get_function(KERNEL)
-    return _module(cp.cuda.runtime.getDevice()).get_function(KERNEL)
+    # One cache key per variant: always the three positional arguments.
+    return _module(cp.cuda.runtime.getDevice(), bool(rain_snow_closure),
+                   bool(lamc_updated_rc)).get_function(KERNEL)
 
 
 def _tile(kernel, ncol: int) -> int:

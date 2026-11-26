@@ -790,7 +790,9 @@ Notes on the 1.1.7 sync:
     38`, WRF route). After the cloud-water update WRF's number balance forms
     the cloud slope from the entry cloud mass instead of the updated mass,
     so its mean-size clamp, and the cloud number it rediagnoses, answer a
-    mass the cloud no longer holds. The option forms it from the updated
+    mass the cloud no longer holds (the sources only remove cloud water, so
+    the mean size is too large: a spurious clamp at 2*D0r or a missed one at
+    D0c). The option forms it from the updated
     mass (finding FQ7). The classic Thompson (`mp_physics = 8`) holds a fixed
     droplet number that never leaves the call, so it does not read it; not
     yet scored against observations.

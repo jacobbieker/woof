@@ -574,9 +574,11 @@ sources (`module_mp_thompson.F:2996-3019`): it forms the updated mass
 divides by the entry mass `rc(k)` rather than `xrc` (a copy of :1833, where
 `rc` is the current mass), while the clamp branches (:3006, :3010) already
 use `xrc`. The clamp decision, and so the rediagnosed cloud number
-`ncten`, then answer a mass the cloud no longer holds: a cloud that gains
-five times its entry mass at an unchanged number is not clamped, and is left
-with a mean size past `2*D0r`. With the correction on, `lamc` divides by
+`ncten`, then answer a mass the cloud no longer holds. The sources only
+remove cloud water (`qcten` holds sinks), so `xrc <= rc(k)` and the entry mass
+gives a mean size that is too large, never too small: a shrinking cloud is
+clamped to `2*D0r` that the updated mass does not reach, or escapes the
+`D0c` clamp that the updated mass needs. With the correction on, `lamc` divides by
 `xrc`. The number tendency only leaves the call in the aerosol-aware
 schemes, so it is per domain, read only where `mp_physics = 28` or `38`
 (every `thompson_version`); the classic Thompson's fixed droplet number never

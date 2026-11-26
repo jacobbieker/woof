@@ -211,11 +211,8 @@ def aerosol_kernel(module: str, func: str):
     closure = _RAIN_SNOW_CLOSURE.get() and module in CLOSURE_MODULES
     lamc = _LAMC_UPDATED_RC.get() and module in LAMC_MODULES
     if _HAIL_AWARE.get():
-        if lamc:
-            return _hail_module(module, closure, True).get_function(func)
-        if closure:
-            return _hail_module(module, True).get_function(func)
-        return _hail_module(module).get_function(func)
+        # One cache key per variant: always the three positional arguments.
+        return _hail_module(module, closure, lamc).get_function(func)
     from woof.core.thompson import (
         LAMC_UPDATED_RC_DEFINES, RAIN_SNOW_CLOSURE_DEFINES)
     extra = ((RAIN_SNOW_CLOSURE_DEFINES if closure else ())

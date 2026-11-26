@@ -1578,8 +1578,11 @@ __device__ bool tf_mp_thompson(
                 lamc = (double)tf_powf(xnc * TF_am_r * CCG(2, nu_c)
                                        * OCG1(nu_c) / rc[k], TF_obmr);
 #ifdef THOMPSON_LAMC_UPDATED_RC
-                // RunConfig.thompson_lamc_updated_rc (FQ7): lamc from the
-                // updated cloud mass xrc, not the entry mass rc(k) (:3003).
+                // RunConfig.thompson_lamc_updated_rc (FQ7): the fork forms
+                // lamc from the entry cloud mass rc(k) (:2839) although the
+                // balance's mass is the updated xrc (:2830); this divides by
+                // xrc.  xrc <= rc(k) (qcten holds only sinks), so the entry
+                // mass gives xDc too large, never too small.
                 lamc = (double)tf_powf(xnc * TF_am_r * CCG(2, nu_c)
                                        * OCG1(nu_c) / xrc, TF_obmr);
 #endif

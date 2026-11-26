@@ -96,7 +96,7 @@ MY1  WRF 4.6.1's MYNN (and every MYNN-EDMF before NCAR/MYNN-EDMF f3c9d9e,
      MY1 as uncorrected; GSD MYNN 4.1 (gsd_41) adds the flux with its sign
      and does not carry it.
 
-FQ1-FQ6 are the fork's quirk ledger on the WRF route (woof.quirk_corrections,
+FQ1-FQ7 are the fork's quirk ledger on the WRF route (woof.quirk_corrections,
 ``woof_quirk_corrections``): corrections of WRF 4.7.1 arithmetic that
 contradicts itself, each with its own key.  Like the findings above they are
 on in correct mode and off in exact mode (and in a strict WRF process).
@@ -192,6 +192,11 @@ class Correction:
 
 
 #: Every correction this engine carries.  Order is the receipt order.
+#: The Thompson schemes whose cloud number leaves the call (aerosol-aware 28
+#: and hail-aware 38); RCON (29) is in THOMPSON_AEROSOL_FAMILY but not here.
+#: RunConfig.thompson_lamc_updated_rc (FQ7) is read under these.
+THOMPSON_CLOUD_BALANCE_MP = (28, 38)
+
 CORRECTIONS: tuple[Correction, ...] = (
     Correction(
         finding="WB1",
@@ -341,7 +346,7 @@ CORRECTIONS: tuple[Correction, ...] = (
         summary=(
             "Thompson's cloud-water mass/number balance forms the cloud "
             "slope from the updated cloud mass, not the entry mass"),
-        carriers=(("mp_physics", (28, 38)),),
+        carriers=(("mp_physics", THOMPSON_CLOUD_BALANCE_MP),),
     ),
 )
 
@@ -398,7 +403,7 @@ KEY_SCOPE: Mapping[str, tuple[str, tuple[int, ...]]] = {
     "mynn_boulac_down_sign": ("bl_pbl_physics", (5,)),
     # ML1's second key: the BouLac (8) and k-epsilon (17) length kernels.
     "pbl_boulac_down_sign": ("bl_pbl_physics", (8, 17)),
-    # FQ1-FQ6, the fork's quirk ledger (woof.quirk_corrections).
+    # FQ1-FQ7, the fork's quirk ledger (woof.quirk_corrections).
     "gf_deep_rain_evaporation_booking": ("cu_physics", (3,)),
     "ysu_surface_heat_exner": ("bl_pbl_physics", (1,)),
     "mynn_sfclay_psih_zolzt": ("sf_sfclay_physics", (5,)),
@@ -408,7 +413,7 @@ KEY_SCOPE: Mapping[str, tuple[str, tuple[int, ...]]] = {
     # _selector_int), at the legacy variant (KEY_GENERATIONS).
     "rrtmg_lw_model_top": ("ra_lw_physics", (4,)),
     # FQ7: the aerosol-aware Thompson, whose cloud number leaves the call.
-    "thompson_lamc_updated_rc": ("mp_physics", (28, 38)),
+    "thompson_lamc_updated_rc": ("mp_physics", THOMPSON_CLOUD_BALANCE_MP),
 }
 
 #: Key -> ``(selector, values)``: selections inside :data:`KEY_SCOPE` under

@@ -8,8 +8,11 @@ updated mass xrc = (qc1d + qcten*dt)*rho and number xnc, then diagnoses the
 cloud slope from them.  :3003 divides by the ENTRY mass rc(k), not xrc
 (a copy of :1833, where rc is the current mass).  The clamp decision on the
 mean size, and so the rediagnosed number, then answers a mass the cloud no
-longer holds; the clamp branches (:3006, :3010) already use xrc.
-RunConfig.thompson_lamc_updated_rc forms lamc from xrc.
+longer holds; the clamp branches (:3006, :3010) already use xrc.  The
+sources only remove cloud water, so xrc <= rc and the stale mass gives a mean
+size that is too large, never too small.  The HRRR fork's own file
+(module_mp_thompson.F, v4.1.21 WRFV3.9, sha 4d600111...) holds the same line
+at :2839 (xrc at :2830).  RunConfig.thompson_lamc_updated_rc forms lamc from xrc.
 
 WHAT THIS FILE HOLDS
 --------------------
@@ -139,11 +142,9 @@ def test_the_aerosol_launch_composes_the_defines(monkeypatch, closure, lamc, hai
         launch.aerosol_kernel("thompson_aerosol_warm", "f")
         launch.aerosol_kernel("thompson_aerosol_cold", "f")
     if hail:
+        # one canonical cache key per variant: three positional arguments
         assert hail_calls == [("thompson_aerosol_warm", closure, lamc),
-                              ("thompson_aerosol_cold", closure, False)] \
-            if (closure or lamc) else hail_calls == [
-                ("thompson_aerosol_warm", False, False),
-                ("thompson_aerosol_cold", False, False)]
+                              ("thompson_aerosol_cold", closure, False)]
         return
     warm = (RAIN_SNOW_CLOSURE_DEFINES if closure else ()) \
         + (LAMC_UPDATED_RC_DEFINES if lamc else ())
@@ -205,27 +206,39 @@ def test_the_corrected_balance_answers_the_updated_cloud_mass():
     if cp.cuda.runtime.getDeviceCount() == 0:
         pytest.skip("device verification needs CUDA")
     dt = 10.0
-    # (entry qc, updated qc, entry nc per kg): the first column's cloud gains
-    # five times its entry mass at an unchanged number, so its mean size is
-    # past 2*D0r; the second holds its mass (the correction is inert); the
-    # third shrinks.
-    qc_entry = np.asarray([1.0e-4, 1.0e-4, 5.0e-4], np.float64)
-    qc_after = np.asarray([5.0e-4, 1.0e-4, 1.0e-4], np.float64)
-    nc_entry = np.asarray([5.0e5, 1.0e8, 3.0e8], np.float64)
-    rho = np.ones(3)
+    # (entry qc, updated qc, entry nc per kg).  qcten holds only sinks, so the
+    # updated mass xrc never exceeds the entry mass rc and the stale rc gives
+    # the mean size xDc (which goes as mass**(1/3)) too LARGE, never too small.
+    #   0  shrinks 5x at 5e5 /kg: stale xDc 139 um is past 2*D0r = 100 um and
+    #      clamps; the updated cloud is 81 um and does not (spurious clamp).
+    #   1  shrinks 5x at 1e9 /kg, small mass: stale xDc 1.40 um clears D0c =
+    #      1 um; the updated cloud is 0.82 um and must clamp (missed clamp).
+    #   2  holds its mass: the correction is inert.
+    #   3  shrinks 5x, no clamp either way: inert.
+    qc_entry = np.asarray([5.0e-4, 5.0e-7, 1.0e-4, 5.0e-4], np.float64)
+    qc_after = np.asarray([1.0e-4, 1.0e-7, 1.0e-4, 1.0e-4], np.float64)
+    nc_entry = np.asarray([5.0e5, 1.0e9, 1.0e8, 1.0e8], np.float64)
+    assert (qc_after <= qc_entry).all()
+    rho = np.ones(4)
     exact = _device_balance(cp, False, qc_entry, qc_after, nc_entry, rho, dt)
     fixed = _device_balance(cp, True, qc_entry, qc_after, nc_entry, rho, dt)
-    for i in range(3):
+    for i in range(4):
         for got, updated in ((exact, False), (fixed, True)):
             want, _ = _balance_reference(qc_entry[i], qc_after[i], nc_entry[i], 1.0, dt, updated)
             assert got[i] == pytest.approx(want, rel=1e-4, abs=1e-3), (i, updated)
-    # the word differs where the mass changed and the clamp decision with it
-    assert exact[0] == 0.0 and fixed[0] > 0.0
-    # and not where the mass is the entry mass
-    assert exact[1] == fixed[1]
-    # the physical claim: the corrected balance leaves the updated cloud no
-    # larger than 2*D0r, the stale one leaves it past it
-    assert _balance_reference(qc_entry[0], qc_after[0], nc_entry[0], 1.0, dt, True)[1] \
-        <= 2.0 * _D0R * (1.0 + 1.0e-9)
-    assert _balance_reference(qc_entry[0], qc_after[0], nc_entry[0], 1.0, dt, False)[1] \
-        > 2.0 * _D0R
+    # the word differs on both flipped clamps (one number: exact vs corrected)
+    assert exact[0] != 0.0 and fixed[0] == 0.0
+    assert exact[1] == 0.0 and fixed[1] != 0.0
+    # and not where the clamp decision is the same
+    assert exact[2] == fixed[2] and exact[3] == fixed[3]
+    # the physical claim: the corrected balance leaves every updated cloud
+    # inside [D0c, 2*D0r]; the stale one clamps the 81 um cloud out to 100 um
+    # (column 0) and leaves the 0.82 um cloud below D0c (column 1)
+    tol = 1.0 + 1.0e-9
+    for i in range(4):
+        size = _balance_reference(qc_entry[i], qc_after[i], nc_entry[i], 1.0, dt, True)[1]
+        assert _D0C / tol <= size <= 2.0 * _D0R * tol, i
+    stale0 = _balance_reference(qc_entry[0], qc_after[0], nc_entry[0], 1.0, dt, False)[1]
+    stale1 = _balance_reference(qc_entry[1], qc_after[1], nc_entry[1], 1.0, dt, False)[1]
+    assert stale0 == pytest.approx(2.0 * _D0R, rel=1e-6)
+    assert stale1 < _D0C

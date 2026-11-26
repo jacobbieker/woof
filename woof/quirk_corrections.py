@@ -25,7 +25,7 @@ The rules, the same on every route:
   coupling, the MPAS-Seaice ``ice_velocity_at_cell`` without the
   velocity solver's pools) it stays off; the WRF route's run receipt
   lists such a finding as uncorrected (woof.correct_mode.uncorrected).
-* On the WRF route the RunConfig keys are correct-mode findings FQ1-FQ6
+* On the WRF route the RunConfig keys are correct-mode findings FQ1-FQ7
   of woof.correct_mode: their defaults are ``CORRECT_KEYS_DEFAULT``,
   exact mode authors them off with every other correct-mode key, and the
   checkpoint echo binds one only where it is on and read.
@@ -48,6 +48,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+
+from woof import correct_mode as _correct_mode
 
 #: The umbrella's key on every route (RunConfig field, MPAS config dicts,
 #: and the hex door's ``--quirk-corrections``).
@@ -120,7 +122,7 @@ CORRECTIONS: tuple[QuirkCorrection, ...] = (
     QuirkCorrection(
         "thompson_lamc_updated_rc", "wrf", False, True, "mp_physics = 28 or 38",
         "Thompson's cloud-water mass/number balance forms the cloud slope from the updated cloud mass, not the entry mass",
-        active=lambda get: int(get("mp_physics")) in (28, 38)),
+        active=lambda get: int(get("mp_physics")) in _correct_mode.THOMPSON_CLOUD_BALANCE_MP),
     # hex (MPAS) regional route
     QuirkCorrection(
         "undriven_species_boundary", "hex", "free", "wrf-flow-dependent", "regional mesh (--lbc-dir)",

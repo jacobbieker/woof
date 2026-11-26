@@ -633,9 +633,10 @@ is WRF's word for word. It is not a WRF namelist key; set it in the TOML.
 the aerosol-aware Thompson's cloud-water balance (`mp_physics = 28` or `38`,
 every `thompson_version`), per domain on the same terms. WRF's
 `module_mp_thompson.F` (:3003) forms the cloud slope `lamc` from the entry
-cloud mass `rc(k)` after the sources have updated it to `xrc`, so the mean
-size clamp, and the cloud number it rediagnoses, answer a mass the cloud no
-longer holds. With `true`, `lamc` is formed from `xrc`. The classic Thompson
+cloud mass `rc(k)` after the sources have updated it to `xrc`. The sources
+only remove cloud water, so `xrc <= rc(k)` and the mean size comes out too
+large: the clamp, and the cloud number it rediagnoses, answer a mass the
+cloud no longer holds (a spurious clamp at `2*D0r`, or a missed one at `D0c`). With `true`, `lamc` is formed from `xrc`. The classic Thompson
 (`mp_physics = 8`) holds a fixed droplet number that no output carries and
 does not read it. Off, and in exact mode, the arithmetic is WRF's word for
 word. It is not a WRF namelist key; set it in the TOML.

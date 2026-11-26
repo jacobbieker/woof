@@ -5153,8 +5153,9 @@ THOMPSON_AEROSOL_FAMILY: dict[int, ThompsonAerosolMember] = {
 #: (28, either generation) and hail-aware (38).  RCON (29) is not carried.
 THOMPSON_RAIN_SNOW_MP = frozenset({8, 28, 38})
 #: The Thompson schemes RunConfig.thompson_lamc_updated_rc corrects: the
-#: aerosol-aware ones (28, 38), whose cloud number leaves the call.
-THOMPSON_AEROSOL_MP = frozenset({28, 38})
+#: aerosol-aware ones, whose cloud number leaves the call (not RCON, 29, which
+#: is in THOMPSON_AEROSOL_FAMILY).
+THOMPSON_CLOUD_BALANCE_MP = frozenset(_correct_mode.THOMPSON_CLOUD_BALANCE_MP)
 
 
 def thompson_aerosol_aware(mp_physics) -> bool:
@@ -10189,7 +10190,7 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
         raise ConfigurationRefused("thompson_lamc_updated_rc must be true or false")
     from woof.quirk_corrections import check_run_config
     check_run_config(cfg)
-    # The quirk-ledger keys (correct-mode findings FQ1-FQ6) are on by
+    # The quirk-ledger keys (correct-mode findings FQ1-FQ7) are on by
     # default and read only where their scheme runs (correct_mode.KEY_SCOPE,
     # KEY_GENERATIONS, KEY_UNREAD: YSU's not with BEP/BEM, MYNN's only at
     # wrf_461), so an unread one is inert, not refused.

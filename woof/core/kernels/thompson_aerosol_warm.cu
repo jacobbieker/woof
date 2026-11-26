@@ -2471,6 +2471,12 @@ extern "C" __global__ void thompson_aa_ncten_balance(
         // ENTRY cloud mass rc(k) (:3003, a copy of :1833) although the
         // balance's mass is the updated xrc; the correction divides by xrc,
         // the same mass the clamp branches below rediagnose xnc from.
+        // The comments elsewhere in this unit that call the rc / xrc split
+        // "load-bearing" or "deliberate" describe WRF's program, which exact
+        // mode keeps; this block is the one place the correction departs.
+        // qcten holds only sinks, so xrc <= rc: the entry mass gives a mean
+        // size xDc that is too large, never too small, so the stale form
+        // clamps spuriously at 2*D0r or misses the D0c clamp.
         lamc = (double)thompson_aa_powf(
             thompson_aa_div(
                 thompson_aa_mul(
