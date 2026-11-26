@@ -369,14 +369,18 @@ def test_new_fields_are_reviewed_defaults_appended_last():
     # (multi_perturb and its pert_* keys, the table) off at WRF's Registry
     # defaults (tests/test_wrfsolar_eps_madwrf_config.py).
     from woof.config import MULTI_PERTURB_RUN_DEFAULTS
-    # The diffusion-metrics periodic seam correction (finding FQ12), appended.
-    assert names.pop() == "diff_metrics_seam_slope"
-    assert RunConfig.__dataclass_fields__["diff_metrics_seam_slope"].default is _cm.CORRECT_KEYS_DEFAULT
-    assert RunConfig.__dataclass_fields__["diff_metrics_seam_slope"].kw_only
     # The MYNN surface-layer Q2 land cap (quirk pass, finding FQ10), appended.
     assert names.pop() == "mynn_sfclay_q2_land_cap"
     assert RunConfig.__dataclass_fields__["mynn_sfclay_q2_land_cap"].default is _cm.CORRECT_KEYS_DEFAULT
     assert RunConfig.__dataclass_fields__["mynn_sfclay_q2_land_cap"].kw_only
+    # The Noah land-ice rain runoff (quirk pass, finding FQ8), appended.
+    assert names.pop() == "noah_land_ice_rain_runoff"
+    assert RunConfig.__dataclass_fields__["noah_land_ice_rain_runoff"].default is _cm.CORRECT_KEYS_DEFAULT
+    assert RunConfig.__dataclass_fields__["noah_land_ice_rain_runoff"].kw_only
+    # The diffusion-metrics periodic seam correction (finding FQ12), appended.
+    assert names.pop() == "diff_metrics_seam_slope"
+    assert RunConfig.__dataclass_fields__["diff_metrics_seam_slope"].default is _cm.CORRECT_KEYS_DEFAULT
+    assert RunConfig.__dataclass_fields__["diff_metrics_seam_slope"].kw_only
     # The Thompson cloud slope from the updated mass (quirk pass, finding FQ7), appended.
     assert names.pop() == "thompson_lamc_updated_rc"
     assert RunConfig.__dataclass_fields__["thompson_lamc_updated_rc"].default is _cm.CORRECT_KEYS_DEFAULT
@@ -1155,6 +1159,8 @@ def _check_frozen_defaults(actual):
                          ("thompson_lamc_updated_rc", __import__("woof.correct_mode", fromlist=["x"]).CORRECT_KEYS_DEFAULT),
                          # the diffusion-metrics periodic seam correction (FQ12)
                          ("diff_metrics_seam_slope", __import__("woof.correct_mode", fromlist=["x"]).CORRECT_KEYS_DEFAULT),
+                         # the Noah land-ice rain runoff (FQ8)
+                         ("noah_land_ice_rain_runoff", __import__("woof.correct_mode", fromlist=["x"]).CORRECT_KEYS_DEFAULT),
                          # the MYNN surface-layer Q2 land cap (FQ10)
                          ("mynn_sfclay_q2_land_cap", __import__("woof.correct_mode", fromlist=["x"]).CORRECT_KEYS_DEFAULT),
                          # the opt-in resolved obstacles, off

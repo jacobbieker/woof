@@ -652,7 +652,28 @@ def test_the_booking_variants_the_run_launches_are_warmed(mode):
     labels = {job[0] for job in kernel_prewarm._variant_jobs(experiment, ("gf", "noah_ua"))}
     on = mode == "correct"
     assert any("GF_DEEP_EVAP_BOOKING=1" in label for label in labels) is on
-    assert ("noah_ua[NOAH_SMC_FLOOR_BOOKING=1]" in labels) is on
+    # FQ4 and FQ8 compose in one unit (woof.core.noah.noah_define_tier)
+    assert ("noah_ua[NOAH_SMC_FLOOR_BOOKING=1,NOAH_LAND_ICE_RAIN_RUNOFF=1]" in labels) is on
+
+
+@pytest.mark.parametrize("floor,rain", [(True, False), (False, True), (True, True), (False, False)])
+def test_the_noah_corrections_compose_in_the_warmed_tier(floor, rain):
+    """FQ4 and FQ8 each alone, both, and neither: the tier launch_noah compiles."""
+    from woof import correct_mode
+    from woof.config import RunConfig, validate_run_config
+    settings = dict(correct_mode.resolve("exact").settings)
+    settings.update(noah_smc_floor_booking=floor, noah_land_ice_rain_runoff=rain)
+    run = validate_run_config(RunConfig(
+        nx=8, ny=8, nz=12, dx=3000.0, dy=3000.0, ztop=12000.0, dt=10.0, run_seconds=60.0, moist=True,
+        sf_surface_physics=2, sf_sfclay_physics=1, bl_pbl_physics=1, **settings))
+    experiment = SimpleNamespace(domains=(SimpleNamespace(run=run),))
+    labels = {job[0] for job in kernel_prewarm._variant_jobs(experiment, ("noah", "noah_ua"))}
+    want = ",".join(([] if not floor else ["NOAH_SMC_FLOOR_BOOKING=1"])
+                    + ([] if not rain else ["NOAH_LAND_ICE_RAIN_RUNOFF=1"]))
+    for name in ("noah", "noah_ua"):
+        tiered = {label for label in labels
+                  if label.startswith(name + "[") and "NOAH_" in label}
+        assert tiered == ({f"{name}[{want}]"} if want else set()), (name, tiered)
 
 
 @pytest.mark.parametrize("mode", ["correct", "exact"])

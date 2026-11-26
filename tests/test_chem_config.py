@@ -187,8 +187,8 @@ def test_the_chem_block_is_appended_after_every_older_field():
             "ysu_surface_heat_exner", "woof_quirk_corrections",
             "mynn_sfclay_psih_zolzt", "noah_smc_floor_booking",
             "thompson_rain_snow_closure", "rrtmg_lw_model_top",
-            "thompson_lamc_updated_rc", "mynn_sfclay_q2_land_cap",
-            "diff_metrics_seam_slope"]
+            "thompson_lamc_updated_rc", "diff_metrics_seam_slope",
+            "noah_land_ice_rain_runoff", "mynn_sfclay_q2_land_cap"]
     assert names[-len(tail):] == tail
     names = names[:-len(tail)]
     # Appended last after the campaign, keyword-only: sea ice's real.exe

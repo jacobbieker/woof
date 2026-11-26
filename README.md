@@ -753,13 +753,13 @@ Notes on the 1.1.7 sync:
     turns every one on / off whatever the mode (the hex door takes
     `--quirk-corrections all|none`); a key set false next to `"all"` is
     refused by name, and a key set next to `"none"` wins. On the WRF route
-    the keys are correct-mode findings FQ1-FQ7, FQ12 and FQ10, so the run receipt's
+    the keys are correct-mode findings FQ1-FQ8, FQ10 and FQ12, so the run receipt's
     `correct_mode` block names them.
     It covers `gf_deep_rain_evaporation_booking`, `ysu_surface_heat_exner`,
     `mynn_sfclay_psih_zolzt`, `noah_smc_floor_booking`,
     `thompson_rain_snow_closure`, `rrtmg_lw_model_top`,
-    `thompson_lamc_updated_rc`, `diff_metrics_seam_slope` and
-    `mynn_sfclay_q2_land_cap` (WRF route);
+    `thompson_lamc_updated_rc`, `noah_land_ice_rain_runoff`,
+    `mynn_sfclay_q2_land_cap` and `diff_metrics_seam_slope` (WRF route);
     `--undriven-species-boundary wrf-flow-dependent` (hex, regional, where its drivers carry it; the only
     flag `--quirk-corrections` sets); `woof_land_ice_isomip_freezing_salinity`,
     `woof_bottom_drag_dry_edges`, `woof_rayleigh_bottom_friction` and
@@ -820,6 +820,12 @@ Notes on the 1.1.7 sync:
     mass (finding FQ7). The classic Thompson (`mp_physics = 8`) holds a fixed
     droplet number that never leaves the call, so it does not read it; not
     yet scored against observations.
+  - `noah_land_ice_rain_runoff` (Noah, `sf_surface_physics = 2`, land-ice
+    points, WRF route). WRF's glacial arm keeps liquid rain in `PRCPF` and
+    never reads it, booking only the snowmelt as `RUNOFF1`, so rain on a
+    glacier leaves the water budget unbooked. The option adds it to the
+    surface runoff (finding FQ8); a WRF-Hydro coupling carries it. Not yet
+    scored against observations.
   - `diff_metrics_seam_slope` (where WRF's mixing package runs on a periodic axis,
     WRF route). WRF's `compute_diff_metrics` fills the coordinate slope at
     a periodic seam for every level but the top w level, which keeps its
