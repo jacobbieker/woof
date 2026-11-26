@@ -895,19 +895,24 @@ Notes on the 1.1.7 sync:
     transition-band diagnostics. The step is set by the smallest cell, so
     a graded mesh costs about what its finest cells cost;
   - an option matrix that runs generic-seam column options through a real
-    hex forecast on CUDA and Metal. Every row now runs or is refused by
-    name with its reason: CAM radiation is refused on Metal, GFDL-Eta on
-    the 149-level case (nominal eta), MAD-WRF (species row) and any
-    radiation-off run with Noah-MP (no GLW source); the WSM3, WSM5
-    and KF-CuP rows state their layer limits. BouLac and QNSE PBL now
-    admit 256 levels (compile-time 128/256 tier; at 128 levels or fewer
-    the unchanged kernel, word for word); their matrix rows still record
-    the old 128-level refusal until the 149-level hex case is re-run.
-    KF-CuP and Multiscale Kain-Fritsch now take up to 256 levels (were
-    128 and 160): both keep every column array in a runtime-sized
-    workspace, so the bound was a refusal guard only, and words at the
-    old level counts are unchanged
-    (`tests/test_cu_kfcup_mskf_256_levels_gpu.py`).
+    hex forecast on CUDA and Metal. Every row runs, is refused by name
+    with its reason, or records its failure: CAM radiation is refused on
+    Metal, GFDL-Eta on the 149-level case (nominal eta), MAD-WRF
+    (species row) and any shortwave-only or radiation-off run with Noah-MP
+    (no GLW source). On the 149-level case the CUDA rows for WSM3, WSM5,
+    WSM7, WDM5, WDM7, BouLac, QNSE (PBL and surface layer), Multiscale
+    Kain-Fritsch and Fu-Liou-Gu now run within the baseline's budget
+    tolerances, since each admits 256 levels (compile-time tiers or
+    runtime-sized workspaces; words at the old level counts unchanged,
+    `tests/test_cu_kfcup_mskf_256_levels_gpu.py` and each family's
+    256-level test). KF-CuP now passes admission there too but its CUDA
+    row stops with negative accumulated `rainc` (a binary32 rounding in
+    the capped downdraft, not the level count); the row records that
+    failure until the fix lands. The Metal entries, KF-CuP's 128-level
+    refusal among them, predate the WRF
+    4.8.0 sync: the case runs the default Grell-Freitas
+    (`gfl_873b414`), which is refused on Metal, so they refresh after the
+    GF Metal port lands.
 
   Limits: the MPAS v8.4.2 suite route (R2) takes a subset of these, and
   refuses the rest by name. WRF's adaptive time step (`--adaptive-timestep`)
@@ -1705,9 +1710,9 @@ Notes on the 1.1.7 sync:
   seam and follows the same bound. WSM6 and WDM6 already ran 256 levels on
   a column workspace; the five here keep the per-thread arrays, so a
   256-level run reserves several GiB of local memory on a large card
-  ([the frame table](docs/kernel_local_memory_bounds.md)). The committed hex
-  option-matrix rows for WSM3 and WSM5 still record the old 80-level
-  refusal at 149 levels until the matrix is re-run on its staged case.
+  ([the frame table](docs/kernel_local_memory_bounds.md)). On the hex
+  option matrix's 149-level case the WSM3, WSM5, WSM7, WDM5 and WDM7 rows
+  run on CUDA.
 - **256-level columns for the GSFC shortwave scheme.** `ra_sw_physics=2`
   was refused above 128 layers: its per-column arena (every array's extent
   and offset) and the entry point's `zero[]` were literals for a 128-layer
@@ -1755,9 +1760,8 @@ Notes on the 1.1.7 sync:
   sized by the column, so the local frame does not grow (928 B on sm_86 at
   both tiers); the workspace grows from 30,301 to 77,101 words per column
   at 100 and 256 layers, and admission prices it per domain. Past 256 is
-  refused by name. The hex option-matrix row still records the old
-  100-level refusal at 149 levels until the matrix is re-run
-  ([the record](docs/kernel_local_memory_bounds.md)).
+  refused by name. The hex option-matrix row runs on CUDA at 149
+  levels ([the record](docs/kernel_local_memory_bounds.md)).
 - **KF-CuP no longer publishes negative convective rain.** When
   `KF_cup_PARA` caps the downdraft (`DDINC = TRPPT/TDER`), binary32
   `TDER*DDINC` can round one ulp above `TRPPT`, and WRF's bare
