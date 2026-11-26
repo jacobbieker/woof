@@ -577,6 +577,9 @@ DEFAULT_TOLERANT_IDENTITY_FIELDS = frozenset({
     # The Thompson cloud slope from the updated mass (FQ7, mp_physics = 28,
     # 38 only, on in correct mode): step-time; preparation never reads it.
     "run.thompson_lamc_updated_rc",
+    # The Noah land-ice rain runoff (FQ8, sf_surface_physics = 2 only, on in
+    # correct mode): step-time; preparation never reads it.
+    "run.noah_land_ice_rain_runoff",
     # The diffusion-metrics periodic seam correction (FQ12, diff_opt = 1 or
     # 2, on in correct mode): step-time; preparation never reads it.
     "run.diff_metrics_seam_slope",

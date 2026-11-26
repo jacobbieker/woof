@@ -2984,7 +2984,7 @@
     },
     {
       "file": "tests/test_mp8_frozen.py",
-      "line": 3377,
+      "line": 3383,
       "column": 8,
       "surface": "tests",
       "constructor": "cp.RawModule",
@@ -5144,7 +5144,7 @@
     },
     {
       "file": "tools/cuda_rounding_check.py",
-      "line": 591,
+      "line": 603,
       "column": 17,
       "surface": "tools",
       "constructor": "cp.ElementwiseKernel",
@@ -8262,7 +8262,7 @@
     },
     {
       "file": "woof/core/noah_mosaic.py",
-      "line": 553,
+      "line": 560,
       "column": 13,
       "surface": "package",
       "constructor": "cp.RawModule",
@@ -8278,7 +8278,7 @@
     },
     {
       "file": "woof/core/noah_mosaic.py",
-      "line": 595,
+      "line": 603,
       "column": 13,
       "surface": "package",
       "constructor": "cp.RawModule",
@@ -9508,7 +9508,7 @@
     },
     {
       "file": "woof/ensemble/batch_physics.py",
-      "line": 551,
+      "line": 553,
       "column": 17,
       "surface": "package",
       "constructor": "array_module.RawModule",
@@ -9528,7 +9528,7 @@
     },
     {
       "file": "woof/ensemble/batch_physics.py",
-      "line": 931,
+      "line": 933,
       "column": 17,
       "surface": "package",
       "constructor": "array_module.RawModule",
@@ -9544,7 +9544,7 @@
     },
     {
       "file": "woof/ensemble/batch_physics.py",
-      "line": 1088,
+      "line": 1090,
       "column": 21,
       "surface": "package",
       "constructor": "array_module.RawModule",
