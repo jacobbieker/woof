@@ -4111,9 +4111,15 @@ these:
 Vertical weighting, time windows, `obs_ionf` cadence, `obs_idynin` ramps
 and surface-ratio factors are WRF's. Checkpoints carry every observation
 carrier, so a restart continues the straight run bit for bit; WRF instead
-refreshes those carriers when it restarts. Adaptive time steps, LTS,
-partitioned runs, the MPAS suite route and `obs_scl_neg_qv_innov` are each
-refused by name. `woof/hex/obs_nudging.py` documents each adaptation.
+refreshes those carriers when it restarts. The MPAS v8.4.2 suite route runs
+the same forcing at the same seat on one card, reading WRF's PBL and
+surface-layer inputs from the suite's `diag_physics` (`hpbl`, `kpbl`,
+`regime`, `u10`, `v10`, `th2m`); its checkpoints do not carry the report
+book yet, so a suite run with `--obs-nudging` starts cold (no checkpoint
+resume, no native restart) and writes no checkpoint. A suite without a PBL
+scheme and a surface layer is refused, and WRF's STEPBL follows the suite's
+PBL cadence (`config_pbl_interval` under correct mode). Adaptive time steps, LTS, partitioned runs and
+`obs_scl_neg_qv_innov` are each refused by name. `woof/hex/obs_nudging.py` documents each adaptation.
 
 ### WRF selector 31 forcing
 
