@@ -1571,8 +1571,8 @@ Notes on the 1.1.7 sync:
   WRFDA 4.7.1, background-error statistics from woof forecasts, and hybrid
   3DEnVar with the LETKF members. Radar, GOES and radiances come later;
   radiances need an opt-in CRTM. It also scopes opt-in gradient and
-  neural-network options inside the DA. 4D-Var waits for the adjoints in
-  the plan above. So far `woof.da.var` reads WRFDA's `be.dat` and has a
+  neural-network options inside the DA. 4D-Var (outer loops included) is
+  described below; its check against compiled WRFDA is still to come. So far `woof.da.var` reads WRFDA's `be.dat` and has a
   binary64 reference of the control-variable transform `U` and its
   adjoint; on WRFDA's tutorial case both equal a compiled WRFDA 4.7.1 word
   for word. `DeviceU` runs `U` and `U^T` as CUDA or Metal kernels: the
@@ -1625,6 +1625,17 @@ Notes on the 1.1.7 sync:
   with first guesses from a WRF 4.7.1 forecast, it takes WRFDA 4.7.1
   FGAT's 31 iterations to its final cost, and the analysis meets O7's
   tolerances.
+  4D-Var (experimental; `woof var --4dvar` with the FGAT slots runs one loop
+  with the identity TL). On the Python door it supports WRFDA's outer loops
+  (`max_ext_its`): each loop reruns a nonlinear model you supply, then
+  relinearises P3a's window TL/AD about the new run and recomputes every
+  slot's innovations. `Jb` is measured from the first guess and the
+  increments accumulate, as in `da_solve`. WRFDA's `var4d_bin` and
+  `time_step` rules are enforced, and `var4d_lbc`, `jcdfi_use` and
+  `multi_inc` are refused by name. On a dry OSSE, two outer loops lower
+  the nonlinear cost and pass the gradient, dot-product and TL-vs-FD
+  checks. It has not yet been checked against compiled WRFDA 4D-Var. The
+  window model is binary64 and refused on Metal.
   `woof.da.var.gen_be` (experimental, Python API, host binary64) makes a
   `be.dat` from woof or WRF history files (NMC 24 h minus 12 h pairs, or
   ensemble members minus their mean): WRFDA's gen_be stages for
