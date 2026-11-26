@@ -32,12 +32,20 @@ fork already had, upstream's keys and flags are now the only ones:
 New:
 
 - The WRF dry-step adjoint's step (`woof.grad.wrfplus.model`) now covers
+  diff_opt 1 / km_opt 4 mixing on a moist state as well: the qv, qc and
+  qr rows of the time-t species with the time-t Kh and the first
+  acoustic loop's muts (`add_scalar_coordinate_wrf`), held as each
+  species' source on every stage, and qv's boundary capture starting from
+  its row on a specified domain. The binary32 base reproduces
+  `dycore.step` word for word. The forecast path is unchanged.
+
+- The WRF dry-step adjoint's step (`woof.grad.wrfplus.model`) now covers
   diff_opt 1 / km_opt 4 horizontal mixing on a dry state, periodic or
   specified: the deformation, smag2d_km and the u, v, w and theta rows
   of the time-t fields into the held tendencies, their map-factor
   coupling (after the folded relaxation on a specified domain) and their
   add on every stage. The binary32 base reproduces `dycore.step` word
-  for word. Other mixing packages, moist states with mixing and a
+  for word. Other mixing packages and a
   resumed diff_opt 1 state without its initial theta
   (`diff1_theta_initial`) are refused, and so are passive tracers
   (tracer_opt, madwrf_opt 2) on any step. The forecast path is unchanged.
@@ -54,8 +62,8 @@ New:
   (`woof.grad.wrfplus.diffusion.hd_tl/hd_ad`): u, v, w, theta (its
   departure from the initial field) and scalar tendencies of the field,
   the coefficient and the column mass, tangent-linear and adjoint,
-  checked against WRFPLUS 4.7.1. The step binding above binds the u, v,
-  w and theta rows; the scalar row waits for the moist mixing rows.
+  checked against WRFPLUS 4.7.1. The step bindings above bind them: the
+  u, v, w and theta rows, and the scalar row for qv, qc and qr.
 
 - The WRF dry-step adjoint gains the diff_opt 1 / km_opt 4 coefficients
   (`woof.grad.wrfplus.diffusion`): the deformation and `smag2d_km`'s
