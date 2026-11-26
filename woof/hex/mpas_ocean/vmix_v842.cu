@@ -226,9 +226,14 @@ extern "C" __global__ void ocn_vmix_vel_implicit_v842(
 
 // ocn_tracer_vmix_tend_implicit, cells 1..nCellsArray(1): one thread per
 // cell; work holds A, B, C, bTemp (4*nl words) and rTemp, x (2*nl*nTracers)
+// With kpp (config_cvmix_kpp_nonlocal_with_implicit_mix) the right-hand side
+// is ocn_compute_kpp_rhs's, built in x (read before the back substitution
+// writes it): the tracer plus dt times the surface flux times the divergence
+// of vertNonLocalFlux(1, :) (vertNonLocalFlux(nGroup, nVertLevelsP1, nCells)
+// is f[(iCell*(nl+1) + k)*nGroup]; surfaceFlux(nTracers, nCells) s[iCell*nTracers + i]).
 extern "C" __global__ void ocn_vmix_tracer_implicit_v842(
     rk *tracers, rk *work, const rk *layerThickness, const rk *vertDiffTopOfCell, const int *maxLevelCell, int nCells,
-    int nl, int nTracers, rk dt)
+    int nl, int nTracers, rk dt, const rk *vertNonLocalFlux, int nGroup, const rk *surfaceFlux, int kpp)
 {
     const int iCell = vm_thread();
     if (iCell >= nCells) return;
@@ -243,14 +248,28 @@ extern "C" __global__ void ocn_vmix_tracer_implicit_v842(
     if (N > 0) Cc[N - 1] = C(0.0);
     for (int k = 0; k < N; ++k) Bb[k] = S(S(C(1.0), Aa[k]), Cc[k]);
     if (N > 0) {
-        // tridiagonal_solve_mult(A(2:N), B, C(1:N-1), tracers, x, N, nVertLevels, nTracers)
+        const rk *rhs = tr;
+        if (kpp) {
+            const rk *f = vertNonLocalFlux + (size_t)iCell * (nl + 1) * nGroup;
+            const rk *sf = surfaceFlux + (size_t)iCell * nTracers;
+            for (int k = 1; k < N - 1; ++k)
+                for (int j = 0; j < nTracers; ++j)
+                    x[k * nTracers + j] = A(tr[k * nTracers + j],
+                                            D(M(M(dt, sf[j]), S(f[k * nGroup], f[(k + 1) * nGroup])), h[k]));
+            for (int j = 0; j < nTracers; ++j) x[j] = A(tr[j], D(M(M(dt, sf[j]), -f[nGroup]), h[0]));
+            for (int j = 0; j < nTracers; ++j)
+                x[(N - 1) * nTracers + j] = A(tr[(N - 1) * nTracers + j],
+                                              D(M(M(dt, sf[j]), f[(N - 1) * nGroup]), h[N - 1]));
+            rhs = x;
+        }
+        // tridiagonal_solve_mult(A(2:N), B, C(1:N-1), rhs, x, N, nVertLevels, nTracers)
         bT[0] = Bb[0];
-        for (int j = 0; j < nTracers; ++j) rT[j] = tr[j];
+        for (int j = 0; j < nTracers; ++j) rT[j] = rhs[j];
         for (int i = 1; i < N; ++i) {
             const rk m = D(Aa[i], bT[i - 1]);
             bT[i] = S(Bb[i], M(m, Cc[i - 1]));
             for (int j = 0; j < nTracers; ++j)
-                rT[i * nTracers + j] = S(tr[i * nTracers + j], M(m, rT[(i - 1) * nTracers + j]));
+                rT[i * nTracers + j] = S(rhs[i * nTracers + j], M(m, rT[(i - 1) * nTracers + j]));
         }
         for (int j = 0; j < nTracers; ++j) x[(N - 1) * nTracers + j] = D(rT[(N - 1) * nTracers + j], bT[N - 1]);
         for (int i = N - 2; i >= 0; --i)

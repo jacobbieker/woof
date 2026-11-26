@@ -1,0 +1,15 @@
+# CVMix v0.84-beta (CVMix/CVMix-src, d83f582714e7f0f98d20efd8fac8fab01fa3bfe6:
+# src/shared, which MPAS-Model v8.4.2's get_cvmix.sh links as
+# src/core_ocean/cvmix) files the RKIND 8 CVMix oracle compiles verbatim.
+# build.sh refuses to build run_vmix_cvmix_r8 if any differs from its pin.
+# None of them is in this repository.
+4baa00a26dc1f468acb2df556f6a6a816e0f1d8fc5423cb0efa14c3b84cdabe4  cvmix_kinds_and_types.F90
+49b19547ede9c436bb672b85f9ed700610da67c149aa834ed7c15cdce08b413f  cvmix_utils.F90
+bd49c1ef6fdb0d1d8e500a11e1bc61145524747e42dc5119bb9ce30cef4b7da3  cvmix_math.F90
+67761bcf648425e000aba5cdeb8f5a883651cef7527161390534ca33620188c3  cvmix_put_get.F90
+7fbb60991f2dc69c60f56d19d6dff292a5673d83f8551500acaa479f61141e35  cvmix_background.F90
+7359e1622837486c7e7b287578ac2c2a048c3cdd9e8bf293fb75e8ef7b0f3b6f  cvmix_convection.F90
+e73c125c07a2895603821c33222ed3cfc5d6d31b6286420d8e2019b3db6c4fc2  cvmix_shear.F90
+8476e186f5296ce9ea3b516ca71e3b524f338b6c873f6236df8d124984e9090b  cvmix_tidal.F90
+0234e4ba1048a002348ed8f2e32cd705c5a356a74782eaefc829dcc463513f54  cvmix_ddiff.F90
+e9b8e589526c638bb80651de98733b9ad708b4999de2ba22a4ca9d17ec7e0a33  cvmix_kpp.F90

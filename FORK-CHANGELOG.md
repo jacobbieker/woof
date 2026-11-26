@@ -7,6 +7,13 @@ releases and is kept as upstream wrote it.
 
 ## Unreleased
 
+- `diff_metrics_seam_slope` (correct-mode finding FQ12, read where WRF's
+  mixing package runs on a periodic axis): WRF's `compute_diff_metrics` leaves the top w level's slope at a
+  periodic seam at zero. On (correct mode, the engine's previous
+  arithmetic) the slope is filled; off (exact mode) the smag kernels and
+  the WRFPLUS diffusion TL/AD take WRF's cold seam word for word, and the
+  WRFPLUS diffusion fixture grades the seam words it used to mask.
+
 Merged upstream WOOF 1.1.5 (with 1.1.4). Where upstream built a feature the
 fork already had, upstream's keys and flags are now the only ones:
 
