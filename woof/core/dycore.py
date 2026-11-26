@@ -2947,10 +2947,10 @@ def prepare_fixed_tendencies(state: DomainState, cfg: RunConfig,
             physics_tendencies=physics_tendencies)
         if cfg.m_opt:
             from woof.core.sfs_output import capture
+            flag_x, flag_y = smag_boundary_flags(cfg)
             capture(state, cfg, km, _horizontal_w_km(state, cfg),
                     _wrf_smag_grid_args(state, cfg, time_t=True),
-                    boundary_x=smag_boundary_flags(cfg)[0],
-                    boundary_y=smag_boundary_flags(cfg)[1])
+                    boundary_x=flag_x, boundary_y=flag_y)
     if (WRF_EXACT and physics_tendencies is not None
             and not ((cfg.use_theta_m or cfg.km_opt == 5) and include_smag)):
         _fold_physics_wrf(state, specs, physics_tendencies)
@@ -3279,10 +3279,10 @@ def add_smag2d_tendencies(state: DomainState, cfg: RunConfig,
             state, cfg, km, kh, specs, time_t=False)
         if cfg.m_opt:
             from woof.core.sfs_output import capture
+            flag_x, flag_y = smag_boundary_flags(cfg)
             capture(state, cfg, km, _horizontal_w_km(state, cfg),
                     _wrf_smag_grid_args(state, cfg, time_t=False),
-                    boundary_x=smag_boundary_flags(cfg)[0],
-                    boundary_y=smag_boundary_flags(cfg)[1])
+                    boundary_x=flag_x, boundary_y=flag_y)
     pairs = tuple((state.scratch(f.shape, slot), tend)
                   for f, tend, _xk, _c1, _c2, slot, _stag in specs
                   if tend is not None)

@@ -630,7 +630,7 @@ With `true` both are kept and the profile is anchored at the model-top
 interface. Not read by RTE+RRTMGP. Off, and in exact mode, the arithmetic
 is WRF's word for word. It is not a WRF namelist key; set it in the TOML.
 `diff_metrics_seam_slope` (default `true`; finding FQ12) is a correction to
-the diffusion metrics of `diff_opt = 1` and `2` on a periodic axis, per
+the diffusion metrics where WRF's mixing package runs on a periodic axis, per
 domain on the same terms. WRF's `compute_diff_metrics`
 (`module_diffusion_em.F`) fills the slopes `zx` / `zy` at a periodic seam
 for `k = 1..ktf` only, so the top w level at the seam keeps its initial
@@ -927,7 +927,7 @@ configuration has no `[physics]` table; `physics.mode` is not an engine key.
 | `noah_smc_floor_booking` | Noah (`sf_surface_physics = 2`), not with WRF-Hydro | FQ4 | the water Noah adds at its 0.02 soil-moisture floor comes from the layer below or the drainage |
 | `thompson_rain_snow_closure` | Thompson (`mp_physics = 8, 28, 38`) | FQ5 | below 0 C the rain-snow collection's graupel gain equals what rain and snow lose after their limiters |
 | `rrtmg_lw_model_top` | legacy RRTMG longwave (`ra_lw_physics = 4`, `ra_rrtmg_variant = "rrtmg_legacy"`) | FQ6 | the model-top interface and top layer temperatures are kept, and the standard profile above them is anchored at the model-top interface |
-| `diff_metrics_seam_slope` | `diff_opt = 1` or `2` on a periodic axis | FQ12 | the top w level's coordinate slope at a periodic seam is filled like every other column's, not left at zero |
+| `diff_metrics_seam_slope` | WRF's mixing package on a periodic axis | FQ12 | the top w level's coordinate slope at a periodic seam is filled like every other column's, not left at zero |
 
 A checkpoint resumes only under the arithmetic it was written with; a
 mismatch is refused, and the refusal names the key to set.

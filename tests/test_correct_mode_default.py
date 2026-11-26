@@ -612,3 +612,59 @@ def test_my1_outside_mynn_does_not_move_the_echo_or_digest():
     mynn = RunConfig(**_MYNN)
     if not correct_mode.STRICT:
         assert restart.configuration_echo(mynn)["mynn_fixes_v61"] is True
+
+
+# ------------------------------------------------------------------ FQ12 --
+def _seam_read(**overrides):
+    values = dataclasses.asdict(RunConfig(**{**_TINY, **overrides}))
+    return correct_mode.key_in_scope("diff_metrics_seam_slope", values)
+
+
+@pytest.mark.parametrize("overrides,read", [
+    ({}, False),                                            # km_opt 1: no mixing package
+    ({"km_opt": 4}, True),                                   # doubly periodic
+    ({"km_opt": 2}, True),
+    ({"km_opt": 4, "open_x": True}, True),                   # y still periodic
+    ({"km_opt": 4, "open_x": True, "open_y": True}, False),  # no periodic axis
+    ({"km_opt": 4, "specified": True}, False),
+    ({"km_opt": 4, "nested": True}, False),
+    ({"km_opt": 4, "diff_opt": 0}, False),
+])
+def test_fq12_is_read_only_where_wrfs_mixing_package_runs_on_a_periodic_axis(overrides, read):
+    """The seam key moves the identity, the echo and the receipt only where
+    compute_diff_metrics' periodic-seam fill is reached: a bounded domain, or
+    one without WRF's mixing package, never reads it."""
+    assert _seam_read(**overrides) is read
+
+
+def test_fq12_an_echo_without_diff_opt_reads_as_diff_opt_2():
+    values = dataclasses.asdict(RunConfig(**{**_TINY, "km_opt": 4}))
+    values.pop("diff_opt")
+    assert correct_mode.key_in_scope("diff_metrics_seam_slope", values)
+
+
+def test_fq12_carrier_is_listed_only_where_the_key_is_read():
+    for overrides, listed in (({}, False), ({"km_opt": 4}, True),
+                              ({"km_opt": 4, "open_x": True, "open_y": True}, False)):
+        cfg = RunConfig(**{**_TINY, **overrides},
+                        **correct_mode.resolve("correct", ["FQ12"]).settings)
+        assert correct_mode.uncorrected(cfg) == [], overrides  # a named skip lists nothing
+        cfg = RunConfig(**{**_TINY, **overrides},
+                        **correct_mode.resolve("correct").settings)
+        assert "FQ12" not in correct_mode.uncorrected(cfg), overrides
+        assert ("FQ12" in correct_mode.run_receipt({1: cfg})["domains"]["1"]["applied_findings"]) is listed, overrides
+
+
+@pytest.mark.parametrize("overrides,flags", [
+    ({"diff_metrics_seam_slope": True}, (0, 0)),
+    ({"diff_metrics_seam_slope": False}, (2, 2)),
+    ({"diff_metrics_seam_slope": False, "open_x": True}, (1, 2)),
+    ({"diff_metrics_seam_slope": True, "open_y": True}, (0, 1)),
+    ({"diff_metrics_seam_slope": False, "specified": True}, (1, 1)),
+])
+def test_smag_boundary_flags_encode_wrfs_cold_seam(overrides, flags):
+    """smag2d.cu wrf_grid's flags: 1 bounded, 0 periodic, 2 periodic with
+    WRF's cold top seam slope (FQ12 off)."""
+    from woof.core.dycore import smag_boundary_flags
+    cfg = RunConfig(**{**_TINY, "km_opt": 4, **overrides})
+    assert tuple(int(f) for f in smag_boundary_flags(cfg)) == flags

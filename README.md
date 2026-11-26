@@ -786,7 +786,7 @@ Notes on the 1.1.7 sync:
     and the top layer's with the profile and anchors at the interface below
     the top. The option keeps both and anchors at the top interface (finding
     FQ6). Not read by RTE+RRTMGP; not yet scored against observations.
-  - `diff_metrics_seam_slope` (`diff_opt = 1` or `2` on a periodic axis,
+  - `diff_metrics_seam_slope` (where WRF's mixing package runs on a periodic axis,
     WRF route). WRF's `compute_diff_metrics` fills the coordinate slope at
     a periodic seam for every level but the top w level, which keeps its
     initial zero while every other column has its slope. The option fills
