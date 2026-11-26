@@ -1123,6 +1123,40 @@ Each step is one small PR, taken to merged before the next widens.
        `GPUWM_WRF_EXACT=1` `dycore` words on every row) and the WRF
        oracle (17 cases: each row periodic, specified, channel and
        moist, plus theta; `tests/data/wrfplus/diffusion2.npz`).
+   - 10b. `vertical_diffusion_2` (2b-2): rows vu, vv, vw, vt and vs of
+     `h2_tl/h2_ad` (row codes 4-7, stage VROW), on woof's strict
+     `dycore.launch_wrf_smag2d_vertical` (`wrf_smag_vd_u/_v/_w/_s` and
+     the surface kernels `wrf_smag_surface_u/_v`, their `_cd0` forms,
+     `wrf_smag_surface_heat_const` and `wrf_smag_surface_scalars`).
+     - Rows: u and v (xkmv, with the defor13/defor23 recomputed from u,
+       v, w and the metrics), w (tau33 from w), theta and scalars
+       (xkhv, the H3 flux; `mix_full_fields` adds the base theta), each
+       with the density from alt (times 1 + qv when moist).
+     - Surface terms, selected by geometry: momentum stress from ustm
+       (isfflx 1/2 with a surface layer) or from a constant cd0
+       (isfflx 0); theta from the constant `tke_heat_flux` (isfflx 0/2)
+       or from hfx over cpm = cp (1 + 0.8 qv) (isfflx 1); qv from qfx.
+       ustm, hfx, qfx, cd0 and the heat flux are passive inputs (the
+       surface layer's own linearisation is not part of this item); qv
+       in cpm is active.
+     - Findings: WRF's surface-flux loops in `vertical_diffusion_2`
+       (vflux, hflux, qflux) run on every column of the tile, without
+       the specified-zone trimming of its interior rows, so on a
+       specified axis the surface increments also land on the outer
+       ring. woof's rows (primal and TL/AD) add on every column and
+       the model zeroes the open strips afterwards, so the oracle
+       grading masks to the columns WRF's interior rows touch. WRF hands
+       `vertical_diffusion_w_2` xkmh where woof passes xkmv (a
+       deliberate woof choice; the oracle runs xkmv = xkmh, so this is
+       not graded). With `mix_full_fields` off WRF mixes thp - t_base;
+       woof mixes thp (t_base = 0 in the oracle).
+     - Tests (`tests/test_grad_wrfplus_vdiff2.py`): 13 row and surface
+       variants on 7 configurations (periodic, specified, channel,
+       length-2 axes, moist): dot product (binary64 to 1e-13),
+       accumulation, TL against FD, the strict primal's words (each
+       variant through `launch_wrf_smag2d_vertical` with its isfflx and
+       surface fields) and the WRF oracle (21 cases;
+       `tests/data/wrfplus/vdiffusion2.npz`).
 
 Cost is measured from item 2 on. Kernel-level AD/forward ratios are
 reported at every merge, so a G3 cost miss shows up before item 8.
