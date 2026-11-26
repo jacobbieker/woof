@@ -2198,6 +2198,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "b7eb6fd7bd794e7055d3dd3d63689ca435ada5b1ee43cb067562d291f2d87a15",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_module_on",
+    "factory_sha256": "fd5bc2c32f54ce8b1beb660d1fc348736ded4283b53bb05fa23d60f2fa54e232",
+    "file": "woof/hex/mpas_ocean/cvmix_v842.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "b9f25a729de3ffe7cd6ccf18342bd9e35fd673544bafe68d87fc3713caea4ced",
     "constructor": "RawModule",
     "factory": "diagnose",
@@ -5332,6 +5340,10 @@
     "sha256": "973ebe26587d52e22a82510afdb987d9412185145081fd01f475f611bc3c2d0e"
    },
    {
+    "file": "woof/hex/mpas_ocean/cvmix_v842.cu",
+    "sha256": "ddee3cc4e21f58a016e9337afc2ed7bcc53e527d40b38f6efa6a5ea20700ac79"
+   },
+   {
     "file": "woof/hex/mpas_ocean/diagnostics_v842.cu",
     "sha256": "b20745616595ec56a8b7c3658ef57c0c7271d68f4266afc8f2a296327d1f468f"
    },
@@ -5389,7 +5401,7 @@
    },
    {
     "file": "woof/hex/mpas_ocean/vmix_v842.cu",
-    "sha256": "cd656248fb02f0690c8435e3d9027f2f54efbe99806cdcfc1f7c10bbf807a898"
+    "sha256": "b385cda7db0ac93730c868e544be51aad8b5a7c084b554d35e8b9b562204c9c3"
    },
    {
     "file": "woof/hex/mpas_seaice/column_bgc_v842.cu",
@@ -6494,6 +6506,10 @@
     "sha256": "386eb67c63be10d0d72642b433fd1bb0f796430dd9b21414aeba23ddda629c8e"
    },
    {
+    "file": "woof/hex/mpas_ocean/cvmix_v842.py",
+    "sha256": "90be3b4f63bbb9cd8dfd47f5ca696bf9e183defd54fe2d76ea1c9ad749f80f96"
+   },
+   {
     "file": "woof/hex/mpas_ocean/diagnostics_v842.py",
     "sha256": "c89dcf300d6fc491e570693fe49a380c5a262a70a0f6787c6666de62d90b97b1"
    },
@@ -6527,7 +6543,7 @@
    },
    {
     "file": "woof/hex/mpas_ocean/split_step_v842.py",
-    "sha256": "e534d86036088a1ed181b8396cf630fca55bb0d96af52f3a6aed6dc8c08ea541"
+    "sha256": "48a2cb1d7c936cbad687197fe00dd648ca9905bf8a65c9fdbc122e9284dd67d0"
    },
    {
     "file": "woof/hex/mpas_ocean/tend_tracer_v842.py",
@@ -6551,7 +6567,7 @@
    },
    {
     "file": "woof/hex/mpas_ocean/vmix_v842.py",
-    "sha256": "aa8a53faf50f9006cc3e81a95b83e3b36dcf356328a7f263727bdc4cfde55ff3"
+    "sha256": "54188bbff276111d88be4e7974a9a64886867d0761524e48c02ed52e8a172000"
    },
    {
     "file": "woof/hex/mpas_seaice/column_bgc_v842.py",
