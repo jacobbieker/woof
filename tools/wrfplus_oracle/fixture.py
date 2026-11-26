@@ -2538,7 +2538,9 @@ def main(argv=None) -> int:
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args(argv)
     data = ROUTINES[args.routine](args.exe, shlex.split(args.runner))
-    driver = ROOT / "tools/wrfplus_oracle" / f"{args.routine}.F90"
+    # vdiffusion2 runs diffusion2.F90's vertical_diffusion_2 row
+    stem = {"vdiffusion2": "diffusion2"}.get(args.routine, args.routine)
+    driver = ROOT / "tools/wrfplus_oracle" / f"{stem}.F90"
     data["provenance"] = np.array(
         f"WRFPLUS 4.7.1 (configure wrfplus 17, real*8, -O0 -ffp-contract=off); "
         f"source sha256 {args.wrfplus_digest}; driver sha256 "
