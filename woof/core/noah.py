@@ -710,11 +710,6 @@ def noah_define_module(name: str, defines: tuple):
                                                 key=f"{K.MODULE_KEY_ROOT}:{key}")
 
 
-def smc_floor_booking_module(name: str):
-    """``name`` with the FQ4 booking define first (:func:`noah_define_module`)."""
-    return noah_define_module(name, NOAH_SMC_FLOOR_BOOKING_DEFINES)
-
-
 def launch_noah(dev: dict, params: NoahParams, dt: float, dzs,
                 isurban: int | None = None, isice: int | None = None,
                 xice_threshold: float = 0.5, frpcpn: bool = False,
