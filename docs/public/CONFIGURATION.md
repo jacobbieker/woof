@@ -659,12 +659,12 @@ likewise. In correct mode, or under `"all"`, these are on:
   `rrtmg_lw_model_top = true` (`ra_lw_physics = 4` with
   `ra_rrtmg_variant = "rrtmg_legacy"`).
 - Hex regional route: `--undriven-species-boundary wrf-flow-dependent`
-  (a regional run, `--lbc-dir`, on the one-card drivers of the WOOF-physics
-  route and the MPAS v8.4.2 suite route; it stays off on local time
-  stepping, partial nest, the partitioned same-host executor, `--hosts`, a
-  moving region and a fork-dycore suite row, which do not carry it). On the
-  suite route it also drives only the species the boundary files hold, as
-  WRF does. The door's
+  (a regional run, `--lbc-dir`, on the WOOF-physics one-card drivers; it
+  stays off on local time stepping, partial nest and the partitioned
+  same-host executor, which do not carry it). The MPAS v8.4.2 suite route
+  carries it on one card only when the flag is given, and then drives only
+  the species the boundary files hold, as WRF does; the umbrella leaves
+  that route native. The door's
   `--quirk-corrections all` sets only this flag: the RunConfig keys above
   are not hex flags.
 - MPAS-Ocean: `woof_land_ice_isomip_freezing_salinity =

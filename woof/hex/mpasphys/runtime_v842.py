@@ -1715,14 +1715,8 @@ def open_limited_area_dycore(arguments, layout, mesh, grid, profiles, state, ref
                              'dycore; a fork-dycore row runs its own driver, which does not stage the mass flux '
                              'the rule reads')
         from ..undriven_species_boundary import lbc_driven_prefix
-        held = lbc_driven_prefix(paths, names)
-        crossed = sorted(set(native_order or {}) & {name[4:] for name in held})
-        if crossed:
-            raise ValueError(f'--undriven-species-boundary wrf-flow-dependent: exact mode drives {crossed} from '
-                             "another species' boundary field (native RRFS lbc_scalars order); the two cannot "
-                             'both hold')
-        scalar_names = tuple(scalar_names[:len(held)])
-        native_order = None
+        # native_order is set only for the RRFS fork Registry, whose fork-dycore row is refused above.
+        scalar_names = tuple(scalar_names[:len(lbc_driven_prefix(paths, names))])
     if native_order:
         print(json.dumps({'exact_mode_native_lbc_order': native_order}), flush=True)
     # A fork dycore with its own regional driver builds it here. A variant on the shared regional driver (the

@@ -63,7 +63,9 @@ runtime (:func:`attach_v842`).  Native MPAS drives every suite scalar from
 ``lbc_<name>``, so a species its boundary files do not hold is relaxed and
 set toward the boundary pool's allocated values; under ``wrf-flow-dependent``
 the route drives only the species the files hold (:func:`lbc_driven_prefix`)
-and the rest take WRF's rule.  ``free`` keeps native's treatment.
+and the rest take WRF's rule.  ``free`` keeps native's treatment, and is what
+the suite route runs unless the flag is given: ``--quirk-corrections all``
+and correct mode do not turn it on there.
 """
 from __future__ import annotations
 
@@ -298,6 +300,10 @@ def attach(driver, host: Mapping, mode: str | None):
                  nssl_cccn=_physics_value(host, "nssl_cccn", 0.5e9))
 
 
+def _driven_indices(runtime) -> list[int]:
+    return sorted({first + i for first, _pool, count in runtime.scalar_segments for i in range(count)})
+
+
 def _bind(runtime, names: Sequence[str], *, wdm6_ccn_conc: float, nssl_cccn: float) -> dict:
     """The rules for ``names`` against the runtime's driven segments, bound to the runtime."""
 
@@ -307,9 +313,8 @@ def _bind(runtime, names: Sequence[str], *, wdm6_ccn_conc: float, nssl_cccn: flo
     row = species_row_for_names(names)
     extras = {d.name for d in row.declared_extras()}
     row_names = tuple(n for n in row.names() if n not in extras)
-    driven = sorted({first + i for first, _pool, count in runtime.scalar_segments for i in range(count)})
     rules = species_rules(
-        names, driven, row_names=row_names, mp_physics=getattr(row, "mp_physics", None),
+        names, _driven_indices(runtime), row_names=row_names, mp_physics=getattr(row, "mp_physics", None),
         wdm6_ccn_conc=wdm6_ccn_conc, nssl_cccn=nssl_cccn)
     runtime.undriven_species_boundary = UndrivenSpeciesBoundary(runtime, rules)
     return runtime.undriven_species_boundary.receipt()
@@ -348,13 +353,36 @@ def lbc_driven_prefix(paths: Sequence[str], names: Sequence[str]) -> tuple[str, 
     return selected
 
 
-def attach_v842(dycore, names: Sequence[str], mode: str | None, *, physics: Mapping | None = None):
+#: MPAS-A v8.4.2's microphysics scalars (Registry.xml ``scalars``, the mp_* packages) beyond ``qv``.  None of
+#: them is WRF's ``P_QNN`` or one of NTU's fixed-inflow species, so each takes ``flow_dep_bdy`` (inflow 0) when
+#: undriven; ``nifa``/``nwfa`` do so under WRF's default ``aer_init_opt = 0`` (solve_em.F:2909-2946).
+SUITE_MICROPHYSICS = frozenset({"qc", "qr", "qi", "qs", "qg", "ni", "nr", "nc", "nifa", "nwfa"})
+
+
+def suite_species_rules(names: Sequence[str], driven: Sequence[int]) -> tuple[SpeciesRule, ...]:
+    """WRF's rule for each suite scalar the boundary files do not drive, or refuse by name.
+
+    The suite route drives only the species its files hold under this mode, so every other scalar must take a
+    WRF rule: one with none (``tke``, a chemistry or lane scalar) would lose its boundary step altogether.
+    """
+
+    driven_set = {int(i) for i in driven}
+    undriven = [name for index, name in enumerate(names) if index not in driven_set and name != "qv"]
+    other = [name for name in undriven if name not in SUITE_MICROPHYSICS]
+    if other:
+        raise ValueError(
+            f"--undriven-species-boundary wrf-flow-dependent: the boundary files do not drive {other}, which are "
+            "not microphysics species and have no WRF flow-dependent rule here; under this mode they would get no "
+            "boundary step at all")
+    return species_rules(names, tuple(driven_set), row_names=tuple(names), mp_physics=None)
+
+
+def attach_v842(dycore, names: Sequence[str], mode: str | None):
     """Bind the rule on the MPAS suite route's regional runtime; None (nothing built) for ``free``.
 
     ``names`` is the suite's scalar block (Registry ``scalars``).  The route opened its regional runtime with
     only the species the boundary files hold (:func:`lbc_driven_prefix`), so the others are undriven here as on
-    the WOOF-physics route.  ``physics`` holds the suite's ``wdm6_ccn_conc`` / ``nssl_cccn`` if it sets them;
-    no MPAS v8.4.2 scheme carries WRF's ``P_QNN``, so neither is read on the in-tree suites.
+    the WOOF-physics route, and each takes WRF's rule (:func:`suite_species_rules`).
     """
 
     if mode in (None, DEFAULT_MODE):
@@ -367,12 +395,11 @@ def attach_v842(dycore, names: Sequence[str], mode: str | None, *, physics: Mapp
     if getattr(getattr(runtime.padded, "base", runtime.padded), "partition_layout_v841", None) is not None:
         raise ValueError("--undriven-species-boundary wrf-flow-dependent needs the whole specified zone on one "
                          "card: a rank's specified cell may read an inner cell another rank owns")
-    host = {"constructor_values": {"physics": dict(physics or {})}}
-    return _bind(runtime, names,
-                 wdm6_ccn_conc=_physics_value(host, "wdm6_ccn_conc", 1.0e8),
-                 nssl_cccn=_physics_value(host, "nssl_cccn", 0.5e9))
+    rules = suite_species_rules(tuple(names), _driven_indices(runtime))
+    runtime.undriven_species_boundary = UndrivenSpeciesBoundary(runtime, rules)
+    return runtime.undriven_species_boundary.receipt()
 
 
 __all__ = ["CCN_INFLOW", "DEFAULT_MODE", "FIXED_INFLOW", "MODES", "SpeciesRule", "UndrivenSpeciesBoundary",
            "ZERO_INFLOW", "apply", "attach", "attach_v842", "boundary_geometry", "ccn_inflow", "lbc_driven_prefix",
-           "outflow_mask", "species_rules"]
+           "outflow_mask", "species_rules", "suite_species_rules", "SUITE_MICROPHYSICS"]

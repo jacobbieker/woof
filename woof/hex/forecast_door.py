@@ -3392,8 +3392,9 @@ def _resolve_undriven_species_boundary(arguments, native_config=None) -> str | N
     """``wrf-flow-dependent`` when asked for, else None (``free``, the default: nothing changes).
 
     ``native_config`` is the MPAS suite route's configuration when the run takes that route: the rule then
-    attaches to the route's one-card MPAS-A regional runtime (mpasphys.runtime_v842), so same-host ranks,
-    --hosts, a moving region and a fork-dycore row do not carry it.
+    attaches to the route's one-card MPAS-A regional runtime (mpasphys.runtime_v842) only when the flag asks
+    for it; same-host ranks, --hosts and a moving region are refused by suite_route_seat_refusal, a fork-dycore
+    row and a global mesh here.
     """
 
     from woof import quirk_corrections
@@ -3406,11 +3407,11 @@ def _resolve_undriven_species_boundary(arguments, native_config=None) -> str | N
                           for flag in ("local_timestep", "fullstep_local_timestep", "partial_nest")) \
             and getattr(arguments, "samehost_devices", None) is None
         if native_config is not None:
-            from .fullstep_lts_admission import moving_launch_switches
+            # The suite route carries the rule only when the flag asks for it: --quirk-corrections all and
+            # correct mode leave it off there, so a default suite run keeps native MPAS's boundary treatment.
             from .mpasphys.route_table import route_row
             fork_dycore = route_row(native_config).get("dycore") is not None
-            carried = carried and not fork_dycore and getattr(arguments, "hosts", None) is None \
-                and not os.environ.get("WOOF_HEX_HOSTS") and not moving_launch_switches(os.environ)
+            carried = False
         mode = quirk_corrections.hex_undriven_species_boundary(arguments, carried=carried)
     except ValueError as error:
         raise _refuse(str(error)) from error
@@ -3418,6 +3419,9 @@ def _resolve_undriven_species_boundary(arguments, native_config=None) -> str | N
         return None
     if mode != "wrf-flow-dependent":
         raise _refuse(f"--undriven-species-boundary {mode!r} must be free or wrf-flow-dependent")
+    if native_config is not None and getattr(arguments, "lbc_dir", None) is None:
+        raise _refuse("--undriven-species-boundary wrf-flow-dependent sets a regional mesh's specified zone; this "
+                      "run names no --lbc-dir, so its mesh is global")
     if fork_dycore:
         raise _refuse("--undriven-species-boundary wrf-flow-dependent acts in the MPAS-A v8.4.2 regional dycore; "
                       "this suite row runs a fork dycore whose driver does not stage the mass flux the rule reads, "
@@ -6089,8 +6093,8 @@ def add_forecast_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--quirk-corrections", default=None, choices=("none", "all"),
                         help="woof_quirk_corrections: 'all' / 'none' turns on / off every correction of a WRF/MPAS "
                              "quirk this door carries: --undriven-species-boundary wrf-flow-dependent on a regional "
-                             "run whose drivers carry it (not local time stepping, partial nest, the partitioned "
-                             "same-host executor, --hosts, a moving region or a fork-dycore suite row). Unset (default), they follow "
+                             "run whose drivers carry it (not the MPAS suite route, where it is the flag's alone, local "
+                             "time stepping, partial nest or the partitioned same-host executor). Unset (default), they follow "
                              "--physics-mode: on in correct mode, off in exact. The RunConfig corrections (GF, "
                              "YSU, ...) are not hex flags and are not set by it")
     parser.add_argument("--wind-farms", default=None, metavar="uswtdb|TABLE|off",

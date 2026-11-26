@@ -883,8 +883,9 @@ Notes on the 1.1.7 sync:
     number). The default, `free`, keeps MPAS's behaviour: on the WOOF
     column route those species get no boundary step, and on the MPAS
     v8.4.2 suite route (R2) they are driven from the boundary pool's
-    allocated values. R2 carries the rule on one card: it then drives only
-    the species the boundary files hold;
+    allocated values. R2 carries the rule on one card when the flag is
+    given (correct mode and `--quirk-corrections all` leave R2 native): it
+    then drives only the species the boundary files hold;
   - extra-species microphysics on regional hex runs: CAM-MG, Morrison and
     Morrison-aerosol, NSSL-2, Milbrandt-Yau, P3 (mp 50-53), NTU, ISHMAEL,
     UDM, WDM6, Goddard 4-ice, Ferrier-Aligo with advected rime (mp 15)
