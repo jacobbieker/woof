@@ -2700,8 +2700,8 @@ class RunConfig:
     # the series (harmonic) snow-soil conductivity DF1H and never reads it
     # (module_sf_noahlsm.F:649); the flux blends the thickness-weighted
     # arithmetic DF1A (:656, :663), a parallel-flow mean of layers the heat
-    # crosses in series.  True blends DF1H, as the commented line at :654-655
-    # intended; False is WRF's arithmetic word for word.  Read only by Noah.
+    # crosses in series.  True blends DF1H (WRF's own commented
+    # lines at :654-655 weigh it by snow cover); False is WRF's arithmetic word for word.  Read only by Noah.
     # Correct-mode finding FQ9: on by default, off in physics.mode = 'exact'.
     noah_snow_series_conductivity: bool = _config_field(
         default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)

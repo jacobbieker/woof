@@ -648,9 +648,11 @@ the series (harmonic) conductivity of the snowpack and the half first soil
 layer, `DF1H` (:649), and never reads it; the flux blends the
 thickness-weighted arithmetic mean `DF1A` (:656, :663), the conductivity of
 layers side by side, though the heat crosses them in series. With `true`,
-`DF1H` is blended with the snow-free `DF1` by the snow cover, as the
-commented line at :654-655 shows was meant. A snow-free point and a fully
-covered one (`SNCOVR > 0.97`) are unchanged. Off, and in exact mode, the
+`DF1H` is blended with the snow-free `DF1` by the snow cover, as WRF's own
+commented lines at :654-655 weigh it. A snow-free point is unchanged and a
+fully covered one (`SNCOVR > 0.97`, `DF1 = SNCOND`) is unchanged to
+rounding; the choice of the series mean is a physical judgement, not scored
+against observations. Off, and in exact mode, the
 arithmetic is WRF's word for word. It is not a WRF namelist key; set it in
 the TOML.
 

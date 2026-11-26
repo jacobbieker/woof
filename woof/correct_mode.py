@@ -138,7 +138,7 @@ FQ9  Noah (sf_surface_physics = 2) on a snow-covered land point computes the
      parallel-flow mean of layers the heat crosses in series, which
      overstates the conductivity of a thin snowpack over soil.  The key
      blends DF1H (``noah_snow_series_conductivity``); a snow-free column and
-     a fully snow-covered one (SNCOVR > 0.97) are unchanged.
+     a fully snow-covered one (SNCOVR > 0.97, to rounding) are unchanged.
 
 WHICH SCHEMES CARRY EACH FINDING is data too (:attr:`Correction.carriers`),
 separate from which schemes a key corrects (:data:`KEY_SCOPE`).  A domain

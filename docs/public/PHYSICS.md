@@ -2193,13 +2193,13 @@ soil layer (`DSOIL`). Heat crosses the two in series, whose conductivity is the
 thickness-weighted harmonic mean `DF1H = SNCOND*DF1/(FRCSOI*SNCOND +
 FRCSNO*DF1)` (:649). WRF computes it and never reads it: the flux uses
 `DF1A = FRCSNO*SNCOND + FRCSOI*DF1` (:656), the parallel-flow mean, blended
-with the snow-free `DF1` by `SNCOVR` (:663); the commented line at :654-655
-shows the author meant `DF1H`. Harmonic never exceeds arithmetic, and snow
+with the snow-free `DF1` by `SNCOVR` (:663); the commented lines at :654-655
+show `DF1H` was weighed by snow cover as an alternative. Harmonic never exceeds arithmetic, and snow
 conducts far less than soil, so WRF overstates the conductivity of a thin
 pack and the heat the soil draws from the skin. With the option on, `DF1H`
 takes `DF1A`'s place. A snow-free point (`SNEQV = 0`) and a fully covered one
-(`SNCOVR > 0.97`, where `DF1 = SNCOND` and both means equal it) are
-unchanged; on a partly covered column the ground heat flux, skin and soil
+(`SNCOVR > 0.97`, where `DF1 = SNCOND` and both means equal it, to
+rounding) are unchanged; on a partly covered column the ground heat flux, skin and soil
 temperatures differ, the corrected flux being smaller
 (`tests/test_noah_snow_series_conductivity.py`, float64 mirror and kernel).
 It is per domain, read only where `sf_surface_physics = 2`, carried by the
