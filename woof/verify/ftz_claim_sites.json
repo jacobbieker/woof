@@ -1449,7 +1449,7 @@
     },
     {
       "file": "docs/public/CONFIGURATION.md",
-      "line": 841,
+      "line": 845,
       "kind": "prose",
       "anchor": "| `ysu_version` | no stock namelist spelling | `\"wrf_480\"` | `\"wrf_480\"`, `\"wrf_461\"` | Corrected YSU default. WRF 4.8 MMM `550b5b4` removes the old efficiency offset and caps `0.2*8*tmp1` at 0.4. `[shared]` selects the generation; namelist import uses the corrected default and preserves an explicit physics-selector comment (`! gpuwm-physics-selectors-v1: {...}`). `wrf_461` under default arithmetic reproduces 2.8.9's YSU kernel, under its restart identity. Under `GPUWM_WRF_EXACT=1` it matches WRF 4.6.1 `bl_ysu_run` word for word on the 1,188-column test set, with the same declared exceptions as `wrf_480` (YSU surface drag removed on mixed BEP urban columns; the bounded PBL-height search on four-level columns), under its own restart identity, so a strict-mode `wrf_461` checkpoint from 2.9.0 or earlier is refused rather than continued with different arithmetic. Four-level shallow columns use the declared bounded PBL-height search and zero final TKE word. A generation change is refused on restart; old headers without a selector mean `wrf_461`. The corrected path uses the shared no-FTZ loader and WOOF's own math routines |",
       "anchor_sha256": "fce15ee2f0dbd461c7726780e0bbe513e810bf65e03e7facb97c388cdb96fb51",
@@ -18059,7 +18059,7 @@
     },
     {
       "file": "tests/test_kf_wrf461_oracle.py",
-      "line": 187,
+      "line": 188,
       "kind": "prose",
       "anchor": "\"--ftz=false\")",
       "anchor_sha256": "6fe98a2495f4ecacbd983449e73c82034b0b3ce8d13ba675a01908db06530b38",
@@ -18070,7 +18070,7 @@
     },
     {
       "file": "tests/test_kf_wrf461_oracle.py",
-      "line": 192,
+      "line": 193,
       "kind": "prose",
       "anchor": "# -ftz=true build matches WRF on all 71,968 words of this set and",
       "anchor_sha256": "2db6f133d9e2f40bb25eac8e15cc6372464b16edc8fe8716c700323e83995cf5",
@@ -18081,7 +18081,7 @@
     },
     {
       "file": "tests/test_kf_wrf461_oracle.py",
-      "line": 201,
+      "line": 202,
       "kind": "prose",
       "anchor": "\"the -ftz=true build matched WRF on every word: either the fixture \"",
       "anchor_sha256": "68da43844abd44fee5c68e2e8f8fc26b3d71c5133b7c1facd183e9f5332fa8fb",
@@ -18092,7 +18092,7 @@
     },
     {
       "file": "tests/test_kf_wrf461_oracle.py",
-      "line": 202,
+      "line": 203,
       "kind": "prose",
       "anchor": "\"no longer reaches the subnormal range or the control is not \"",
       "anchor_sha256": "bcccaa883b9b516df1cc84d6b4379dc02e4d4ff1ee97287b89cfc7744d14f210",

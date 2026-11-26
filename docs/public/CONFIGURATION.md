@@ -637,7 +637,11 @@ downdraft (`DDINC = TRPPT/TDER`), binary32 `TDER*DDINC` can round above
 so `RAINCV` is negative for the whole `NCA` window. With `true` the flux is
 floored at zero, the float64 answer. Not read by the previous KF
 (`cu_physics = 99`). Off, and in exact mode, the arithmetic is WRF's word
-for word. It is not a WRF namelist key; set it in the TOML.
+for word. It is not a WRF namelist key; set it in the TOML. A checkpoint
+written before the key resumes as its build ran: KF-eta and MSKF floored
+unconditionally, so such a checkpoint continues in correct mode and is
+refused by name in exact mode; KF-CuP did not, so it continues in exact
+mode.
 
 `woof_quirk_corrections` (default unset) is the umbrella over the
 corrections of WRF 4.7.1 / MPAS v8.4.2 quirks (`woof/quirk_corrections.py`).

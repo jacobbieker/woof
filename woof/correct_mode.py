@@ -495,6 +495,41 @@ def _scope_values(cfg) -> dict:
 #: block still records them.
 OUTPUT_ONLY_KEYS: tuple[str, ...] = ("thompson_cloud_surface_booking",)
 
+#: Correct-mode keys whose scheme already carried the correction before the
+#: key existed, by the selector values that did: a checkpoint header,
+#: fingerprint or document without the key ran it ON there, and OFF under
+#: every other scheme.  FQ11: kf.cu floored the capped-downdraft rain flux
+#: unconditionally from d547dc8c3 and mskf.cu from 695ddf87a, while
+#: kfcup.cu ran WRF's bare subtraction until the key gated all three.
+KEY_ABSENT_ON: Mapping[str, tuple[str, tuple[int, ...]]] = {
+    "kf_capped_downdraft_rain_floor": ("cu_physics", (1, 11)),
+}
+
+
+def absent_value(key: str, values: Mapping) -> bool:
+    """What a header, fingerprint or document without ``key`` ran under the
+    scheme selection in ``values``: False (the matched arithmetic) except
+    where :data:`KEY_ABSENT_ON` says the scheme carried the correction."""
+    rule = KEY_ABSENT_ON.get(key)
+    if rule is None:
+        return False
+    selector, schemes = rule
+    try:
+        return _selector_int(selector, values) in schemes
+    except (TypeError, ValueError):
+        return False
+
+
+def key_echoes(key: str, values: Mapping) -> bool:
+    """Is correction ``key`` written into a checkpoint echo, digest,
+    fingerprint or experiment document?  Only where a selected scheme reads
+    it and its value is not what absence means (:func:`absent_value`), so
+    every record written before the key keeps its bytes."""
+    if key in OUTPUT_ONLY_KEYS or not key_in_scope(key, values):
+        return False
+    absent = absent_value(key, values)
+    return bool(values.get(key, absent)) != absent
+
 
 CORRECTIONS_BY_FINDING: Mapping[str, Correction] = {
     c.finding: c for c in CORRECTIONS}
@@ -740,11 +775,13 @@ __all__ = [
     "CARRIER_GENERATIONS", "CORRECTIONS", "CORRECTIONS_BY_FINDING",
     "CORRECTION_KEYS",
     "CORRECT_KEYS_DEFAULT", "Correction", "CorrectModeResolution", "EXACT",
-    "FINDING_BY_KEY", "KEY_GENERATIONS", "KEY_SCOPE", "KEY_UNREAD",
+    "FINDING_BY_KEY", "KEY_ABSENT_ON", "KEY_GENERATIONS", "KEY_SCOPE",
+    "KEY_UNREAD",
     "OUTPUT_ONLY_KEYS", "PHYSICS_MODES", "SCOPE_SELECTORS",
     "PHYSICS_MODE_CORRECT",
     "PHYSICS_MODE_DEFAULT", "PHYSICS_MODE_EXACT", "STRICT",
-    "STRICT_FORCED_BY", "in_effect", "key_in_scope", "resolution_of",
+    "STRICT_FORCED_BY", "absent_value", "in_effect", "key_echoes",
+    "key_in_scope", "resolution_of",
     "resolve",
     "run_receipt", "uncorrected", "uncorrected_notice",
 ]

@@ -3824,7 +3824,7 @@
     },
     {
       "file": "tests/test_physics_256_levels_gpu.py",
-      "line": 450,
+      "line": 451,
       "column": 13,
       "surface": "tests",
       "constructor": "compiler.compile_using_nvrtc",

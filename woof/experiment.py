@@ -6612,12 +6612,12 @@ def _public_config_value(value):
             # selected scheme, so a default document without WSM6 or New
             # Tiedtke keeps its bytes under the 2.9.0 correct-mode default,
             # and an exact-mode document keeps the bytes it had before them.
-            from woof.correct_mode import (CORRECTION_KEYS,
-                                            OUTPUT_ONLY_KEYS, key_in_scope)
+            # A key a scheme carried before it existed (FQ11 under KF-eta
+            # and MSKF) is written where it differs from that
+            # (correct_mode.key_echoes).
+            from woof.correct_mode import CORRECTION_KEYS, key_echoes
             for name in CORRECTION_KEYS:
-                if (name in OUTPUT_ONLY_KEYS
-                        or not run_document.get(name, False)
-                        or not key_in_scope(name, run_document)):
+                if not key_echoes(name, run_document):
                     run_document.pop(name, None)
             # Lightning and aer_opt = 2 controls (golden/ports-rad): absent
             # while unread, so default public documents keep their bytes.

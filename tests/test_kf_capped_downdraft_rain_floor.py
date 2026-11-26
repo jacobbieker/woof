@@ -24,6 +24,10 @@ WHAT THIS FILE HOLDS
   floored statement, as before 695ddf87a and d547dc8c3).
 * Every launcher compiles the define exactly when the key reaches the run;
   a direct launcher call is WRF's arithmetic unless it asks.
+* A checkpoint written before the key resumes as that build ran: KF-eta and
+  MSKF floored unconditionally, so there an absent key is ON (a
+  correct-mode resume continues, an exact-mode one is refused by name);
+  KF-CuP ran WRF's bare subtraction, so there it is OFF.
 
 The device columns are in tests/test_kfcup_capped_downdraft_gpu.py (KF-CuP)
 and tests/test_kf.py (the seven WRF-graded KF-eta capped columns).
@@ -144,3 +148,66 @@ def test_every_production_adapter_passes_the_key():
                    inspect.getsource(column_cumulus.MskfColumnCumulus.__call__)):
         assert "rain_floor=capped_downdraft_rain_floor_due(cfg)" in source
 
+
+
+def _pre_key_header(cfg):
+    """The echo a build before the key wrote for ``cfg``'s scheme choice."""
+    from woof.io import restart
+    echo = restart.configuration_echo(cfg)
+    echo.pop(KEY, None)
+    return echo
+
+
+_KF_CUP = dict(bl_pbl_physics=1, sf_sfclay_physics=1)
+_strict_skip = pytest.mark.skipif(correct_mode.STRICT,
+                                  reason="a strict process refuses correct mode")
+
+
+@_strict_skip
+@pytest.mark.parametrize("cu", [1, 11])
+def test_an_echo_carries_the_key_only_where_it_differs_from_what_absence_ran(cu):
+    from woof.io import restart
+    assert KEY not in restart.configuration_echo(_run(cu_physics=cu))
+    exact = restart.configuration_echo(
+        _run(cu_physics=cu, **correct_mode.resolve("exact").settings))
+    assert exact[KEY] is False
+    cup = restart.configuration_echo(_run(cu_physics=10, **_KF_CUP))
+    assert cup[KEY] is True
+    assert KEY not in restart.configuration_echo(
+        _run(cu_physics=10, **_KF_CUP, **correct_mode.resolve("exact").settings))
+
+
+@_strict_skip
+@pytest.mark.parametrize("cu", [1, 11])
+def test_a_pre_key_kf_or_mskf_checkpoint_resumes_in_correct_mode(cu):
+    """main floored kf.cu and mskf.cu unconditionally: absent is ON."""
+    from woof.io import restart
+    live = _run(cu_physics=cu)
+    restart._require_config_match(_pre_key_header(live), live, "pre-key.npz")
+
+
+@pytest.mark.parametrize("cu", [1, 11])
+def test_a_pre_key_kf_or_mskf_checkpoint_is_refused_in_exact_mode_by_name(cu):
+    """Exact mode would silently drop the floor that checkpoint ran with."""
+    from woof.io import restart
+    header = restart.configuration_echo(_run(cu_physics=cu, **{KEY: False}))
+    header.pop(KEY)      # what the pre-key build wrote: its floor was on
+    live = _run(cu_physics=cu, **correct_mode.resolve("exact").settings)
+    with pytest.raises(restart.RestartMismatchError) as refused:
+        restart._require_config_match(header, live, "pre-key.npz")
+    assert KEY in str(refused.value)
+    assert "before the key existed" in str(refused.value)
+
+
+def test_a_pre_key_kfcup_checkpoint_ran_without_the_floor():
+    """main's kfcup.cu was WRF's bare subtraction: absent is OFF, so an
+    exact-mode resume continues and a correct-mode one is refused."""
+    from woof.io import restart
+    exact = _run(cu_physics=10, **_KF_CUP, **correct_mode.resolve("exact").settings)
+    header = _pre_key_header(exact)
+    restart._require_config_match(header, exact, "pre-key.npz")
+    if correct_mode.STRICT:
+        return
+    with pytest.raises(restart.RestartMismatchError) as refused:
+        restart._require_config_match(header, _run(cu_physics=10, **_KF_CUP), "pre-key.npz")
+    assert KEY in str(refused.value)

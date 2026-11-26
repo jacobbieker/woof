@@ -138,10 +138,10 @@ MOVED = {
     "rrtmg_lw_model_top": (
         dict(ra_lw_physics=4, ra_sw_physics=4, ra_rrtmg_variant="rrtmg_legacy"),
         {"rrtmg_lw_model_top"}),
-    # Correct-mode FQ11 (on by default): echoed where KF-eta, KF-CuP or
-    # MSKF runs.
+    # Correct-mode FQ11: KF-eta floored unconditionally before the key, so
+    # a header without it ran it on there and the echo carries it off.
     "kf_capped_downdraft_rain_floor": (
-        dict(cu_physics=1, moist=True),
+        dict(cu_physics=1, moist=True, kf_capped_downdraft_rain_floor=False),
         {"kf_capped_downdraft_rain_floor"}),
     # The gridded urban morphology rides the single-layer UCM.
     "urban_param_file": (dict(sf_surface_physics=2, sf_urban_physics=1,
