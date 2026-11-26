@@ -1176,7 +1176,15 @@ __device__ void kc_para(const KcTable& tb, const KcWs& ws, const KcParaIn& in,
             DDR(NK) = DDR(NK) * DDINC;
         }
         CPR = TRPPT;
-        PPTFLX = TRPPT - TDER;
+        /* Declared divergence from WRF, the one kf.cu and mskf.cu carry for
+         * module_cu_kfeta.F and module_cu_mskf.F: when the cap above sets
+         * DDINC = TRPPT/TDER, binary32 TDER*DDINC can round one ulp above
+         * TRPPT, and the bare TRPPT-TDER is then -2^-15 or so, so RAINCV is
+         * negative for NCA and RAINC accumulates below zero (hex option
+         * matrix, cumulus.kf-cup: 2 cells at about -3e-10 mm in 1 h on a 5 km
+         * regional mesh; the hex snapshot gate refuses a negative
+         * accumulation).  The float64 answer there is 0. */
+        PPTFLX = fmaxf(TRPPT - TDER, 0.0f);
         PEFF = PPTFLX / TRPPT;
         if (LDB > 1) {
             for (NK = 1; NK <= LDB - 1; ++NK) {

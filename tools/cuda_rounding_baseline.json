@@ -3685,7 +3685,7 @@
    },
    {
     "file": "woof/core/kernels/kfcup.cu",
-    "sha256": "2a77ac6f1bbaf0f3704c7a4d6813774cfe7b19525649c528cdae21134d702dae"
+    "sha256": "61f6342bd981595015499fbca62e222c3413139995a9a9cb9d0e76e9d2aad817"
    },
    {
     "file": "woof/core/kernels/km5.cu",

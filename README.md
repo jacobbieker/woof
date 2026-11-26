@@ -1758,6 +1758,14 @@ Notes on the 1.1.7 sync:
   refused by name. The hex option-matrix row still records the old
   100-level refusal at 149 levels until the matrix is re-run
   ([the record](docs/kernel_local_memory_bounds.md)).
+- **KF-CuP no longer publishes negative convective rain.** When
+  `KF_cup_PARA` caps the downdraft (`DDINC = TRPPT/TDER`), binary32
+  `TDER*DDINC` can round one ulp above `TRPPT`, and WRF's bare
+  `TRPPT - TDER` then gives about -3e-10 mm of `RAINCV` for the whole
+  `NCA` window, at any level count. On the hex option matrix's 149-level
+  case that drove `RAINC` below zero and the forecast stopped. KF-CuP now
+  floors the flux at zero, as old KF and MSKF already do (the float64
+  answer there is 0; `tests/test_kfcup_capped_downdraft_gpu.py`).
 - **256-level hex member init and TC potential intensity.** The hex GPU
   member init (`woof/hex/init_gpu/physics.cu`) and the TC diagnostics'
   potential-intensity sounding (`tc_climate/potential_intensity.cu`) held
