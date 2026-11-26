@@ -25,8 +25,9 @@ ROOT = Path(__file__).resolve().parents[1]
 ORACLE = ROOT / "tests/data/oracles/gfl_wrf480_strict239"
 
 
-def _replay(cp, gfl, tile=1):
-    """Run the captured call (its 72 columns repeated ``tile`` times); return got, want, ncol, the oracle."""
+def _replay(cp, gfl, tile=1, order=None):
+    """Run the captured call (its 72 columns repeated ``tile`` times, or the captured columns ``order`` lists, in
+    that order); return got, want, ncol, the oracle."""
     sys.path.insert(0, str(ROOT / "tools/gfl_873b414"))
     from replay_gfl import read_pre, read_post, LEVEL_IN, SURF_IN, SURF_INOUT, INT_INOUT, LEVEL_INOUT
     from woof import wrf_exact
@@ -38,9 +39,14 @@ def _replay(cp, gfl, tile=1):
     ncol = ni
 
     def lev(x):
+        if order is not None:
+            return cp.ascontiguousarray(cp.asarray(x[0].T[order]))
         return cp.ascontiguousarray(cp.asarray(np.tile(x[0].T, (tile, 1))))
 
     def srf(x):
+        if order is not None:
+            assert x[0].ndim == 1
+            return cp.ascontiguousarray(cp.asarray(x[0][order]))
         return cp.ascontiguousarray(cp.asarray(np.tile(x[0], tile)))
 
     f = {n: lev(a[n]) for n in LEVEL_IN + ("rqvften", "rthften", "rthblten", "rqvblten", "rthraten",
@@ -50,7 +56,7 @@ def _replay(cp, gfl, tile=1):
                    ("dt", cp.float32), ("dxcell", cp.float32), ("xlv", cp.float32), ("cp", cp.float32),
                    ("g", cp.float32), ("r_v", cp.float32)):
         f[n] = cp.asarray([d[n]], dtype=typ)
-    out = gfl.launch_columns(f, ncol=ncol * tile, nz=d["kte"],
+    out = gfl.launch_columns(f, ncol=ncol * tile if order is None else len(order), nz=d["kte"],
                              vertical=(d["kms"], d["kme"], d["kds"], d["kde"], d["kts"], d["kte"]))
     got = {n: cp.asnumpy(f[n]).T[None] for n in ("gdc", "gdc2") + LEVEL_INOUT}
     got.update({n: cp.asnumpy(f[n])[None] for n in SURF_INOUT + INT_INOUT})
@@ -120,32 +126,33 @@ def test_gfl_pool_entries_return_so_more_columns_spill_than_entries(monkeypatch)
     a deep-column launch (the 256 MiB cap holds 384 entries at nz=256, 1920 at nz=49,
     against tens of thousands of threads) trapped once that many threads had ever
     spilled. Entries now return when their column ends; the limit is the columns
-    spilling at the same moment. Here one block (128 threads, 4 warps of 32
-    consecutive columns) runs with as many entries as can spill at once (4 x the
-    most spilling columns in an aligned 32-column window, at most 64, so fewer than
-    the block's threads), and the share is set so at least twice that many spill
-    over the launch.
+    spilling at the same moment.
+
+    The captured columns need one of two scratch depths; the share sits between
+    them, so only the deeper columns spill. One block runs (128 threads, 4 warps,
+    each taking 32 consecutive columns at a time), and every aligned 32-column
+    window holds 8 deep columns at rotating lanes: at most 32 spill at once, 32
+    entries, while 144 spill over the launch, at lanes across the whole block.
     """
     cp = pytest.importorskip("cupy")
     from woof.core import gfl_873b414 as gfl
 
-    tile = 8
-    _, _, _, _, ncol, _, base = _replay(cp, gfl, tile=1)
-    need = cp.asnumpy(base["scratch_highwater"]).astype(np.int64)        # one tile's per-column need
-    window, lanes = 32, 128
-    total = ncol * tile
-    starts = range(0, total, window)
-    share = entries = None
-    for candidate in sorted(set(need.tolist())):                        # the most spilling share that qualifies
-        trial = int(candidate) // 16 * 16 + 16
-        spills = np.tile(need > trial, tile)
-        at_once = max(int(spills[s:s + window].sum()) for s in starts) * (lanes // window)
-        # Entries: the most that can spill at once, under half the block's threads, so a thread that kept its
-        # entry for the launch would run the pool dry; at least twice that many spill over the launch.
-        if 0 < at_once <= lanes // 2 and int(spills.sum()) >= 2 * at_once:
-            share, entries = trial, at_once
-            break
-    assert share is not None
+    _, _, _, _, ncol, _, base = _replay(cp, gfl)
+    need = cp.asnumpy(base["scratch_highwater"]).astype(np.int64)        # each captured column's need
+    deep, shallow = np.flatnonzero(need == need.max()), np.flatnonzero(need < need.max())
+    share = int(need[shallow].max()) // 16 * 16 + 16
+    assert deep.size and shallow.size and share < need.max()
+    window, lanes, per_window, windows = 32, 128, 8, 18
+    entries = per_window * (lanes // window)
+    order, d, s = [], 0, 0
+    for w in range(windows):
+        hot = {(w * per_window + i) % window for i in range(per_window)}  # the lanes that spill rotate
+        for lane in range(window):
+            if lane in hot:
+                order.append(deep[d % deep.size]); d += 1
+            else:
+                order.append(shallow[s % shallow.size]); s += 1
+    order = np.asarray(order)
     monkeypatch.setattr(gfl, "_share_bytes", lambda storage, compute: share)
     monkeypatch.setattr(gfl, "SPILL_SHARES", 16)
     monkeypatch.setattr(gfl, "_SCRATCH", {})
@@ -154,14 +161,13 @@ def test_gfl_pool_entries_return_so_more_columns_spill_than_entries(monkeypatch)
     pool = gfl._spill_pool
     monkeypatch.setattr(gfl, "_spill_pool", lambda device, spill_bytes, slabs: (pool(device, spill_bytes, slabs)[0],
                                                                                  entries))
-    got, want, _, _, ncol, _, out = _replay(cp, gfl, tile=tile)
-    highwater = cp.asnumpy(out["scratch_highwater"])
-    spilled = highwater > share
+    got, want, _, _, _, _, out = _replay(cp, gfl, order=order)
+    spilled = cp.asnumpy(out["scratch_highwater"]) > share
     assert out["blocks"] == 1 and out["share_bytes"] == share
-    assert int(spilled.sum()) >= 2 * entries, (int(spilled.sum()), entries)  # oversubscribed over the launch
-    assert max(int(spilled[s:s + window].sum()) for s in starts) * (lanes // window) <= entries
+    assert int(spilled.sum()) == windows * per_window >= 4 * entries         # oversubscribed over the launch
+    assert all(int(spilled[w:w + window].sum()) == per_window for w in range(0, order.size, window))
     assert not cp.asnumpy(gfl._SPILL_MAP[cp.cuda.runtime.getDevice()]).any()
     for n in got:
-        for k in range(tile):
-            part = got[n][..., k * ncol:(k + 1) * ncol]
-            assert np.array_equal(part.view(np.uint32), want[n].view(np.uint32)), (n, k)
+        assert np.array_equal(got[n].view(np.uint32), want[n][..., order].view(np.uint32)), n
+
+
