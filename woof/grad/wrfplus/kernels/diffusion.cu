@@ -11,6 +11,12 @@
 //                WRF smag2d_km at diff_opt 1 (no slope limiter), with the
 //                cold-zero outer row of a bounded axis.
 //
+// and of the diff_opt 2 stages (P3a items 2b-1 to 2b-3; the h2_* kernels):
+// horizontal_diffusion_2's rows, vertical_diffusion_2 with the isfflx 0-2
+// surface fluxes, and the coefficients wrf_smag2d_km (km_opt 4 with the
+// terrain-slope limiter), the dry wrf_calc_n2 and wrf_smag3d_km (km_opt 3),
+// each followed by wrf_smag_km_bc as the model runs them.
+//
 // The oracle is WRFPLUS 4.7.1 g_/a_compute_diff_metrics +
 // g_/a_cal_deform_and_div and G_/A_SMAG2D_KM; see
 // docs/dev/P3A-WRF-DRYCORE-ADJOINT.md.
@@ -1681,7 +1687,7 @@ static __device__ int h2_km2(const H2Src& s, int k, int j, int i, Dl* out)
              * rw) * dym;
     Dl root = h2_sqrt(sx * sx + sy * sy);
     Dl alpha = root.v > (wreal)1 ? root : dl((wreal)1, (wreal)0);
-    wreal def_limit = wmax(wdiv((wreal)10.0f, mlen), (wreal)1.0e-3f);
+    wreal def_limit = wmax(wdiv((wreal)10.0f, mlen), (wreal)1.0e-3);
     km = strain.v > def_limit ? km / (alpha * alpha) : km / alpha;
     out[0] = km;
     out[1] = km / s.pr;
@@ -1709,7 +1715,7 @@ static __device__ Dl h2_n2(const H2Src& s, int k, int j, int i)
         Dl th_p = h2_theta(s, ke + 1, j, i);
         Dl th_m = h2_theta(s, ke - 1, j, i);
         return DF_G * (((((th_p - th_m) / th_c) / tmpdz)
-                        + (((wreal)1.61f * (zero - zero)) / tmpdz))
+                        + (((wreal)1.61 * (zero - zero)) / tmpdz))
                        - ((zero - zero) / tmpdz));
     }
     Dl th_p = h2_theta(s, 1, j, i);
@@ -1717,7 +1723,7 @@ static __device__ Dl h2_n2(const H2Src& s, int k, int j, int i)
     wreal qvsfc = ((s.cf1 * z) + (s.cf2 * z)) + (s.cf3 * z);
     Dl tmpdz = (wreal)1.0f / h2_rw(s, 0, j, i);
     return DF_G * (((((th_p - th_c) / th_c) / tmpdz)
-                    + (((wreal)1.61f * dl(z - qvsfc, (wreal)0)) / tmpdz))
+                    + (((wreal)1.61 * dl(z - qvsfc, (wreal)0)) / tmpdz))
                    - ((zero - zero) / tmpdz));
 }
 
@@ -1753,16 +1759,16 @@ static __device__ int h2_km3(const H2Src& s, int k, int j, int i, Dl* out)
         wreal mh = wsqrt(area);
         Dl mv = (wreal)1.0f / rw;
         wreal caph = wdiv((s.mub * mh) * mh, s.dt);
-        kmh = h2_max(((cs2 * mh) * mh) * tmp, dl(((wreal)1.0e-6f * mh) * mh, (wreal)0));
+        kmh = h2_max(((cs2 * mh) * mh) * tmp, dl(((wreal)1.0e-6 * mh) * mh, (wreal)0));
         kmh = h2_min(kmh, caph);
-        kmv = h2_max(((cs2 * mv) * mv) * tmp, ((wreal)1.0e-6f * mv) * mv);
+        kmv = h2_max(((cs2 * mv) * mv) * tmp, ((wreal)1.0e-6 * mv) * mv);
         Dl capv = ((s.mub * mv) * mv) / s.dt;
         kmv = h2_min(kmv, capv);
         khh = h2_min(kmh / s.pr, caph);
         khv = h2_min(kmv / s.pr, capv);
     } else {
-        Dl deltas = h2_pow(area / rw, (wreal)0.33333333f);
-        kmh = h2_max(((cs2 * deltas) * deltas) * tmp, ((wreal)1.0e-6f * deltas) * deltas);
+        Dl deltas = h2_pow(area / rw, (wreal)0.33333333);
+        kmh = h2_max(((cs2 * deltas) * deltas) * tmp, ((wreal)1.0e-6 * deltas) * deltas);
         wreal caph = wdiv(wdiv(wdiv(s.mub * s.dxs, map) * s.dys, map), s.dt);
         kmh = h2_min(kmh, caph);
         Dl capv = ((s.mub / rw) / rw) / s.dt;

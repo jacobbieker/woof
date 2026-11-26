@@ -19,8 +19,13 @@ with the 10 * mlen cap and the cold-zero outer row of a bounded axis.
 Rows: the u, v and w (xkmh) and theta and scalar (xkhh) tendencies of
 the field, the coefficient and the column mass ``mut`` (hybrid mass
 c1 mut + c2; theta mixes its departure from the initial field).
-Not covered: diff_opt 2's slope limiter, the TC horizontal length, a 1-D
-base geopotential and m_opt.
+diff_opt 2 (items 2b-1 to 2b-3, below): the horizontal_diffusion_2 rows
+(h2_*), vertical_diffusion_2 with its isfflx 0-2 surface fluxes, and the
+coefficients: smag2d_km with its terrain-slope limiter (km_opt 4, k2_*),
+dry calculate_N2 (n2_*) and smag_km (km_opt 3, k3_*), all on the
+GPUWM_WRF_EXACT_C_DIFFUSION statements.
+Not covered: moist calculate_N2, km_opt 2 (TKE), the TC horizontal
+length, a 1-D base geopotential and m_opt.
 """
 
 from __future__ import annotations
