@@ -33,7 +33,7 @@ import pytest
 from woof.da.var import fourd as f4
 from woof.da.var import transfer4d as t4
 from woof.da.var import window4d as w4
-from woof.grad.wrfplus.model import STEP_INPUTS
+from woof.grad.wrfplus.model import SPECIES, STEP_INPUTS
 
 from woof.grad.wrfplus import model as _M  # noqa: E402
 
@@ -73,22 +73,25 @@ class FakeWindow:
     (numpy, its names and shapes): each step rolls every field along ``i``
     and feeds ``p_pert`` into ``p`` and ``thp`` and ``muts`` into ``mup``."""
 
-    def __init__(self, nx, ny, nz, nsteps, dtype=np.float64, every=1, halo=False):
+    def __init__(self, nx, ny, nz, nsteps, dtype=np.float64, every=1, halo=False, moist=False):
         mass, two = (nz, ny, nx), (ny, nx)
         shapes = {"u": (nz, ny, nx + 1), "v": (nz, ny + 1, nx), "w": (nz + 1, ny, nx), "php": (nz + 1, ny, nx),
                   "thp": mass, "p": mass, "al": mass, "alt": mass, "p_pert": mass, "mup": two, "muts": two,
-                  HALO: two}
-        if halo:   # a specified domain's Window.inputs (#743)
-            self.inputs = STEP_INPUTS + (HALO,)
-        names = STEP_INPUTS + ((HALO,) if halo else ())
+                  HALO: two, "qv": mass, "qc": mass, "qr": mass}
+        names = STEP_INPUTS + (SPECIES if moist else ()) + ((HALO,) if halo else ())
+        if halo or moist:   # Window.inputs: a moist state's species, a specified domain's halo
+            self.inputs = names
         self._start = {n: np.ones(shapes[n], dtype=dtype) for n in names}
         self.nsteps = nsteps
         self.every = every
         self._checkpoints = None
         self.forwards = 0
 
-    def forward(self):
-        """The base: the start plus ``k`` in every field at state ``k``."""
+    def forward(self, x0=None, *, trajectory=None):
+        """The base: the start plus ``k`` in every field at state ``k`` (or
+        ``trajectory``'s states, as ``Window.forward(trajectory=)``)."""
+        if trajectory is not None:
+            return self.use_trajectory(list(trajectory))
         self.forwards += 1
         self._checkpoints = {k: {n: v + k for n, v in self._start.items()}
                              for k in range(0, self.nsteps, self.every)}
@@ -107,6 +110,9 @@ class FakeWindow:
         d["p"] = d["p"] + 0.3 * d["p_pert"]
         d["mup"] = d["mup"] + 0.2 * d["muts"]
         d["thp"] = d["thp"] + 0.05 * d["p_pert"]
+        if "qv" in d:   # qv feels theta, and qc carries qv
+            d["qv"] = d["qv"] + 0.07 * d["thp"]
+            d["qc"] = d["qc"] + 0.4 * d["qv"]
         if HALO in d:
             d[HALO] = d[HALO] + 0.5 * d["mup"]
         return d
@@ -116,6 +122,9 @@ class FakeWindow:
         a = dict(a)
         if HALO in a:
             a["mup"] = a["mup"] + 0.5 * a[HALO]
+        if "qv" in a:
+            a["qv"] = a["qv"] + 0.4 * a["qc"]
+            a["thp"] = a["thp"] + 0.07 * a["qv"]
         a["p_pert"] = a["p_pert"] + 0.05 * a["thp"]
         a["muts"] = a["muts"] + 0.2 * a["mup"]
         a["p_pert"] = a["p_pert"] + 0.3 * a["p"]
@@ -146,8 +155,8 @@ class FakeWindow:
         return ax
 
 
-def _fake(nx=5, ny=4, nz=3, sps=2, nslots=3, halo=False, **kw):
-    win = FakeWindow(nx, ny, nz, sps * (nslots - 1), halo=halo)
+def _fake(nx=5, ny=4, nz=3, sps=2, nslots=3, halo=False, moist=False, **kw):
+    win = FakeWindow(nx, ny, nz, sps * (nslots - 1), halo=halo, moist=moist)
     return w4.WindowModel(win, sps, to_device=np.asarray, to_host=np.asarray, **kw), (nx, ny, nz)
 
 
@@ -162,12 +171,17 @@ def _dot(a, b):
     return sum(float(np.sum(a[k] * b[k])) for k in t4.TL_KEYS)
 
 
-@pytest.mark.parametrize("halo,halo_start", [(False, "wrfplus"), (True, "wrfplus"), (True, "carried")])
-def test_fake_window_dot_product(halo, halo_start):
+@pytest.mark.parametrize("halo,halo_start,moist", [(False, "wrfplus", False), (True, "wrfplus", False),
+                                                   (True, "carried", False), (False, "wrfplus", True),
+                                                   (True, "wrfplus", True)])
+def test_fake_window_dot_product(halo, halo_start, moist):
     """With ``halo`` the window is a specified domain's: its inputs add the
     carried mu halo (fed from ``mup``), which the adjoint must force too,
-    and under ``wrfplus`` the TL start seeds it from ``g_mu``."""
-    model, dims = _fake(halo=halo, halo_start=halo_start)
+    and under ``wrfplus`` the TL start seeds it from ``g_mu``.  With
+    ``moist`` the window carries qv, qc and qr: g_qv starts the window's qv
+    and reads back from it (``moisture="advect"``, the default there)."""
+    model, dims = _fake(halo=halo, halo_start=halo_start, moist=moist)
+    assert model.moisture == ("advect" if moist else "persist")
     rng = np.random.default_rng(0)
     g0 = _tl_state(rng, *dims)
     fs = [_tl_state(rng, *dims) for _ in range(3)]
@@ -178,6 +192,24 @@ def test_fake_window_dot_product(halo, halo_start):
     assert lhs == pytest.approx(rhs, rel=1e-12)
     # the slots differ (the window moved them) and p felt p_pert's start
     assert not np.array_equal(gs[1]["p"], gs[2]["p"])
+    if moist:   # g_qv moved with the window, and felt theta
+        assert not np.array_equal(gs[1]["qv"], g0["qv"])
+
+
+def test_moist_window_advects_qv_and_starts_qc_qr_at_zero():
+    model, dims = _fake(moist=True)
+    g0 = _tl_state(np.random.default_rng(3), *dims)
+    gs = model.tl(g0, 3)
+    np.testing.assert_array_equal(gs[0]["qv"], g0["qv"])
+    dx0 = model.window.last_dx0
+    assert "qv" in dx0 and "qc" not in dx0 and "qr" not in dx0
+    # one step: qv rolled, plus theta's share
+    r = lambda a: a + 0.1 * np.roll(a, 1, axis=-1)
+    model.window.nsteps, model.sps = 1, 1
+    g1 = model.tl(g0, 2)[1]
+    p0, t0, q0 = (w4.to_window(g0[k]) for k in ("p", "t_2", "qv"))
+    th1 = r(t0) + 0.05 * r(p0)
+    np.testing.assert_allclose(g1["qv"], w4.from_window(r(q0) + 0.07 * th1), rtol=1e-14)
 
 
 def test_slot_zero_is_wrfda_start_and_qv_persists():
@@ -212,6 +244,11 @@ def test_refusals():
         model.tl({k: v for k, v in g0.items() if k != "qv"}, 3)
     with pytest.raises(NotImplementedError, match="dry"):
         w4.WindowModel(model.window, 2, moisture="advect", to_device=np.asarray, to_host=np.asarray)
+    with pytest.raises(ValueError, match="moist window"):
+        w4.WindowModel(FakeWindow(*dims, 4, moist=True), 2, moisture="persist", to_device=np.asarray,
+                       to_host=np.asarray)
+    with pytest.raises(ValueError, match="moisture must be one of"):
+        w4.WindowModel(model.window, 2, moisture="hold", to_device=np.asarray, to_host=np.asarray)
     with pytest.raises(ValueError, match="steps_per_slot"):
         w4.WindowModel(model.window, 0, to_device=np.asarray, to_host=np.asarray)
 
@@ -328,10 +365,12 @@ STRICT = dict(GPUWM_WRF_EXACT="1", WOOF_WRF_EXACT_DIAGNOSTICS="1", WOOF_WRF_EXAC
 
 
 @pytest.mark.skipif(not any(shutil.which(c) for c in ("clang++", "g++", "c++")), reason="no C++ compiler")
-def test_real_window_dot_product(tmp_path):
+@pytest.mark.parametrize("moist", [False, True])
+def test_real_window_dot_product(tmp_path, moist):
     """The real window (host backend, binary64, a warm ridge case): three
-    slots two steps apart, ``sum_n <TL(g0)_n, f_n> == <g0, AD(f)>``."""
-    env = dict(os.environ, WOOF_BACKEND="host", PYTHONPATH=str(ROOT),
+    slots two steps apart, ``sum_n <TL(g0)_n, f_n> == <g0, AD(f)>``.  Moist:
+    qv, qc and qr (mp_physics 0), g_qv advected by the window."""
+    env = dict(os.environ, WOOF_BACKEND="host", PYTHONPATH=str(ROOT), WOOF_TEST_MOIST=str(int(moist)),
                WOOF_HOST_CACHE=str(tmp_path / "hostcache"), WOOF_HOST_THREADS="4", **STRICT)
     script = """
 import dataclasses, json, numpy as np, woof
@@ -344,7 +383,10 @@ from woof.core import dycore as D
 from woof.grad.wrfplus import window as W
 from woof.da.var import transfer4d as t4, window4d as w4
 nx, ny, nz = 16, 12, 10
-cfg = H.make_config(nx, ny, nz, h_sca_adv_order=5, terrain_opt=1)
+import os
+moist = os.environ["WOOF_TEST_MOIST"] == "1"
+cfg = H.make_config(nx, ny, nz, h_sca_adv_order=5, terrain_opt=1,
+                    **(dict(moist=True, moist_adv_opt=0) if moist else {}))
 jj, ii = np.meshgrid(np.arange(ny), np.arange(nx), indexing='ij')
 ridge = 400.0 * np.exp(-(((ii - nx / 2) / (nx / 5)) ** 2 + ((jj - ny / 2) / (ny / 4)) ** 2))
 geo = dataclasses.replace(H.neutral_geography(cfg), terrain=ridge)
@@ -353,7 +395,9 @@ D.step(state, cfg)
 win = W.Window(state, cfg, 4)
 model = w4.WindowModel(win, 2)
 rng = np.random.default_rng(5)
-names = {"u_2": "u", "v_2": "v", "w_2": "w", "t_2": "thp", "mu_2": "mup", "ph_2": "php", "p": "p_pert", "qv": "thp"}
+names = {"u_2": "u", "v_2": "v", "w_2": "w", "t_2": "thp", "mu_2": "mup", "ph_2": "php", "p": "p_pert",
+         "qv": "qv" if moist else "thp"}
+assert model.moisture == ("advect" if moist else "persist")
 def rnd():
     out = {}
     for k, n in names.items():
@@ -366,11 +410,12 @@ dot = lambda a, b: sum(float(np.sum(a[k] * b[k])) for k in t4.TL_KEYS)
 lhs = sum(dot(g, f) for g, f in zip(gs, fs))
 rhs = dot(g0, model.ad(fs))
 same = all(np.array_equal(gs[0][k], g0[k]) for k in t4.TL_KEYS)
-print('RESULT ' + json.dumps(dict(lhs=lhs, rhs=rhs, same=same)))
+moved = (not np.array_equal(gs[2]["qv"], g0["qv"])) if moist else True
+print('RESULT ' + json.dumps(dict(lhs=lhs, rhs=rhs, same=same, moved=moved)))
 """
     done = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, env=env, timeout=1800)
     assert done.returncode == 0, done.stderr[-4000:]
     out = json.loads([ln for ln in done.stdout.splitlines() if ln.startswith("RESULT ")][-1][7:])
-    assert out["same"]
+    assert out["same"] and out["moved"]
     assert abs(out["lhs"]) > 0.0
     assert out["lhs"] == pytest.approx(out["rhs"], rel=1e-12)

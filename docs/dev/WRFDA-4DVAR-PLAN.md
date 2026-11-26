@@ -1,6 +1,20 @@
 # WRFDA 4D-Var (`var4d`) on woof: plan
 
-Status: plan only (2026-11-20). It is the second half of V5 in
+Status (2026-11-26): 4D.1 (`transfer4d.py`, #737), 4D.2
+(`FourDObsTerm`, `IdentityModel`, `analyse(var4d=)`, #741) and 4D.3
+(`WindowModel`, #742) are merged. 4D.3b makes `WindowModel` advect `g_qv`
+on a moist window (`moisture="advect"`). 4D.4 adds outer loops
+(`outer4d.py`, `Var4D.nl_model`, `WindowModel.relinearise`) and `woof var
+--4dvar` (identity TL, one loop). Its L2-style OSSE passes. Its L1 gate
+(`max_ext_its = 2`) is a skipped, data-gated test reading
+`WOOF_WRFDA471_4DVAR_L1_DIR`. Open questions for L1: the QC carry across
+loops, the var4d transfer's LBC perturbation, and per-loop `var_scaling`
+(docs/var.md). 4D.0 has run: the lanes L-id, L1 and L0 converge on pb with
+per-slot TL, adjoint-forcing and gradient files
+(`tools/wrfda_oracle/run_4dvar.sh`). Not done: the 4D.4 L1 gate, the
+checkpoint policy and its G3 receipt, and 4D.5 (L0, after P3a item 6).
+It is the
+second half of V5 in
 [WRFDA-3DVAR-PLAN.md](WRFDA-3DVAR-PLAN.md) section 7 (V5.2 and the
 differentiable plan's P4.2). The model TL/AD is P3a's
 (`woof/grad/wrfplus/window.py`, #718; see
@@ -142,7 +156,13 @@ jo_split), so `VarCost` itself does not change:
 ## 3. What P3a must still provide
 
 Via the coordinator. They are listed in the order the oracle lanes
-(section 4) need them.
+(section 4) need them. Where they stand (2026-11-26): 1 is
+`Window.forward(trajectory=)`; 2 is `wrfda_tl_start` and
+`Window.tl(partial=True)`; 3 is the specified window (#743); 4 is the moist
+window (qv, qc, qr, mp_physics 0), which `WindowModel(moisture="advect")`
+uses; 5 is the diff_opt 1 / km_opt 4 binding (dry merged, the moist rows in
+#825); 6 is not started; 7 holds on CUDA, and a Metal 4D-Var analysis is
+refused (no binary64 there; PERF-QUEUE has the follow-up).
 
 1. **The trajectory comes from outside the window.** WRFPLUS linearises
    about the NL run's states, read every time step (`auxinput6`). That run

@@ -984,8 +984,11 @@ Each step is one small PR, taken to merged before the next widens.
      - WRFPLUS findings. `compute_diff_metrics` (WRF's too) fills a
        periodic axis's seam slope (zx at ids/ide, zy at jds/jde) for
        levels 1..ktf only, so the top w level's seam slope keeps its cold
-       zero, where woof's primal takes the true slope: the fixture leaves
-       those deformation words out (and zeroes their adjoint seeds).
+       zero, where woof's primal takes the true slope. The correction
+       `diff_metrics_seam_slope` (finding FQ12, on in correct mode) keeps
+       the true slope; off (exact mode) both the primal smag kernels and
+       the TL/AD (`DFGeometry.seam_cold`, boundary flag 2) take WRF's cold
+       top seam, so the fixture grades every deformation word.
        `a_cal_deform_and_div` sizes its y tapes (Tmpv400-403) from
        max(jds+1, jts) but fills them from j_start = jts on a periodic y
        axis, so it overruns them there: the fully periodic case is TL
@@ -1087,7 +1090,92 @@ Each step is one small PR, taken to merged before the next widens.
        and a warm and a cold mapped specified moist step with qv's
        tables. Each gives `dycore.step`'s words, and dropping the moist
        rows moves every species. Also dot, base-only and FD.
-   `sixth_order_diffusion` and diff_opt 2 are not started.
+   `sixth_order_diffusion` is not started; diff_opt 2 is item 10.
+10. Diffusion, `diff_opt = 2` (P3a item 2b; stacked PRs 2b-1 to 2b-3).
+   - Oracle pin: WRF and WRFPLUS 4.7.1 (`v4.7.1.tar.gz`, `11186188...`),
+     as for items 1-9. The WRF 4.8.1 oracle re-pin (P0/P9 of that work)
+     re-pins this item's drivers after it lands; until then 4.7.1 is the
+     graded version.
+   - Oracle method: WRFPLUS 4.7.1's own `g_/a_horizontal_diffusion_2`
+     and `g_/a_vertical_diffusion_2` differentiate the older mu-coupled
+     formulation (a finding), so `tools/wrfplus_oracle/diffusion2.F90`
+     links WRF 4.7.1's nonlinear routines from the same `libwrflib.a`
+     (real*8, -O0, -ffp-contract=off) and the fixture takes the TL and
+     AD from fourth-order central differences of them over every active
+     woof word and its halo images (about 1e-9 of the scale).
+   - 10a. `horizontal_diffusion_2` (2b-1): `h2_tl/h2_ad` in
+     `woof/grad/wrfplus/diffusion.py` and `kernels/diffusion.cu`, on
+     woof's strict `wrf_smag_hd_u/_v/_w` and `wrf_smag_flux_s` +
+     `wrf_smag_hd_s`.
+     - Rows u, v, w (xkmh) and theta and scalars (xkhh, the scalar
+       operator; theta on the strict thp). Active: the deformation
+       (defor11/22/12 for u and v; u, v, w for w, whose defor13/23 are
+       recomputed), the coefficient, alt and php (the metrics zx, zy,
+       rdz and rdzw and the density rho = 1/alt, times 1 + qv when
+       moist, are recomputed in the TL/AD), the field and qv.
+     - The AD is a seeded forward: each thread seeds one input word and
+       gathers the output words that read it, one writer per word, so
+       the AD is the exact transpose of the TL with no atomics.
+     - Finding: `compute_diff_metrics` leaves zx and zy on the end faces
+       of the top w level unset (its face loops stop at kde-2). The
+       driver sets them by the interior formula (periodic) or to zero
+       (specified); woof computes them.
+     - Tests (`tests/test_grad_wrfplus_hdiff2.py`): dot product
+       (binary64 to 1e-13), accumulation into existing adjoints, TL
+       against FD, the strict primal's words (the TL base equals
+       `GPUWM_WRF_EXACT=1` `dycore` words on every row) and the WRF
+       oracle (17 cases: each row periodic, specified, channel and
+       moist, plus theta; `tests/data/wrfplus/diffusion2.npz`).
+     - Cost (A6000, 40 x 120 x 120, binary32, periodic, median of 20,
+       2026-11-26; primal = the strict row kernels): TL 1.2x (u), 1.3x
+       (v), 0.4x (w, whose primal recomputes the deformation) and 1.4x
+       (scalar); AD 35x, 25x, 21x and 31x. The AD is far over G3's ~5x:
+       each input word's thread recomputes every reading output word's
+       whole stencil (the deformation, rho and the metrics at every
+       stage), as `df_ad` did before PR #820. Narrowing the gathers to
+       the reading terms is left to a perf pass, as #820 did for
+       `df_ad`.
+   - 10b. `vertical_diffusion_2` (2b-2): rows vu, vv, vw, vt and vs of
+     `h2_tl/h2_ad` (row codes 4-7, stage VROW), on woof's strict
+     `dycore.launch_wrf_smag2d_vertical` (`wrf_smag_vd_u/_v/_w/_s` and
+     the surface kernels `wrf_smag_surface_u/_v`, their `_cd0` forms,
+     `wrf_smag_surface_heat_const` and `wrf_smag_surface_scalars`).
+     - Rows: u and v (xkmv, with the defor13/defor23 recomputed from u,
+       v, w and the metrics), w (tau33 from w), theta and scalars
+       (xkhv, the H3 flux; `mix_full_fields` adds the base theta), each
+       with the density from alt (times 1 + qv when moist).
+     - Surface terms, selected by geometry: momentum stress from ustm
+       (isfflx 1/2 with a surface layer) or from a constant cd0
+       (isfflx 0); theta from the constant `tke_heat_flux` (isfflx 0/2)
+       or from hfx over cpm = cp (1 + 0.8 qv) (isfflx 1); qv from qfx.
+       ustm, hfx, qfx, cd0 and the heat flux are passive inputs (the
+       surface layer's own linearisation is not part of this item); qv
+       in cpm is active.
+     - Findings: WRF's surface-flux loops in `vertical_diffusion_2`
+       (vflux, hflux, qflux) run on every column of the tile, without
+       the specified-zone trimming of its interior rows, so on a
+       specified axis the surface increments also land on the outer
+       ring. woof's rows (primal and TL/AD) add on every column and
+       the model zeroes the open strips afterwards, so the oracle
+       grading masks to the columns WRF's interior rows touch. WRF hands
+       `vertical_diffusion_w_2` xkmh where woof passes xkmv (a
+       deliberate woof choice; the oracle runs xkmv = xkmh, so this is
+       not graded). With `mix_full_fields` off WRF mixes thp - t_base;
+       woof mixes thp (t_base = 0 in the oracle).
+     - Tests (`tests/test_grad_wrfplus_vdiff2.py`): 13 row and surface
+       variants on 7 configurations (periodic, specified, channel,
+       length-2 axes, moist): dot product (binary64 to 1e-13),
+       accumulation, TL against FD, the strict primal's words (each
+       variant through `launch_wrf_smag2d_vertical` with its isfflx and
+       surface fields) and the WRF oracle (21 cases;
+       `tests/data/wrfplus/vdiffusion2.npz`).
+     - Cost (A6000, 40 x 120 x 120, binary32, periodic, moist, USTM,
+       HFX and QFX, median of 20, 2026-11-26): the primal
+       `launch_wrf_smag2d_vertical` for all rows 0.70 ms; the five rows'
+       TL 1.64 ms (2.4x) and AD 25.8 ms (37x). vw, vt and vs cost about
+       1.1-1.3 ms of AD each (5x their TL); vu and vv take 12 and 10 ms,
+       almost all in the tau13/tau23 stage's gather (the deformation
+       recomputed per reading word). Same follow-up as 10a.
 
 Cost is measured from item 2 on. Kernel-level AD/forward ratios are
 reported at every merge, so a G3 cost miss shows up before item 8.

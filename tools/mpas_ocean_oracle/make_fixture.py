@@ -28,7 +28,8 @@ diagnostics`` runs ``run_diagnostics_{r4,r8}`` into
 ``--piece gm`` ``run_gm_{r4,r8}`` into ``tests/data/oracles/mpas_ocean_gm``,
 ``--piece redi`` ``run_tracer_hmix_{r4,r8}`` into ``tests/data/oracles/mpas_ocean_redi``,
 ``--piece split_step_gm`` ``run_split_step_{r4,r8}`` into ``tests/data/oracles/mpas_ocean_split_step_gm``,
-``--piece forward_gm`` ``run_forward_{r4,r8}`` into ``tests/data/oracles/mpas_ocean_forward_gm``
+``--piece forward_gm`` ``run_forward_{r4,r8}`` into ``tests/data/oracles/mpas_ocean_forward_gm``,
+``--piece cvmix`` ``run_vmix_cvmix_r8`` into ``tests/data/oracles/mpas_ocean_cvmix`` (RKIND 8 only)
 (their cases are built per precision).  A piece's ``EXTRA_PRECISIONS`` (the
 tendency's ``r8-glibc239``: its RKIND 8 bulk wind stress) add fixtures run by
 the binary they name.  Writes ``oracle-r4.npz`` and
@@ -56,7 +57,7 @@ from woof.verify import (  # noqa: E402
     mpas_ocean_split_step_oracle, mpas_ocean_eos_oracle, mpas_ocean_pgrad_hmix_oracle, mpas_ocean_tend_oracle,
     mpas_ocean_tend_tracer_oracle, mpas_ocean_tendency_oracle, mpas_ocean_tracer_advection_oracle,
     mpas_ocean_tracer_hmix_oracle, mpas_ocean_vert_transport_oracle, mpas_ocean_vmix_oracle,
-    mpas_ocean_split_step_gm_oracle, mpas_ocean_forward_gm_oracle)
+    mpas_ocean_split_step_gm_oracle, mpas_ocean_forward_gm_oracle, mpas_ocean_cvmix_oracle)
 
 #: piece -> (case module, binary stem)
 PIECES = {"tend": (mpas_ocean_tend_oracle, "run_oracle"),
@@ -80,7 +81,8 @@ PIECES = {"tend": (mpas_ocean_tend_oracle, "run_oracle"),
           "gm": (mpas_ocean_gm_oracle, "run_gm"),
           "redi": (mpas_ocean_redi_oracle, "run_tracer_hmix"),
           "split_step_gm": (mpas_ocean_split_step_gm_oracle, "run_split_step"),
-          "forward_gm": (mpas_ocean_forward_gm_oracle, "run_forward")}
+          "forward_gm": (mpas_ocean_forward_gm_oracle, "run_forward"),
+          "cvmix": (mpas_ocean_cvmix_oracle, "run_vmix_cvmix")}
 
 
 def run_case(oo, binary: Path, case: dict, precision: str) -> dict[str, np.ndarray]:

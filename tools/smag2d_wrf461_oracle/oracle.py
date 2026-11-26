@@ -226,8 +226,12 @@ def run_wrf(args):
 
 # ---------------------------------------------------------------- engine side
 
-def engine_outputs(arrays, meta):
-    """Every output word of the production km_opt=4 path for one case."""
+def engine_outputs(arrays, meta, seam_slope=None):
+    """Every output word of the production km_opt=4 path for one case.
+
+    ``seam_slope`` is RunConfig.diff_metrics_seam_slope (correct-mode FQ12;
+    None: the process default): False is unmodified WRF's cold top seam
+    slope on a periodic axis, True the control's filled one."""
     import cupy as cp
     from types import SimpleNamespace
     from woof.config import RunConfig
@@ -259,7 +263,8 @@ def engine_outputs(arrays, meta):
     cfg = RunConfig(nx=nx, ny=ny, nz=nz, dx=meta["dx"], dy=meta["dy"], dt=1.0, ztop=20000.0,
                     run_seconds=0.0, open_x=boundary == "open", open_y=boundary == "open",
                     specified=boundary == "specified", km_opt=4, diff_opt=2, c_s=0.25,
-                    bl_pbl_physics=1)
+                    bl_pbl_physics=1,
+                    **({} if seam_slope is None else {"diff_metrics_seam_slope": bool(seam_slope)}))
     out = {}
     km = cp.zeros((nz, ny, nx), cp.float32)
     kh = cp.zeros_like(km)
@@ -281,7 +286,7 @@ def engine_outputs(arrays, meta):
         ((nx + 128) // 128, ny + 1, nz + 1), (128, 1, 1),
         tuple(dycore._wrf_smag_grid_args(state, cfg, time_t=True) + [d13, d23] +
               [np.int32(nz), np.int32(ny), np.int32(nx), np.int32(1),
-               np.int32(bx), np.int32(bx)]))
+               *dycore.smag_boundary_flags(cfg)]))
     out["d13"], out["d23"] = cp.asnumpy(d13), cp.asnumpy(d23)
     # The forecast's own once-per-step builder, on fresh K buffers.
     km2 = state.scratch((nz, ny, nx), "smag_km")
@@ -332,7 +337,8 @@ def compare(args):
                 wrf = {k.removeprefix("wrf__"): data[k] for k in data.files if k.startswith("wrf__")}
                 fallback.append(row["case"])
             meta = json.loads(str(data["meta_json"]))
-        got = engine_outputs(arrays, meta)
+        # unmodified WRF is the cold seam (FQ12 off), the control the filled one
+        got = engine_outputs(arrays, meta, seam_slope=args.reference == "wrfctl")
         if args.save:
             saved.update({f"{row['case']}__{k}": np.asarray(got[k], F32) for k in COMPARED})
         result = {}

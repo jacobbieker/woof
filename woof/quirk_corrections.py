@@ -25,7 +25,7 @@ The rules, the same on every route:
   coupling, the MPAS-Seaice ``ice_velocity_at_cell`` without the
   velocity solver's pools) it stays off; the WRF route's run receipt
   lists such a finding as uncorrected (woof.correct_mode.uncorrected).
-* On the WRF route the RunConfig keys are correct-mode findings FQ1-FQ6, FQ8 and FQ9
+* On the WRF route the RunConfig keys are correct-mode findings FQ1-FQ9 and FQ12
   of woof.correct_mode: their defaults are ``CORRECT_KEYS_DEFAULT``,
   exact mode authors them off with every other correct-mode key, and the
   checkpoint echo binds one only where it is on and read.
@@ -48,6 +48,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+
+from woof import correct_mode as _correct_mode
 
 #: The umbrella's key on every route (RunConfig field, MPAS config dicts,
 #: and the hex door's ``--quirk-corrections``).
@@ -118,6 +120,10 @@ CORRECTIONS: tuple[QuirkCorrection, ...] = (
                                 else get("ra_lw_physics")) == 4
                             and get("ra_rrtmg_variant") == "rrtmg_legacy")),
     QuirkCorrection(
+        "thompson_lamc_updated_rc", "wrf", False, True, "mp_physics = 28 or 38",
+        "Thompson's cloud-water mass/number balance forms the cloud slope from the updated cloud mass, not the entry mass",
+        active=lambda get: int(get("mp_physics")) in _correct_mode.THOMPSON_CLOUD_BALANCE_MP),
+    QuirkCorrection(
         "noah_land_ice_rain_runoff", "wrf", False, True, "sf_surface_physics = 2, land-ice points",
         "Noah books the liquid rain that falls on land ice as surface runoff, where WRF's glacial arm drops it",
         active=lambda get: int(get("sf_surface_physics")) == 2),
@@ -125,6 +131,11 @@ CORRECTIONS: tuple[QuirkCorrection, ...] = (
         "noah_snow_series_conductivity", "wrf", False, True, "sf_surface_physics = 2, snow-covered land points",
         "Noah blends the series snow-soil conductivity into the soil heat flux, where WRF computes it and uses the arithmetic mean",
         active=lambda get: int(get("sf_surface_physics")) == 2),
+    QuirkCorrection(
+        "diff_metrics_seam_slope", "wrf", False, True, "diff_opt = 1 or 2",
+        "the diffusion metrics take the true terrain slope at a periodic axis's seam on the top w level, "
+        "where WRF keeps a cold zero",
+        active=lambda get: int(get("diff_opt")) in (1, 2)),
     # hex (MPAS) regional route
     QuirkCorrection(
         "undriven_species_boundary", "hex", "free", "wrf-flow-dependent", "regional mesh (--lbc-dir)",
@@ -374,9 +385,9 @@ def run_corrections_due(cfg) -> tuple[str, ...]:
 def run_corrections_under(umbrella: str) -> dict:
     """Every RunConfig correction's value under an explicit ``umbrella``:
     all true under 'all', all false under 'none' (RunConfig.__post_init__
-    writes them for a RunConfig built in Python; the TOML readers resolve
-    'none' first, so an individual key set next to it wins there; each is
-    read only where its scheme runs)."""
+    writes them for a RunConfig built in Python, where a key passed by name
+    next to 'none' then wins, as it does on the TOML route, which resolves
+    'none' first; each is read only where its scheme runs)."""
     umbrella_value(umbrella)
     return {key: _wanted(BY_KEY[key], umbrella) for key in keys("wrf")}
 
@@ -384,13 +395,14 @@ def run_corrections_under(umbrella: str) -> dict:
 def run_reads(cfg, key: str) -> bool:
     """Whether RunConfig correction ``key`` reaches ``cfg``'s arithmetic:
     on, and read by the schemes it selects (woof.correct_mode.KEY_SCOPE,
-    KEY_GENERATIONS and KEY_UNREAD). Every consumer asks this, so a key
-    that is on by default (correct mode) is inert where it is not read."""
+    KEY_GENERATIONS and KEY_UNREAD, with this launch's WRF-Hydro coupling:
+    correct_mode.launch_values). Every consumer asks this, so a key that is
+    on by default (correct mode) is inert where it is not read."""
     from woof import correct_mode
     if BY_KEY[key].route != "wrf":
         raise ValueError(f"{key} is not a RunConfig correction")
     return (getattr(cfg, key, False) is True
-            and correct_mode.key_in_scope(key, correct_mode._scope_values(cfg)))
+            and correct_mode.key_in_scope(key, correct_mode.launch_values(cfg)))
 
 
 def check_run_config(cfg) -> None:

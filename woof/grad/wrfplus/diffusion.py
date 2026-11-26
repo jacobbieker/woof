@@ -68,7 +68,11 @@ DF_PASSIVE = ("phb", "msft", "msfu", "msfv", "fnm", "fnp", "dn", "dnw")
 class DFGeometry:
     """wrf_smag_deform's scalars: ``rdx = 1/dx`` and ``rdy = 1/dy`` as the
     primal rounds them, the bottom extrapolation weights cf1-cf3 and the
-    bounded (open or specified) axes."""
+    bounded (open or specified) axes.  ``seam_cold`` = 1 is WRF's
+    compute_diff_metrics at a periodic axis's seam: the slope at the top w
+    level keeps its cold zero there (RunConfig.diff_metrics_seam_slope off,
+    the primal's boundary flag 2, woof.core.dycore.smag_boundary_flags);
+    0 takes the true slope."""
     nz: int
     ny: int
     nx: int
@@ -79,14 +83,21 @@ class DFGeometry:
     cf3: float
     boundary_x: int = 0
     boundary_y: int = 0
+    seam_cold: int = 0
 
     def args(self, dtype) -> tuple:
         i, r = np.int32, np.dtype(dtype).type
+        # the primal's flags: 1 bounded, 0 periodic, 2 periodic with WRF's
+        # cold seam slope at the top w level
+        bx, by = ((1 if b else 2 * int(self.seam_cold))
+                  for b in (self.boundary_x, self.boundary_y))
         return (r(self.rdx), r(self.rdy), r(self.cf1), r(self.cf2), r(self.cf3),
-                i(self.boundary_x), i(self.boundary_y), i(self.nz), i(self.ny), i(self.nx))
+                i(bx), i(by), i(self.nz), i(self.ny), i(self.nx))
 
     def validate(self) -> None:
         _axes(self)
+        if self.seam_cold not in (0, 1):
+            raise ValueError(f"seam_cold is 0 or 1, got {self.seam_cold}")
         if self.nz < 3:
             raise ValueError(f"the deformation needs nz >= 3 (the bottom "
                              f"extrapolation reads levels 0-2), got {self.nz}")
@@ -303,3 +314,383 @@ def hd_ad(adj_state, traj, adj, geom: HDGeometry):
     sh = hd_shapes(geom)
     n = sum(int(np.prod(sh[k])) for k in HD_ACTIVE)
     _kernel("hd_ad", dtype)(_blocks(n), (THREADS,), arrs + geom.args(dtype))
+
+
+# --------------------------------- horizontal_diffusion_2 (diff_opt 2)
+
+#: The rows of WRF horizontal_diffusion_2 (woof wrf_smag_hd_u / _v / _w
+#: and wrf_smag_flux_s + wrf_smag_hd_s) and of vertical_diffusion_2 (woof
+#: wrf_smag_vd_u / _v / _w / _s with the surface kernels of
+#: dycore.launch_wrf_smag2d_vertical): the kernel's row code.  Theta is the
+#: scalar row on woof's strict thp (= theta - 300, WRF's t_2); ``vt`` and
+#: ``vs`` are the vertical scalar row with theta's or qv's surface flux.
+H2_ROWS = {"u": 1, "v": 2, "w": 3, "t": 0, "s": 0, "vu": 4, "vv": 5, "vw": 6, "vt": 7, "vs": 7}
+H2_STATE = ("tend",)
+H2_PASSIVE = ("phb", "msft", "msfu", "msfv", "fnm", "fnp", "dn", "dnw")
+#: Each row's active inputs, before ``qv`` (moist density).
+_H2_ACTIVE = {1: ("defor11", "defor12", "xk", "alt", "php"),
+              2: ("defor22", "defor12", "xk", "alt", "php"),
+              3: ("u", "v", "w", "xk", "alt", "php"),
+              0: ("field", "xk", "alt", "php"),
+              4: ("u", "v", "w", "xk", "alt", "php"),
+              5: ("u", "v", "w", "xk", "alt", "php"),
+              6: ("w", "xk", "alt", "php"),
+              7: ("field", "xk", "alt", "php")}
+#: vertical_diffusion_2's surface momentum flux: none, USTM (isfflx 1/2) or
+#: the constant drag coefficient (isfflx 0); its heat flux: none, the
+#: prescribed tke_heat_flux (isfflx 0/2) or HFX (isfflx 1).
+H2_SURFACE = {"none": 0, "ustm": 1, "cd0": 2}
+H2_HEAT = {"none": 0, "const": 1, "hfx": 2}
+
+
+@dataclass(frozen=True)
+class H2Geometry:
+    """horizontal_diffusion_2's scalars: ``rdx = 1/dx`` and ``rdy = 1/dy``
+    as the primal rounds them, the bottom extrapolation weights cf1-cf3,
+    the row (``u``, ``v``, ``w``; ``t`` theta and ``s`` a scalar, both the
+    scalar operator), the bounded (open or specified) axes and ``moist``
+    (the density 1/alt times 1 + qv, wrf_rho's moist branch)."""
+    nz: int
+    ny: int
+    nx: int
+    rdx: float
+    rdy: float
+    cf1: float
+    cf2: float
+    cf3: float
+    row: str = "s"
+    boundary_x: int = 0
+    boundary_y: int = 0
+    moist: int = 0
+    #: vertical rows only: the vu / vv surface stress (H2_SURFACE) and cd0;
+    #: vt's surface heat flux (H2_HEAT), the prescribed kinematic flux and
+    #: full_theta (thp mixed with thb, wrf_smag_vd_s's full_theta); vs's
+    #: qflux (the QFX surface moisture flux of the qv row, moist only).
+    #: The geometry carries no isfflx or surface-layer flag: the caller
+    #: picks ``surface`` / ``heat`` / ``qflux`` as
+    #: dycore.launch_wrf_smag2d_vertical's SELECT CASE(isfflx) would (none
+    #: where the surface layer supplies no fields).  The surface stress
+    #: takes the earth-relative u and v; a moving frame's ground-relative
+    #: winds are not modelled (the step binding refuses a moving frame).
+    #: The rows are the GPUWM_WRF_EXACT_C_DIFFUSION statements (the
+    #: default build; only GPUWM_WRF_EXACT=1 with
+    #: GPUWM_WRF_EXACT_DIFFUSION=0 compiles the other forms).
+    surface: str = "none"
+    cd0: float = 0.0
+    heat: str = "none"
+    heat_flux: float = 0.0
+    full_theta: int = 0
+    qflux: int = 0
+
+    def __post_init__(self):
+        if self.row not in H2_ROWS:
+            raise ValueError(f"row is one of {sorted(H2_ROWS)}, got {self.row!r}")
+        if self.surface not in H2_SURFACE:
+            raise ValueError(f"surface is one of {sorted(H2_SURFACE)}, got {self.surface!r}")
+        if self.heat not in H2_HEAT:
+            raise ValueError(f"heat is one of {sorted(H2_HEAT)}, got {self.heat!r}")
+        if self.surface != "none" and self.row not in ("vu", "vv"):
+            raise ValueError("a surface stress belongs to the vu and vv rows")
+        if (self.heat != "none" or self.full_theta) and self.row != "vt":
+            raise ValueError("a surface heat flux and full_theta belong to the vt row")
+        if self.qflux and (self.row != "vs" or not self.moist):
+            raise ValueError("qflux belongs to the vs row of a moist run (the qv row)")
+        if self.full_theta not in (0, 1) or self.qflux not in (0, 1):
+            raise ValueError("full_theta and qflux are 0 or 1")
+
+    @property
+    def vertical(self) -> bool:
+        return self.code >= 4
+
+    @property
+    def code(self) -> int:
+        return H2_ROWS[self.row]
+
+    def args(self, dtype) -> tuple:
+        i, r = np.int32, np.dtype(dtype).type
+        return (r(self.rdx), r(self.rdy), r(self.cf1), r(self.cf2), r(self.cf3),
+                i(self.boundary_x), i(self.boundary_y), i(self.nz), i(self.ny), i(self.nx),
+                i(self.code), i(self.moist))
+
+    def validate(self) -> None:
+        _axes(self)
+        if self.nz < 3:
+            raise ValueError(f"diff_opt 2 rows need nz >= 3 (the scalar faces' and "
+                             f"defor13/23's bottom extrapolation read levels 0-2; "
+                             f"vw, vt and vs alone would take 2, held at 3 with "
+                             f"the rest), got {self.nz}")
+        if self.moist not in (0, 1):
+            raise ValueError(f"moist is 0 or 1, got {self.moist}")
+        if not (np.isfinite(self.rdx) and np.isfinite(self.rdy)
+                and self.rdx > 0 and self.rdy > 0):
+            raise ValueError("rdx and rdy must be positive and finite")
+
+
+def h2_active(geom) -> tuple:
+    return _H2_ACTIVE[geom.code] + (("qv",) if geom.moist else ())
+
+
+def h2_passive(geom) -> tuple:
+    """H2_PASSIVE and the vertical rows' surface fields: ``ustm`` (vu / vv
+    with the USTM stress), ``hfx`` (vt with HFX), ``thb`` (vt with
+    full_theta, the 3-D base theta) and ``qfx`` (vs with qflux)."""
+    extra = ((("ustm",) if geom.surface == "ustm" else ())
+             + (("hfx",) if geom.heat == "hfx" else ())
+             + (("thb",) if geom.full_theta else ())
+             + (("qfx",) if geom.qflux else ()))
+    return H2_PASSIVE + extra
+
+
+def h2_shapes(geom) -> dict:
+    nz, ny, nx, c = geom.nz, geom.ny, geom.nx, geom.code
+    mass, wlev = (nz, ny, nx), (nz + 1, ny, nx)
+    tend = {1: (nz, ny, nx + 1), 2: (nz, ny + 1, nx), 3: wlev, 0: mass,
+            4: (nz, ny, nx + 1), 5: (nz, ny + 1, nx), 6: wlev, 7: mass}[c]
+    return {"tend": tend, "defor11": mass, "defor22": mass, "defor12": mass, "xk": mass,
+            "alt": mass, "qv": mass, "field": mass, "u": (nz, ny, nx + 1),
+            "v": (nz, ny + 1, nx), "w": wlev, "php": wlev, "phb": wlev, "msft": (ny, nx),
+            "msfu": (ny, nx + 1), "msfv": (ny + 1, nx), "fnm": (nz,), "fnp": (nz,),
+            "dn": (nz,), "dnw": (nz,), "ustm": (ny, nx), "hfx": (ny, nx), "qfx": (ny, nx),
+            "thb": mass}
+
+
+def _h2_temp_shapes(geom) -> dict:
+    """The stored intermediates (kernels/diffusion.cu, diff_opt 2)."""
+    nz, ny, nx = geom.nz, geom.ny, geom.nx
+    sh = {"zx": (nz + 1, ny, nx + 1), "zy": (nz + 1, ny + 1, nx), "rdzw": (nz, ny, nx),
+          "rdz": (nz + 1, ny, nx), "rho": (nz, ny, nx)}
+    sh.update({1: {"s1": (nz, ny, nx), "s2": (nz, ny + 1, nx + 1)},
+               2: {"s1": (nz, ny, nx), "s2": (nz, ny + 1, nx + 1)},
+               3: {"s1": (nz + 1, ny, nx + 1), "s2": (nz + 1, ny + 1, nx)},
+               4: {"s1": (nz + 1, ny, nx + 1), "s2": (nz + 1, ny + 1, nx)},
+               5: {"s1": (nz + 1, ny, nx + 1), "s2": (nz + 1, ny + 1, nx)},
+               0: {"s1": (nz, ny, nx + 1), "s2": (nz, ny + 1, nx)},
+               6: {}, 7: {}}[geom.code])
+    return sh
+
+
+def _h2_temps(geom, dtype, fill=None) -> dict:
+    import cupy as cp
+    make = cp.empty if fill is None else cp.zeros
+    return {n: make(s, dtype=dtype) for n, s in _h2_temp_shapes(geom).items()}
+
+
+def _h2_check(geom, named) -> None:
+    geom.validate()
+    _check(geom, named, h2_shapes(geom), min_nz=3)
+
+
+def _h2_launch(name, dtype, n, args, geom):
+    _kernel(name, dtype)(_blocks(n), (THREADS,), args + geom.args(dtype))
+
+
+def _h2_sizes(geom) -> dict:
+    return {n: int(np.prod(s)) for n, s in _h2_temp_shapes(geom).items()}
+
+
+def _h2_forward(traj, pert, geom, dtype, tl):
+    """The staged forward: the intermediates (and with ``tl`` their
+    tangents).  Returns (values, tangents); with ``tl`` 0 the tangents are
+    one-word placeholders the kernels never touch."""
+    import cupy as cp
+    T = _h2_temps(geom, dtype)
+    D = _h2_temps(geom, dtype) if tl else {n: cp.zeros(1, dtype=dtype) for n in T}
+    P = pert if tl else traj
+    sz, c, flag = _h2_sizes(geom), geom.code, np.int32(tl)
+    _h2_launch("h2_met_tl", dtype, sz["zx"] + sz["zy"] + sz["rdzw"] + sz["rdz"],
+               (traj["php"], P["php"], traj["phb"], T["zx"], D["zx"], T["zy"], D["zy"],
+                T["rdzw"], D["rdzw"], T["rdz"], D["rdz"], flag), geom)
+    qv = traj["qv"] if geom.moist else traj["alt"]
+    qvd = P["qv"] if geom.moist else P["alt"]
+    _h2_launch("h2_rho_tl", dtype, sz["rho"],
+               (traj["alt"], P["alt"], qv, qvd, T["rho"], D["rho"], flag), geom)
+    if c in (1, 2):
+        da = "defor11" if c == 1 else "defor22"
+        _h2_launch("h2_tuv_tl", dtype, sz["s1"] + sz["s2"],
+                   (T["rho"], D["rho"], traj["xk"], P["xk"], traj[da], P[da],
+                    traj["defor12"], P["defor12"], T["s1"], D["s1"], T["s2"], D["s2"], flag),
+                   geom)
+    elif c in (3, 4, 5):
+        _h2_launch("h2_tw_tl", dtype, sz["s1"] + sz["s2"],
+                   (traj["u"], P["u"], traj["v"], P["v"], traj["w"], P["w"], T["zx"], D["zx"],
+                    T["zy"], D["zy"], T["rdz"], D["rdz"], T["rho"], D["rho"], traj["xk"],
+                    P["xk"], traj["msft"], traj["msfu"], traj["msfv"], traj["fnm"],
+                    traj["fnp"], T["s1"], D["s1"], T["s2"], D["s2"], flag), geom)
+    elif c == 0:
+        _h2_launch("h2_hs_tl", dtype, sz["s1"] + sz["s2"],
+                   (traj["field"], P["field"], traj["xk"], P["xk"], T["rho"], D["rho"],
+                    T["zx"], D["zx"], T["zy"], D["zy"], T["rdzw"], D["rdzw"], traj["msfu"],
+                    traj["msfv"], traj["fnm"], traj["fnp"], traj["dn"], traj["dnw"],
+                    T["s1"], D["s1"], T["s2"], D["s2"], flag), geom)
+    return T, D
+
+
+def _h2_rz(geom) -> str:
+    return "rdz" if geom.code == 3 else "rdzw"
+
+
+def _h2_row_passive(traj) -> tuple:
+    return tuple(traj[n] for n in ("msft", "msfu", "msfv", "fnm", "fnp", "dn", "dnw"))
+
+
+def h2_tl(state, pert_state, traj, pert, geom: H2Geometry, *, nl=True):
+    """One diff_opt 2 row: WRF horizontal_diffusion_2's (rows u, v, w, t,
+    s: horizontal_diffusion_u_2, _v_2, _w_2 or _s on woof's strict
+    wrf_smag_hd_u / _v / _w or wrf_smag_flux_s + wrf_smag_hd_s) or
+    vertical_diffusion_2's (rows vu, vv, vw, vt, vs: vertical_diffusion_u_2,
+    _v_2, _w_2 and vertical_diffusion_s with their isfflx surface terms, on
+    woof's strict dycore.launch_wrf_smag2d_vertical: wrf_smag_vd_u / _v /
+    _w / _s then wrf_smag_surface_u / _v (or _cd0),
+    wrf_smag_surface_heat_const and wrf_smag_surface_scalars).  ``tend``
+    (accumulated) of the row's active inputs (:func:`h2_active`)."""
+    act, pas = h2_active(geom), h2_passive(geom)
+    traj = _h2_traj3(traj, geom)
+    _h2_check(geom, _named("state", H2_STATE, state) + _named("pert_state", H2_STATE, pert_state)
+              + _named("traj", act + pas, traj) + _named("pert", act, pert))
+    dtype = _dtype((state["tend"], pert_state["tend"]) + tuple(traj[n] for n in act + pas)
+                   + tuple(pert[n] for n in act))
+    T, D = _h2_forward(traj, pert, geom, dtype, 1)
+    if geom.vertical:
+        _h2_vrow_tl(state, pert_state, traj, pert, T, D, geom, dtype, nl)
+        return
+    rz = _h2_rz(geom)
+    _h2_launch("h2_row_tl", dtype, int(np.prod(h2_shapes(geom)["tend"])),
+               (state["tend"], pert_state["tend"], T["s1"], D["s1"], T["s2"], D["s2"],
+                T["zx"], D["zx"], T["zy"], D["zy"], T[rz], D[rz]) + _h2_row_passive(traj)
+               + (np.int32(bool(nl)),), geom)
+
+
+def h2_ad(adj_state, traj, adj, geom: H2Geometry):
+    """Adjoint of :func:`h2_tl`: add into ``adj`` (the row's active
+    inputs).  The tendency accumulates, so its adjoint is left as it is.
+    Runs the base forward into the intermediates, then each stage's
+    adjoint in reverse order."""
+    act, pas = h2_active(geom), h2_passive(geom)
+    traj = _h2_traj3(traj, geom)
+    _h2_check(geom, _named("adj", H2_STATE, adj_state) + _named("traj", act + pas, traj)
+              + _named("adj", act, adj))
+    dtype = _dtype((adj_state["tend"],) + tuple(traj[n] for n in act + pas)
+                   + tuple(adj[n] for n in act))
+    T, _ = _h2_forward(traj, None, geom, dtype, 0)
+    A = _h2_temps(geom, dtype, fill=0)
+    sz, c, rz = _h2_sizes(geom), geom.code, _h2_rz(geom)
+    if geom.vertical:
+        _h2_vrow_ad(adj_state, traj, adj, T, A, geom, dtype)
+    else:
+        _h2_launch("h2_row_ad", dtype, sz["s1"] + sz["s2"] + sz["zx"] + sz["zy"] + sz[rz],
+                   (adj_state["tend"], T["s1"], T["s2"], T["zx"], T["zy"], T[rz])
+                   + _h2_row_passive(traj) + (A["s1"], A["s2"], A["zx"], A["zy"], A[rz]),
+                   geom)
+    m = sz["rho"]
+    if c in (1, 2):
+        da = "defor11" if c == 1 else "defor22"
+        _h2_launch("h2_tuv_ad", dtype, 4 * m,
+                   (A["s1"], A["s2"], T["rho"], traj["xk"], traj[da], traj["defor12"],
+                    A["rho"], adj["xk"], adj[da], adj["defor12"]), geom)
+    elif c in (3, 4, 5):
+        sh = h2_shapes(geom)
+        n = (sum(int(np.prod(sh[k])) for k in ("u", "v", "w")) + sz["zx"] + sz["zy"]
+             + sz["rdz"] + 2 * m)
+        _h2_launch("h2_tw_ad", dtype, n,
+                   (A["s1"], A["s2"], traj["u"], traj["v"], traj["w"], T["zx"], T["zy"],
+                    T["rdz"], T["rho"], traj["xk"], traj["msft"], traj["msfu"], traj["msfv"],
+                    traj["fnm"], traj["fnp"], adj["u"], adj["v"], adj["w"], A["zx"], A["zy"],
+                    A["rdz"], A["rho"], adj["xk"]), geom)
+    elif c == 0:
+        _h2_launch("h2_hs_ad", dtype, 3 * m + sz["zx"] + sz["zy"] + sz["rdzw"],
+                   (A["s1"], A["s2"], traj["field"], traj["xk"], T["rho"], T["zx"], T["zy"],
+                    T["rdzw"], traj["msfu"], traj["msfv"], traj["fnm"], traj["fnp"],
+                    traj["dn"], traj["dnw"], adj["field"], adj["xk"], A["rho"], A["zx"],
+                    A["zy"], A["rdzw"]), geom)
+    import cupy as cp
+    qv = traj["qv"] if geom.moist else traj["alt"]
+    aqv = adj["qv"] if geom.moist else cp.zeros(1, dtype=dtype)
+    _h2_launch("h2_rho_ad", dtype, m * (2 if geom.moist else 1),
+               (A["rho"], traj["alt"], qv, adj["alt"], aqv), geom)
+    _h2_launch("h2_met_ad", dtype, int(np.prod(h2_shapes(geom)["php"])),
+               (A["zx"], A["zy"], A["rdzw"], A["rdz"], traj["php"], traj["phb"], adj["php"]),
+               geom)
+
+
+def _h2_thb3(thb, geom):
+    """The base theta as the 3-D mass field the kernel reads; a 1-D
+    column (wrf_smag_vd_s's thb3d = 0 branch, thb[k]) is broadcast."""
+    import cupy as cp
+    if thb.ndim == 1:
+        if thb.shape != (geom.nz,):
+            raise ValueError(f"a 1-D thb has nz = {geom.nz} levels, got {thb.shape}")
+        thb = cp.ascontiguousarray(cp.broadcast_to(thb[:, None, None],
+                                                   (geom.nz, geom.ny, geom.nx)))
+    return thb
+
+
+def _h2_traj3(traj, geom) -> dict:
+    """``traj`` with a 1-D base theta broadcast to 3-D (:func:`_h2_thb3`)."""
+    thb = traj.get("thb") if geom.full_theta else None
+    if thb is None or getattr(thb, "ndim", 3) != 1:
+        return traj
+    return dict(traj, thb=_h2_thb3(thb, geom))
+
+
+def _h2_vargs(traj, geom, dtype) -> tuple:
+    """The vertical rows' passive arguments (H2_V_PASSIVE)."""
+    import cupy as cp
+    r, i = np.dtype(dtype).type, np.int32
+    dummy = cp.zeros(1, dtype=dtype)
+    return (traj["fnm"], traj["fnp"], traj["dn"], traj["dnw"],
+            traj["ustm"] if geom.surface == "ustm" else dummy,
+            traj["hfx"] if geom.heat == "hfx" else dummy,
+            traj["qfx"] if geom.qflux else dummy,
+            traj["thb"] if geom.full_theta else dummy,
+            r(geom.cd0), r(geom.heat_flux), i(H2_SURFACE[geom.surface]), i(H2_HEAT[geom.heat]),
+            i(geom.full_theta), i(geom.qflux))
+
+
+def _h2_vsel(geom, X, fallback) -> tuple:
+    """(stress, u, v, w, field, rho, K, rdzw-or-rdz, qv) of the vertical
+    row from the dict ``X`` (values, tangents or adjoints); ``fallback``
+    stands in for the inputs the row does not read."""
+    c = geom.code
+    st = X["s1"] if c == 4 else X["s2"] if c == 5 else fallback("st")
+    rz = X["rdzw"] if c == 6 else X["rdz"] if c == 7 else fallback("rz")
+    return (st, X["u"] if c in (4, 5) else fallback("u"),
+            X["v"] if c in (4, 5) else fallback("v"),
+            X["w"] if c in (4, 5, 6) else fallback("w"),
+            X["field"] if c == 7 else fallback("field"), X["rho"], X["xk"], rz,
+            X["qv"] if geom.moist else fallback("qv"))
+
+
+def _h2_vrow_tl(state, pert_state, traj, pert, T, D, geom, dtype, nl):
+    import cupy as cp
+    dummy = cp.zeros(1, dtype=dtype)
+    val = _h2_vsel(geom, {**traj, **T}, lambda n: dummy)
+    tan = _h2_vsel(geom, {**pert, **D}, lambda n: dummy)
+    args = (state["tend"], pert_state["tend"])
+    for a, b in zip(val, tan):
+        args += (a, b)
+    _h2_launch("h2_vrow_tl", dtype, int(np.prod(h2_shapes(geom)["tend"])),
+               args + _h2_vargs(traj, geom, dtype) + (np.int32(bool(nl)),), geom)
+
+
+def _h2_vrow_count(geom) -> int:
+    """Words of the vrow stage's inputs (kernels h2_inputs, stage vrow)."""
+    sh, c = h2_shapes(geom), geom.code
+    n = lambda k: int(np.prod(sh[k]))  # noqa: E731
+    m = n("xk")
+    if c in (4, 5):
+        st = int(np.prod(_h2_temp_shapes(geom)["s1" if c == 4 else "s2"]))
+        return st + ((n("u") + n("v") + m) if geom.surface != "none" else 0)
+    if c == 6:
+        return n("w") + 3 * m
+    return 3 * m + n("php") + (m if geom.moist and geom.heat == "hfx" else 0)
+
+
+def _h2_vrow_ad(adj_state, traj, adj, T, A, geom, dtype):
+    import cupy as cp
+    dummy = cp.zeros(1, dtype=dtype)
+    val = _h2_vsel(geom, {**traj, **T}, lambda n: dummy)
+    # the adjoint targets: the row's temps, else the active inputs; one
+    # distinct scratch word per input the row does not read
+    out = _h2_vsel(geom, {**adj, **A}, lambda n: cp.zeros(1, dtype=dtype))
+    _h2_launch("h2_vrow_ad", dtype, _h2_vrow_count(geom),
+               (adj_state["tend"],) + val + _h2_vargs(traj, geom, dtype) + out, geom)

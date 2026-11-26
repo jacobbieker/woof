@@ -88,6 +88,7 @@ def test_the_ocean_door_verify_grades_the_ported_piece():
                                                      "tracer_hmix_r4", "tracer_hmix_r8",
                                                      "tracer_tendency_r4", "tracer_tendency_r8",
                                                      "vertical_mixing_r4", "vertical_mixing_r8",
+                                                     "cvmix_kpp_r8",
                                                      "vertical_transport_r4", "vertical_transport_r8",
                                                      "barotropic_stage_r4", "barotropic_stage_r8",
                                                      "split_explicit_step_r4", "split_explicit_step_r8",
