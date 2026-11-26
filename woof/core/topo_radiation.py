@@ -273,7 +273,7 @@ class TopoShortwave:
     """
 
     def __init__(self, *, state, cfg, fields, latitude, longitude,
-                 start_time):
+                 start_time, slope_statics=None):
         import cupy as cp
 
         from woof.config import radiation_scheme_ids
@@ -291,10 +291,29 @@ class TopoShortwave:
         self.xlong = _f32(cp, longitude, self.shape, "longitude")
         self._xlat_host = cp.asnumpy(self.xlat).reshape(-1)
         self._xlong_host = cp.asnumpy(self.xlong).reshape(-1)
-        slope, slp_azi = slope_geometry(
-            state.ht, state.msft, state.msft, state.sina, state.cosa,
-            dx=self.dx, dy=self.dy,
-            initialization="scalar_build" if strict_arithmetic else "column_oracle")
+        if slope_statics is None:
+            slope, slp_azi = slope_geometry(
+                state.ht, state.msft, state.msft, state.sina, state.cosa,
+                dx=self.dx, dy=self.dy,
+                initialization="scalar_build" if strict_arithmetic else "column_oracle")
+        else:
+            # A caller whose columns are not a structured grid hands SLOPE
+            # and SLP_AZI built on its own geometry (the hex mesh:
+            # woof.hex.slope_statics); the grid stencil would difference
+            # columns that are not neighbours.  The shadow search marches
+            # that same grid, so it is refused here rather than run on it.
+            if self.shading:
+                raise ValueError(
+                    "topo_shading = 1 marches the sun direction over a "
+                    "structured grid's terrain; with caller-built slope "
+                    "statics the columns are not that grid")
+            slope, slp_azi = (_f32(cp, value, self.shape, name) for value, name in
+                              zip(slope_statics, ("topo_slope", "topo_slope_azimuth")))
+            if not (bool(cp.all(cp.isfinite(slope))) and bool(cp.all(cp.isfinite(slp_azi)))):
+                raise ValueError("topo_slope/topo_slope_azimuth must be finite")
+            if bool(cp.any(slope < 0)) or bool(cp.any(slope >= np.float32(np.pi / 2))):
+                raise ValueError("topo_slope must lie in [0, pi/2) radians")
+            slope, slp_azi = slope.copy(), slp_azi.copy()
         fields["slope"] = slope
         fields["slp_azi"] = slp_azi
         for name in ("diffuse_frac", "topo_coszen", "hrang", "swnorm"):
