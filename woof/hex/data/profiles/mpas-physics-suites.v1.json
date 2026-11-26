@@ -575,29 +575,32 @@
         "follow_up": "drop spacewx_epp_source from --physics and set \"spacewx_epp_opt\": 1 with \"spacewx_epp_source\" in the --chemistry-config wrf_chem block (chem_sets radm2 or radm2sorg; both hex routes)"
       },
       "diff_opt": {
-        "inactive_values": [],
-        "reason": "WRF's explicit diffusion (diff_opt=1 along coordinate surfaces, 2 in physical space) is the divergence of the deformation stress, K D with D11 = 2 du/dx (WRF 4.7.1 module_diffusion_em.F:215, horizontal_diffusion_u_2 :3118-3318), which for momentum is K (laplacian u + grad div); hex integrates with the MPAS-A dycore, whose horizontal mixing (--horiz-mixing; mpas_atm_dissipation_models.F:579-1606) is the vector Laplacian of momentum, K (grad div - k x grad vorticity) scaled by meshScalingDel2 (:709-716), with theta mixed at the inverse Prandtl number 3 (:434, :1293-1296) and, under 2d_smagorinsky, a fourth-order filter (config_visc4_2dsmag) beside it, so no WRF diff_opt value is the operator hex runs. diff_opt=0 (no explicit diffusion) is exactly --horiz-mixing off, which this resolver does not set",
-        "follow_up": "drop diff_opt; for WRF's diff_opt=0 pass --horiz-mixing off, otherwise MPAS's own mixing by its own names (--horiz-mixing, and --dynamics config_* for the &nhyd_model mixing options the route carries)"
+        "inactive_values": [
+          "0"
+        ],
+        "engine_field": false,
+        "reason": "WRF's explicit diffusion (diff_opt=1 along coordinate surfaces, 2 in physical space) is the divergence of the deformation stress, K D with D11 = 2 du/dx (WRF 4.7.1 module_diffusion_em.F:215, horizontal_diffusion_u_2 :3118-3318), which for momentum is K (laplacian u + grad div); hex integrates with the MPAS-A dycore, whose non-LES horizontal mixing (--horiz-mixing; mpas_atm_dissipation_models.F:579-1606) is the vector Laplacian of momentum, K (grad div - k x grad vorticity) times meshScalingDel2 (:709-721), with theta mixed at the same K (MPAS's prandtl = 1, mpas_constants.F:56; dissipation_models.F:1282-1296) where WRF mixes heat at K/prandtl = 3K, and under 2d_smagorinsky a fourth-order filter (config_visc4_2dsmag) beside it; its --les-model lanes are MPAS's own 3-D closures, so diff_opt=1 and 2 are not the operator hex runs. diff_opt=0 (no explicit diffusion) is exactly --horiz-mixing off and passes; the forecast door refuses it beside any other mixing lane",
+        "follow_up": "drop diff_opt (or diff_opt=0 with --horiz-mixing off); MPAS's own mixing goes by its own names (--horiz-mixing, and --dynamics config_* for the &nhyd_model mixing options the route carries)"
       },
       "khdif": {
         "inactive_values": [
           "0"
         ],
         "engine_field": false,
-        "reason": "WRF's constant horizontal K (km_opt=1: xkmh = khdif, xkhh = khdif/prandtl, module_diffusion_em.F:1756-1767) acts through WRF's stress-divergence diffusion; hex integrates with the MPAS-A dycore, whose horizontal mixing (--horiz-mixing; mpas_atm_dissipation_models.F:579-1606) is the vector Laplacian of momentum, K (grad div - k x grad vorticity) scaled by meshScalingDel2 (:709-716), with theta mixed at the inverse Prandtl number 3 (:434, :1293-1296) and, under 2d_smagorinsky, a fourth-order filter (config_visc4_2dsmag) beside it. khdif=0 asks for no constant K and passes",
-        "follow_up": "drop khdif; MPAS's own constant-K mixing (config_horiz_mixing = 2d_fixed with config_h_mom_eddy_visc2 and config_h_theta_eddy_visc2, on the MPAS v8.4.2 suite route's namelist) is a different operator under its own names"
+        "reason": "WRF's constant horizontal K (km_opt=1: xkmh = khdif for momentum, xkhh = khdif/prandtl = 3 khdif for heat, module_diffusion_em.F:1756-1767) acts through WRF's stress-divergence diffusion; hex integrates with the MPAS-A dycore, whose non-LES horizontal mixing (--horiz-mixing; mpas_atm_dissipation_models.F:579-1606) is the vector Laplacian of momentum, K (grad div - k x grad vorticity) times meshScalingDel2 (:709-721), with theta mixed at the same K (MPAS's prandtl = 1, mpas_constants.F:56; dissipation_models.F:1282-1296) where WRF mixes heat at K/prandtl = 3K, and under 2d_smagorinsky a fourth-order filter (config_visc4_2dsmag) beside it; its --les-model lanes are MPAS's own 3-D closures. MPAS's constant-K lane (config_horiz_mixing = 2d_fixed) takes one K, config_h_theta_eddy_visc2, for momentum and theta alike (mpas_atm_time_integration.F:6354-6366). khdif=0 asks for no constant K and passes",
+        "follow_up": "drop khdif; MPAS's own constant-K lane is config_horiz_mixing = 2d_fixed with config_h_theta_eddy_visc2 (one K for momentum and theta) on the MPAS v8.4.2 suite route's namelist, a different operator under its own names"
       },
       "kvdif": {
         "inactive_values": [
           "0"
         ],
         "engine_field": false,
-        "reason": "WRF's constant vertical K (km_opt=1: xkmv = kvdif, xkhv = kvdif/prandtl, module_diffusion_em.F:1756-1767) is applied by WRF's vertical_diffusion_2 with the momentum and heat K split by the Prandtl number; MPAS-A's constant vertical mixing (config_v_mom_eddy_visc2, config_v_theta_eddy_visc2) takes the two coefficients separately and only under its non-LES dissipation boundary, so the WRF setting is not the operator hex runs. kvdif=0 passes",
+        "reason": "WRF's constant vertical K (km_opt=1: xkmv = kvdif for momentum, xkhv = 3 kvdif for heat, module_diffusion_em.F:1756-1767) is applied by WRF's vertical diffusion of the full or base-state-departure fields; MPAS-A's constant vertical mixing takes config_v_mom_eddy_visc2 and config_v_theta_eddy_visc2 separately and mixes u as the departure from u_init (mpas_atm_dissipation_models.F:816-880), so the WRF setting is not the operator hex runs. kvdif=0 passes; the forecast door refuses it beside a nonzero MPAS vertical K",
         "follow_up": "drop kvdif; config_v_mom_eddy_visc2 and config_v_theta_eddy_visc2 (MPAS v8.4.2 suite route namelist) are MPAS's own options"
       },
       "c_s": {
         "inactive_values": [],
-        "reason": "WRF's Smagorinsky constant (km_opt=3/4, 0.25 by default) scales K = (c_s l)^2 |D| with l = sqrt(dx dy) inside WRF's stress-divergence diffusion; hex integrates with the MPAS-A dycore, whose horizontal mixing (--horiz-mixing; mpas_atm_dissipation_models.F:579-1606) is the vector Laplacian of momentum, K (grad div - k x grad vorticity) scaled by meshScalingDel2 (:709-716), with theta mixed at the inverse Prandtl number 3 (:434, :1293-1296) and, under 2d_smagorinsky, a fourth-order filter (config_visc4_2dsmag) beside it, with its own coefficient config_smagorinsky_coef (0.125 by default) on its own deformation and length config_len_disp",
+        "reason": "WRF's Smagorinsky constant (km_opt=3/4, 0.25 by default) scales K = (c_s l)^2 |D| (module_diffusion_em.F smag_km :1777-1929, smag2d_km :1934) inside WRF's stress-divergence diffusion; hex integrates with the MPAS-A dycore, whose non-LES horizontal mixing (--horiz-mixing; mpas_atm_dissipation_models.F:579-1606) is the vector Laplacian of momentum, K (grad div - k x grad vorticity) times meshScalingDel2 (:709-721), with theta mixed at the same K (MPAS's prandtl = 1, mpas_constants.F:56; dissipation_models.F:1282-1296) where WRF mixes heat at K/prandtl = 3K, and under 2d_smagorinsky a fourth-order filter (config_visc4_2dsmag) beside it; its --les-model lanes are MPAS's own 3-D closures, with its own coefficient config_smagorinsky_coef (0.125 by default) on its own deformation and length config_len_disp (mpas_atm_dissipation_models.F smagorinsky_2d)",
         "follow_up": "drop c_s; --dynamics config_smagorinsky_coef=... is MPAS's own coefficient"
       },
       "mix_full_fields": {
@@ -608,22 +611,22 @@
           "t"
         ],
         "engine_field": false,
-        "reason": "mix_full_fields=false makes WRF's diff_opt=2 vertical mixing act on the departure from its 1-D base states u_base, v_base, t_base and qv_base (module_diffusion_em.F:839, 4251, 4347); MPAS-A's config_mix_full=false subtracts its initial-state theta t_init per cell and the 1-D wind profile u_init/v_init (mpas_atm_dissipation_models.F:818-870, 1416), a different reference, and hex runs no WRF diff_opt=2 for it to modify. mix_full_fields=true (mix the full fields) is MPAS's default config_mix_full=true and passes",
+        "reason": "mix_full_fields=false makes WRF's diff_opt=2 vertical mixing act on the departure from its 1-D base states u_base, v_base, t_base and qv_base (module_diffusion_em.F:839, 4251, 4347); MPAS-A's config_mix_full=false subtracts its initial-state theta t_init per cell and the 1-D wind profile u_init/v_init (mpas_atm_dissipation_models.F:818-870, 1416), a different reference. mix_full_fields=true (mix the full fields) is MPAS's default config_mix_full=true and passes; the forecast door refuses it beside config_mix_full=false",
         "follow_up": "drop mix_full_fields; config_mix_full = false (MPAS v8.4.2 suite route namelist) is MPAS's own initial-state departure"
       },
       "h_mom_adv_order": {
         "inactive_values": [],
-        "reason": "WRF's horizontal momentum advection order (2-6, module_advect_em.F advect_u/v/w) selects a grid-stencil flux for u, v and w; hex integrates with the MPAS-A dycore, which has no advection-order selection: horizontal transport of scalars, theta and w is MPAS's fourth-order flux on its own adv_coefs plus config_coef_3rd_order times the third-order upwind term, one coefficient that also scales the vertical scalar and theta fluxes and the zb3_cell terrain metric (mpas_atm_core.F:1539-1558); u is carried in MPAS's vector-invariant form (kinetic-energy gradient and the nonlinear Coriolis term, mpas_atm_time_integration.F:6520-6562), with no order at all; the *_adv_order options of the v8.4.2 Registry have no reader",
-        "follow_up": "drop h_mom_adv_order; --dynamics config_coef_3rd_order=... sets MPAS's own upwind coefficient"
+        "reason": "WRF's horizontal momentum advection order (2-6) selects a grid-stencil flux for u and v (module_advect_em.F advect_u :223, advect_v :1633); MPAS-A carries u in vector-invariant form, the kinetic-energy gradient and the nonlinear Coriolis term (mpas_atm_time_integration.F:6520-6562), with no order at all, so no value is the operator hex runs",
+        "follow_up": "drop h_mom_adv_order"
       },
       "h_sca_adv_order": {
         "inactive_values": [],
-        "reason": "WRF's horizontal scalar advection order (2-6) selects a grid-stencil flux for theta, moisture and scalars alone; hex integrates with the MPAS-A dycore, which has no advection-order selection: horizontal transport of scalars, theta and w is MPAS's fourth-order flux on its own adv_coefs plus config_coef_3rd_order times the third-order upwind term, one coefficient that also scales the vertical scalar and theta fluxes and the zb3_cell terrain metric (mpas_atm_core.F:1539-1558); u is carried in MPAS's vector-invariant form (kinetic-energy gradient and the nonlinear Coriolis term, mpas_atm_time_integration.F:6520-6562), with no order at all; the *_adv_order options of the v8.4.2 Registry have no reader. Even order 3 or 4 (config_coef_3rd_order 1 or 0) would change w and the terrain metric, which WRF's h_sca_adv_order does not touch",
+        "reason": "WRF's horizontal scalar order (2-6) selects the flux for theta, moisture, scalars and w (advect_scalar; advect_w :4463); MPAS-A has no advection-order selection (the *_adv_order options of the v8.4.2 Registry have no reader): horizontal transport of scalars, theta and w is MPAS's fourth-order flux on its own adv_coefs plus config_coef_3rd_order times the third-order upwind term, and that one coefficient also scales the vertical scalar and theta fluxes (mpas_atm_time_integration.F:4915, 5356, 6923) and the zb3_cell terrain metric of the vertical-velocity diagnosis (mpas_atm_core.F:1539-1558). Orders 3 and 4 come closest (config_coef_3rd_order 1 and 0), but the same coefficient also sets the vertical scalar and theta order, which WRF chooses apart (v_sca_adv_order), and the terrain metric, which no WRF advection order touches",
         "follow_up": "drop h_sca_adv_order; --dynamics config_coef_3rd_order=... sets MPAS's own upwind coefficient, for all of the fields above together"
       },
       "v_sca_adv_order": {
         "inactive_values": [],
-        "reason": "WRF's vertical scalar advection order (2-6) is chosen apart from the horizontal one; in MPAS-A the vertical theta and scalar fluxes are flux3 with the same config_coef_3rd_order as the horizontal transport (mpas_atm_time_integration.F:4915, 5356, 6923), so no WRF vertical order can be set on its own; hex integrates with the MPAS-A dycore, which has no advection-order selection: horizontal transport of scalars, theta and w is MPAS's fourth-order flux on its own adv_coefs plus config_coef_3rd_order times the third-order upwind term, one coefficient that also scales the vertical scalar and theta fluxes and the zb3_cell terrain metric (mpas_atm_core.F:1539-1558); u is carried in MPAS's vector-invariant form (kinetic-energy gradient and the nonlinear Coriolis term, mpas_atm_time_integration.F:6520-6562), with no order at all; the *_adv_order options of the v8.4.2 Registry have no reader",
+        "reason": "WRF's vertical scalar order (2-6) selects the vertical flux of theta, moisture, scalars and w (advect_w :4464) apart from the horizontal one; in MPAS-A the vertical theta and scalar fluxes take the horizontal config_coef_3rd_order and the vertical w flux is fixed at third order (mpas_atm_time_integration.F:6758-6770), so no WRF vertical order can be set on its own; MPAS-A has no advection-order selection (the *_adv_order options of the v8.4.2 Registry have no reader): horizontal transport of scalars, theta and w is MPAS's fourth-order flux on its own adv_coefs plus config_coef_3rd_order times the third-order upwind term, and that one coefficient also scales the vertical scalar and theta fluxes (mpas_atm_time_integration.F:4915, 5356, 6923) and the zb3_cell terrain metric of the vertical-velocity diagnosis (mpas_atm_core.F:1539-1558)",
         "follow_up": "drop v_sca_adv_order; --dynamics config_coef_3rd_order=... sets MPAS's coefficient for the horizontal and vertical transport together"
       },
       "v_mom_adv_order": {
@@ -631,7 +634,7 @@
           "3"
         ],
         "engine_field": false,
-        "reason": "MPAS-A's vertical momentum transport is fixed: u and w use flux3 with coefficient 1 at interior levels and the second-order average next to the surface and the lid (mpas_atm_time_integration.F:6499-6512, 6758-6770), which is WRF's v_mom_adv_order=3 flux (module_advect_em.F:1470-1496) on MPAS's levels. v_mom_adv_order=3 is that operator and passes; 2, 4, 5 and 6 have no MPAS counterpart",
+        "reason": "MPAS-A's vertical transport of u is fixed: flux3 with coefficient 1 at interior levels and the second-order average next to the surface and the lid (mpas_atm_time_integration.F:6499-6512), which is WRF's v_mom_adv_order=3 flux for u (module_advect_em.F:1470-1496). v_mom_adv_order=3 is that operator and passes; 2, 4, 5 and 6 have no MPAS counterpart",
         "follow_up": "v_mom_adv_order=3, or drop it"
       }
     }
