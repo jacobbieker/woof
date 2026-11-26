@@ -355,6 +355,15 @@ class H2Geometry:
     #: vt's surface heat flux (H2_HEAT), the prescribed kinematic flux and
     #: full_theta (thp mixed with thb, wrf_smag_vd_s's full_theta); vs's
     #: qflux (the QFX surface moisture flux of the qv row, moist only).
+    #: The geometry carries no isfflx or surface-layer flag: the caller
+    #: picks ``surface`` / ``heat`` / ``qflux`` as
+    #: dycore.launch_wrf_smag2d_vertical's SELECT CASE(isfflx) would (none
+    #: where the surface layer supplies no fields).  The surface stress
+    #: takes the earth-relative u and v; a moving frame's ground-relative
+    #: winds are not modelled (the step binding refuses a moving frame).
+    #: The rows are the GPUWM_WRF_EXACT_C_DIFFUSION statements (the
+    #: default build; only GPUWM_WRF_EXACT=1 with
+    #: GPUWM_WRF_EXACT_DIFFUSION=0 compiles the other forms).
     surface: str = "none"
     cd0: float = 0.0
     heat: str = "none"
@@ -395,8 +404,10 @@ class H2Geometry:
     def validate(self) -> None:
         _axes(self)
         if self.nz < 3:
-            raise ValueError(f"horizontal_diffusion_2 needs nz >= 3 (the scalar faces' "
-                             f"bottom extrapolation reads levels 0-2), got {self.nz}")
+            raise ValueError(f"diff_opt 2 rows need nz >= 3 (the scalar faces' and "
+                             f"defor13/23's bottom extrapolation read levels 0-2; "
+                             f"vw, vt and vs alone would take 2, held at 3 with "
+                             f"the rest), got {self.nz}")
         if self.moist not in (0, 1):
             raise ValueError(f"moist is 0 or 1, got {self.moist}")
         if not (np.isfinite(self.rdx) and np.isfinite(self.rdy)
@@ -517,6 +528,7 @@ def h2_tl(state, pert_state, traj, pert, geom: H2Geometry, *, nl=True):
     + wrf_smag_hd_s: ``tend`` (accumulated) of the row's active inputs
     (:func:`h2_active`)."""
     act, pas = h2_active(geom), h2_passive(geom)
+    traj = _h2_traj3(traj, geom)
     _h2_check(geom, _named("state", H2_STATE, state) + _named("pert_state", H2_STATE, pert_state)
               + _named("traj", act + pas, traj) + _named("pert", act, pert))
     dtype = _dtype((state["tend"], pert_state["tend"]) + tuple(traj[n] for n in act + pas)
@@ -538,6 +550,7 @@ def h2_ad(adj_state, traj, adj, geom: H2Geometry):
     Runs the base forward into the intermediates, then each stage's
     adjoint in reverse order."""
     act, pas = h2_active(geom), h2_passive(geom)
+    traj = _h2_traj3(traj, geom)
     _h2_check(geom, _named("adj", H2_STATE, adj_state) + _named("traj", act + pas, traj)
               + _named("adj", act, adj))
     dtype = _dtype((adj_state["tend"],) + tuple(traj[n] for n in act + pas)
@@ -581,6 +594,26 @@ def h2_ad(adj_state, traj, adj, geom: H2Geometry):
     _h2_launch("h2_met_ad", dtype, int(np.prod(h2_shapes(geom)["php"])),
                (A["zx"], A["zy"], A["rdzw"], A["rdz"], traj["php"], traj["phb"], adj["php"]),
                geom)
+
+
+def _h2_thb3(thb, geom):
+    """The base theta as the 3-D mass field the kernel reads; a 1-D
+    column (wrf_smag_vd_s's thb3d = 0 branch, thb[k]) is broadcast."""
+    import cupy as cp
+    if thb.ndim == 1:
+        if thb.shape != (geom.nz,):
+            raise ValueError(f"a 1-D thb has nz = {geom.nz} levels, got {thb.shape}")
+        thb = cp.ascontiguousarray(cp.broadcast_to(thb[:, None, None],
+                                                   (geom.nz, geom.ny, geom.nx)))
+    return thb
+
+
+def _h2_traj3(traj, geom) -> dict:
+    """``traj`` with a 1-D base theta broadcast to 3-D (:func:`_h2_thb3`)."""
+    thb = traj.get("thb") if geom.full_theta else None
+    if thb is None or getattr(thb, "ndim", 3) != 1:
+        return traj
+    return dict(traj, thb=_h2_thb3(thb, geom))
 
 
 def _h2_vargs(traj, geom, dtype) -> tuple:

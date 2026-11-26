@@ -327,6 +327,32 @@ for n, (key, over) in enumerate({GEOMS!r}):
     assert not bad, bad
 
 
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_one_dimensional_base_theta(backend, tmp_path):
+    """A 1-D thb column (the primal's thb3d = 0 branch) gives the TL and AD
+    of the same column broadcast to 3-D, word for word."""
+    dtn = "float32" if backend == "mlx" else "float64"
+    out = _run(backend, f"""
+dt = np.dtype({dtn!r})
+g = C.h2_geometry(row="vt", nz=4, ny=3, nx=4, full_theta=1, heat="hfx")
+X = D.h2_active(g)
+t3 = dev(C.h2_trajectory(g, 71, dt))
+col = t3["thb"][:, 0, 0].copy()
+t3["thb"] = cp.ascontiguousarray(cp.broadcast_to(col[:, None, None], t3["thb"].shape))
+t1 = dict(t3, thb=col)
+pe = dev(C.h2_perturbation(g, 72, dt))
+res = []
+for t in (t3, t1):
+    s, d = {{"tend": t["tend"].copy()}}, {{"tend": cp.zeros_like(t["tend"])}}
+    D.h2_tl(s, d, t, pe, g)
+    adj = {{m: cp.zeros_like(t[m]) for m in X}}
+    D.h2_ad({{"tend": cp.ones_like(t["tend"])}}, t, adj, g)
+    res.append([s["tend"], d["tend"]] + [adj[m] for m in X])
+out["diff"] = int(sum(int((cp.asnumpy(a) != cp.asnumpy(b)).sum()) for a, b in zip(*res)))
+""", tmp_path)
+    assert out["diff"] == 0, out
+
+
 def test_geometry_rejects_unported_options():
     """Surface options on rows that have none, qflux off the moist vs row,
     unknown surface or heat kinds and flags other than 0/1 are refused, not

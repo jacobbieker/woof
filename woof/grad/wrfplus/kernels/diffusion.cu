@@ -1419,12 +1419,18 @@ static __device__ Dl h2_row_s(const H2Src& s, int k, int j, int i)
 // dycore.launch_wrf_smag2d_vertical).  ``t`` is the tendency word before
 // the row; the interior and surface increments are added to it in the
 // primal's order.  The u and v rows read the w stresses tau13 / tau23
-// (stage tw) as the stored s1 / s2.
+// (stage tw) as the stored s1 / s2.  The statements are the
+// GPUWM_WRF_EXACT_C_DIFFUSION forms of those kernels (the default build and
+// strict mode; GPUWM_WRF_EXACT=1 with GPUWM_WRF_EXACT_DIFFUSION=0 compiles
+// other forms, which this TL/AD does not follow).
 
 #define DF_CP ((wreal)1004.5)
 
 static __device__ __forceinline__ Dl h2_addc(Dl a, wreal b) { return dl(a.v + b, a.d); }
-// sqrt' = 0 at 0 (the wind speed below is offset by 1e-15 after the root)
+// sqrt' = 0 at 0: a subgradient choice at a calm surface word (u = v = 0),
+// where sqrt(u^2 + v^2) has no derivative; the 1e-15 offset comes after the
+// root, so the stress there is linear in u (v) with the tangent of the speed
+// taken as zero.  Away from calm words this is the exact derivative.
 static __device__ __forceinline__ Dl h2_sqrt(Dl a)
 {
     wreal r = wsqrt(a.v);
