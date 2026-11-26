@@ -1526,7 +1526,7 @@ def kc_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False,
             out[n] = np.where(near, out[n] * 1.3, out[n])
         if steep_near.any():
             out["php"] = out["php"] + np.where(
-                np.concatenate([steep_near, steep_near[-1:]]), 30.0, 0.0) \
+                np.concatenate([steep_near, steep_near[-1:]]), 300.0, 0.0) \
                 * rng.standard_normal(sh["php"])
     else:
         raise RuntimeError("kc_trajectory: could not clear the switches' neighbourhoods")

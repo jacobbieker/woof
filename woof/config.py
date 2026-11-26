@@ -3187,8 +3187,10 @@ NOAHMP_OPTION_VALUES: dict[str, tuple[int, ...]] = {
 #: the ``wrf_reference`` selector owns). "4.7.1" is today's engine
 #: byte for byte: None keeps the existing resolution (wrf_461, or wrf_471
 #: when a 4.7.1-only control is named). "4.8.0" is the MYNN-EDMF 8f8e8b59
-#: column, replay-qualified against native WRF 4.8.0 strict.
-MYNN_VERSION_BY_WRF_REFERENCE: dict[str, str | None] = {"4.7.1": None, "4.8.0": "wrf_480"}
+#: column, replay-qualified against native WRF 4.8.0 strict; "4.8.1" pins
+#: the same MYNN-EDMF gitlink, so it resolves to the same column.
+MYNN_VERSION_BY_WRF_REFERENCE: dict[str, str | None] = {
+    "4.7.1": None, "4.8.0": "wrf_480", "4.8.1": "wrf_480"}
 
 MYNN471_OPTION_VALUES = {
     "bl_mynn_closure": (2.5, 2.6, 3.0), "bl_mynn_cloudpdf": (0, 1, 2),
