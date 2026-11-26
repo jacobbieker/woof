@@ -1484,10 +1484,10 @@ Notes on the 1.1.7 sync:
   sumflux and the non-PD scalar update, and qv's boundary rows with
   flow_dep_bdy for qc and qr). The forecast path does not import any of
   it.
-  On a dry state the step also covers WRF's diff_opt 1 / km_opt 4
-  horizontal mixing (`woof.grad.wrfplus.diffusion`, bound into the step
-  on periodic and specified domains, word for word against
-  `dycore.step`; the moist rows are next): the deformation (WRF
+  The step also covers WRF's diff_opt 1 / km_opt 4 horizontal mixing
+  (`woof.grad.wrfplus.diffusion`, bound into the step on periodic and
+  specified domains, dry or moist, word for word against
+  `dycore.step`): the deformation (WRF
   `compute_diff_metrics` + `cal_deform_and_div`) and `smag2d_km`'s
   xkmh/xkhh with the 10 * mlen
   cap. Their binary32 base reproduces woof's strict `wrf_smag_deform` and
