@@ -934,8 +934,10 @@ extern "C" __global__ void hd_ad(const wreal* __restrict__ atend, const wreal* _
 #define H2S_TW 4
 #define H2S_HS 5
 #define H2S_ROW 6
+#define H2S_VROW 7
 
-// rows: 1 u, 2 v, 3 w, 0 a scalar (theta is strict thp = theta - 300)
+// rows: 1 u, 2 v, 3 w, 0 a scalar (theta is strict thp = theta - 300);
+// vertical_diffusion_2's rows: 4 u, 5 v, 6 w, 7 a scalar
 
 static __device__ __forceinline__ Dl operator-(Dl a) { return dl(-a.v, -a.d); }
 // a / b, both active: the value is the primal's division.
@@ -986,6 +988,12 @@ struct H2Src {
     const wreal* fnp;
     const wreal* dn;
     const wreal* dnw;
+    const wreal* ustm;    // the vertical rows' passive surface fields
+    const wreal* hfx;
+    const wreal* qfx;
+    const wreal* thb;
+    wreal cd0, hflux;
+    int sfc, heat, full, qflux;
     wreal rdx, rdy, cf1, cf2, cf3;
     int nz, ny, nx, bx, by, row, moist;
     int mode;     // 1: tangents from the *d arrays; 0: the seed's; 2: none
@@ -1004,6 +1012,9 @@ static __device__ H2Src h2_src(wreal rdx, wreal rdy, wreal cf1, wreal cf2, wreal
     s.zx = s.zxd = s.zy = s.zyd = s.rz = s.rzd = nullptr;
     s.s1 = s.s1d = s.s2 = s.s2d = nullptr;
     s.msft = s.msfu = s.msfv = s.fnm = s.fnp = s.dn = s.dnw = nullptr;
+    s.ustm = s.hfx = s.qfx = s.thb = nullptr;
+    s.cd0 = s.hflux = (wreal)0;
+    s.sfc = s.heat = s.full = s.qflux = 0;
     s.rdx = rdx; s.rdy = rdy; s.cf1 = cf1; s.cf2 = cf2; s.cf3 = cf3;
     s.bx = bx; s.by = by; s.nz = nz; s.ny = ny; s.nx = nx; s.row = row; s.moist = moist;
     s.mode = mode; s.which = 0; s.at = 0;
@@ -1412,6 +1423,136 @@ static __device__ Dl h2_row_s(const H2Src& s, int k, int j, int i)
     return (DF_G / (s.dnw[k] * rz)) * ((divh - first) - second);
 }
 
+// ---- the vertical rows (wrf_smag_vd_u / _v / _w / _s and the surface
+// kernels wrf_smag_surface_u / _v (_cd0), wrf_smag_surface_heat_const and
+// wrf_smag_surface_scalars, launched in that order by
+// dycore.launch_wrf_smag2d_vertical).  ``t`` is the tendency word before
+// the row; the interior and surface increments are added to it in the
+// primal's order.  The u and v rows read the w stresses tau13 / tau23
+// (stage tw) as the stored s1 / s2.  The statements are the
+// GPUWM_WRF_EXACT_C_DIFFUSION forms of those kernels (the default build and
+// strict mode; GPUWM_WRF_EXACT=1 with GPUWM_WRF_EXACT_DIFFUSION=0 compiles
+// other forms, which this TL/AD does not follow).
+
+#define DF_CP ((wreal)1004.5)
+
+static __device__ __forceinline__ Dl h2_addc(Dl a, wreal b) { return dl(a.v + b, a.d); }
+// sqrt' = 0 at 0: a subgradient choice at a calm surface word (u = v = 0),
+// where sqrt(u^2 + v^2) has no derivative; the 1e-15 offset comes after the
+// root, so the stress there is linear in u (v) with the tangent of the speed
+// taken as zero.  Away from calm words this is the exact derivative.
+static __device__ __forceinline__ Dl h2_sqrt(Dl a)
+{
+    wreal r = wsqrt(a.v);
+    return dl(r, r == (wreal)0 ? (wreal)0 : wdiv(a.d, (wreal)2 * r));
+}
+static __device__ __forceinline__ Dl h2_u0(const H2Src& s, int jj, int i)
+{
+    return h2_in(s, H2_U, s.u, s.ud, R3(0, jj, h2_iu(s, i), s.ny, s.nx + 1));
+}
+static __device__ __forceinline__ Dl h2_v0(const H2Src& s, int j, int ii)
+{
+    return h2_in(s, H2_V, s.v, s.vd, R3(0, h2_jv(s, j), ii, s.ny + 1, s.nx));
+}
+
+static __device__ Dl h2_vrow_u(const H2Src& s, int k, int j, int i, Dl t)
+{
+    wreal rdz = wdiv(-DF_G, s.dnw[k]);
+    t = t - rdz * (h2_t13(s, k + 1, j, i) - h2_t13(s, k, j, i));
+    if (k != 0 || !s.sfc) return t;
+    int ic = h2_ix(s, i), im = h2_ix(s, i - 1), jj = h2_iy(s, j);
+    Dl vv = (wreal)0.25 * (((h2_v0(s, j, ic) + h2_v0(s, j + 1, ic)) + h2_v0(s, j, im))
+                           + h2_v0(s, j + 1, im));
+    Dl uu = h2_u0(s, jj, i);
+    Dl speed = h2_addc(h2_sqrt((uu * uu) + (vv * vv)), (wreal)1.0e-15);
+    Dl stress;
+    if (s.sfc == 1) {
+        wreal ustar = (wreal)0.5 * (s.ustm[(size_t)jj * s.nx + ic] + s.ustm[(size_t)jj * s.nx + im]);
+        stress = ((ustar * ustar) * uu) / speed;
+    } else {
+        stress = (s.cd0 * speed) * uu;
+    }
+    return t + ((((DF_G * stress) * (wreal)0.5) * (h2_rho(s, 0, j, ic) + h2_rho(s, 0, j, im)))
+                / s.dnw[0]);
+}
+
+static __device__ Dl h2_vrow_v(const H2Src& s, int k, int j, int i, Dl t)
+{
+    wreal rdz = wdiv(-DF_G, s.dnw[k]);
+    t = t - rdz * (h2_t23(s, k + 1, j, i) - h2_t23(s, k, j, i));
+    if (k != 0 || !s.sfc) return t;
+    int jc = h2_iy(s, j), jm = h2_iy(s, j - 1), ii = h2_ix(s, i);
+    Dl uu = (((h2_u0(s, jc, i) + h2_u0(s, jm, i)) + h2_u0(s, jc, i + 1)) + h2_u0(s, jm, i + 1))
+            / (wreal)4;
+    Dl vv = h2_v0(s, j, ii);
+    Dl speed = h2_addc(h2_sqrt((vv * vv) + (uu * uu)), (wreal)1.0e-15);
+    Dl stress;
+    if (s.sfc == 1) {
+        wreal ustar = (wreal)0.5 * (s.ustm[(size_t)jc * s.nx + ii] + s.ustm[(size_t)jm * s.nx + ii]);
+        stress = ((ustar * ustar) * vv) / speed;
+    } else {
+        stress = (s.cd0 * speed) * vv;
+    }
+    return t + ((((DF_G * stress) * (wreal)0.5) * (h2_rho(s, 0, jc, i) + h2_rho(s, 0, jm, i)))
+                / s.dnw[0]);
+}
+
+// wrf_tau33 (k in 0..nz-1)
+static __device__ Dl h2_tau33(const H2Src& s, int k, int j, int i)
+{
+    int jj = h2_iy(s, j), ii = h2_ix(s, i);
+    Dl d33 = ((wreal)2 * (h2_in(s, H2_W, s.w, s.wd, R3(k + 1, jj, ii, s.ny, s.nx))
+                          - h2_in(s, H2_W, s.w, s.wd, R3(k, jj, ii, s.ny, s.nx))))
+             * h2_rdzw(s, k, j, i);
+    return ((-h2_rho(s, k, j, i)) * h2_k(s, k, j, i)) * d33;
+}
+
+static __device__ Dl h2_vrow_w(const H2Src& s, int kw, int j, int i, Dl t)
+{
+    if (kw <= 0 || kw >= s.nz) return t;
+    return t + ((DF_G * (h2_tau33(s, kw, j, i) - h2_tau33(s, kw - 1, j, i))) / s.dn[kw]);
+}
+
+// wrf_vd_s_h3: the flux on w level kw (0 at the bottom and top)
+static __device__ Dl h2_vh3(const H2Src& s, int kw, int j, int i)
+{
+    if (kw <= 0 || kw >= s.nz) return dl((wreal)0, (wreal)0);
+    int jj = h2_iy(s, j), ii = h2_ix(s, i);
+    size_t hc = R3(kw, jj, ii, s.ny, s.nx), hm = R3(kw - 1, jj, ii, s.ny, s.nx);
+    Dl xkx = (s.fnm[kw] * h2_in(s, H2_K, s.km, s.kmd, hc))
+             + (s.fnp[kw] * h2_in(s, H2_K, s.km, s.kmd, hm));
+    xkx = xkx * ((s.fnm[kw] * h2_rho(s, kw, j, i)) + (s.fnp[kw] * h2_rho(s, kw - 1, j, i)));
+    Dl dvar = h2_in(s, H2_F, s.f, s.fd, hc) - h2_in(s, H2_F, s.f, s.fd, hm);
+    if (s.full) dvar = h2_addc(dvar, s.thb[hc] - s.thb[hm]);
+    return ((-xkx) * dvar) * h2_rdz(s, kw, j, i);
+}
+
+static __device__ Dl h2_vrow_s(const H2Src& s, int k, int j, int i, Dl t)
+{
+    t = t + ((DF_G * (h2_vh3(s, k + 1, j, i) - h2_vh3(s, k, j, i))) / s.dnw[k]);
+    if (k != 0) return t;
+    size_t h = (size_t)j * s.nx + i;
+    if (s.heat == 1) {          // hflux CASE(0,2): the prescribed kinematic flux
+        t = t - (((DF_G * s.hflux) * h2_rho(s, 0, j, i)) / s.dnw[0]);
+    } else if (s.heat == 2) {   // hflux CASE(1): hfx / cpm
+        Dl vapor = s.moist ? h2_in(s, H2_QV, s.qv, s.qvd, R3(0, j, i, s.ny, s.nx))
+                           : dl((wreal)0, (wreal)0);
+        Dl cpm = DF_CP * ((wreal)1 + ((wreal)0.8 * vapor));
+        Dl heat_flux = s.hfx[h] / cpm;
+        t = t - ((DF_G * heat_flux) / s.dnw[0]);
+    }
+    if (s.qflux) t = dl(t.v - wdiv(DF_G * s.qfx[h], s.dnw[0]), t.d);   // qflux CASE(1,2)
+    return t;
+}
+
+static __device__ Dl h2_vrow(const H2Src& s, int k, int j, int i, Dl t)
+{
+    if (s.row == 4) return h2_vrow_u(s, k, j, i, t);
+    if (s.row == 5) return h2_vrow_v(s, k, j, i, t);
+    if (s.row == 6) return h2_vrow_w(s, k, j, i, t);
+    return h2_vrow_s(s, k, j, i, t);
+}
+
 // ---- dispatch
 
 static __device__ Dl h2_eval(const H2Src& s, int o, int k, int j, int i)
@@ -1433,6 +1574,7 @@ static __device__ Dl h2_eval(const H2Src& s, int o, int k, int j, int i)
     if (s.row == 1) return h2_row_u(s, k, j, i);
     if (s.row == 2) return h2_row_v(s, k, j, i);
     if (s.row == 3) return h2_row_w(s, k, j, i);
+    if (s.row >= 4) return h2_vrow(s, k, j, i, dl((wreal)0, (wreal)0));
     return h2_row_s(s, k, j, i);
 }
 
@@ -1450,9 +1592,9 @@ static __device__ void h2_odims(const H2Src& s, int o, int* nl, int* sy, int* sx
     case H2O_H1: x = 1; break;
     case H2O_H2: y = 1; break;
     case H2O_TEND:
-        if (s.row == 1) x = 1;
-        else if (s.row == 2) y = 1;
-        else if (s.row == 3) L = s.nz + 1;
+        if (s.row == 1 || s.row == 4) x = 1;
+        else if (s.row == 2 || s.row == 5) y = 1;
+        else if (s.row == 3 || s.row == 6) L = s.nz + 1;
         break;
     default: break;
     }
@@ -1488,6 +1630,19 @@ static __device__ int h2_inputs(const H2Src& s, int stage, int* ids)
         ids[0] = H2_F; ids[1] = H2_K; ids[2] = H2_RHO; ids[3] = H2_ZX; ids[4] = H2_ZY;
         ids[5] = H2_RZ;
         return 6;
+    case H2S_VROW:
+        if (s.row == 4 || s.row == 5) {
+            ids[0] = s.row == 4 ? H2_S1 : H2_S2;
+            if (!s.sfc) return 1;
+            ids[1] = H2_U; ids[2] = H2_V; ids[3] = H2_RHO;
+            return 4;
+        }
+        if (s.row == 6) {
+            ids[0] = H2_W; ids[1] = H2_RZ; ids[2] = H2_RHO; ids[3] = H2_K;
+            return 4;
+        }
+        ids[0] = H2_F; ids[1] = H2_K; ids[2] = H2_RHO; ids[3] = H2_RZ; ids[4] = H2_QV;
+        return (s.moist && s.heat == 2) ? 5 : 4;
     default:
         ids[0] = H2_S1; ids[1] = H2_S2; ids[2] = H2_ZX; ids[3] = H2_ZY; ids[4] = H2_RZ;
         return 5;
@@ -1505,10 +1660,11 @@ static __device__ void h2_idims(const H2Src& s, int stage, int id, int* nl, int*
     case H2_ZX: L = s.nz + 1; x = 1; break;
     case H2_ZY: L = s.nz + 1; y = 1; break;
     case H2_RZ:   // rdz on w levels for the w stresses and row, else rdzw
-        if (stage == H2S_TW || (stage == H2S_ROW && s.row == 3)) L = s.nz + 1;
+        if (stage == H2S_TW || (stage == H2S_ROW && s.row == 3)
+            || (stage == H2S_VROW && s.row == 7)) L = s.nz + 1;
         break;
     case H2_S1: case H2_S2:
-        if (s.row == 3) { L = s.nz + 1; if (id == H2_S1) x = 1; else y = 1; }
+        if (s.row >= 3) { L = s.nz + 1; if (id == H2_S1) x = 1; else y = 1; }
         else if (s.row == 0) { if (id == H2_S1) x = 1; else y = 1; }
         else if (id == H2_S2) { y = 1; x = 1; }
         break;
@@ -1574,6 +1730,20 @@ static __device__ int h2_pairs(const H2Src& s, int stage, int id, int* slot, int
             H2_PAIR(0, 0, 0, 0, 0, 0, 1);
             H2_PAIR(1, 0, 0, 0, 1, 0, 0);
             break;
+        }
+    } else if (stage == H2S_VROW) {
+        switch (s.row * 32 + id) {
+        case 4 * 32 + H2_S1: case 5 * 32 + H2_S2: H2_PAIR(0, -1, 0, 0, 0, 0, 0); break;
+        case 4 * 32 + H2_V: H2_PAIR(0, 0, 0, -1, 0, 0, 1); break;
+        case 4 * 32 + H2_RHO: H2_PAIR(0, 0, 0, 0, 0, 0, 1); break;
+        case 5 * 32 + H2_U: H2_PAIR(0, 0, 0, 0, 1, -1, 0); break;
+        case 5 * 32 + H2_RHO: H2_PAIR(0, 0, 0, 0, 1, 0, 0); break;
+        case 6 * 32 + H2_W: case 7 * 32 + H2_F: case 7 * 32 + H2_K: case 7 * 32 + H2_RHO:
+            H2_PAIR(0, -1, 1, 0, 0, 0, 0); break;
+        case 6 * 32 + H2_RZ: case 6 * 32 + H2_RHO: case 6 * 32 + H2_K:
+            H2_PAIR(0, 0, 1, 0, 0, 0, 0); break;
+        case 7 * 32 + H2_RZ: H2_PAIR(0, -1, 0, 0, 0, 0, 0); break;
+        default: H2_PAIR(0, 0, 0, 0, 0, 0, 0); break;   // u (4), v (5), qv (7): own word
         }
     } else if (s.row == 1) {
         switch (id) {
@@ -1643,6 +1813,10 @@ static __device__ wreal h2_gather(const H2Src& s, int stage, int id, int k, int 
                                   const wreal* a3)
 {
     int outs[4], slot[4], win[24];
+    // the vertical rows' surface-only inputs feed the bottom level alone
+    if (stage == H2S_VROW && k > 0
+        && ((s.row <= 5 && id != H2_S1 && id != H2_S2) || id == H2_QV))
+        return (wreal)0;
     h2_outputs(s, stage, outs);
     int np = h2_pairs(s, stage, id, slot, win);
     wreal acc = (wreal)0;
@@ -2014,5 +2188,101 @@ extern "C" __global__ void h2_row_ad(const wreal* __restrict__ atend,
     wreal acc;
     if (!h2_ad_word(s, H2S_ROW, t, atend, atend, atend, atend, &q, &at, &acc)) return;
     wreal* out = q == 0 ? as1 : q == 1 ? as2 : q == 2 ? azx : q == 3 ? azy : arz;
+    out[at] = out[at] + acc;
+}
+
+// ---- the vertical rows' kernels
+
+#define H2_V_PASSIVE const wreal* __restrict__ fnm, const wreal* __restrict__ fnp, \
+    const wreal* __restrict__ dn, const wreal* __restrict__ dnw, \
+    const wreal* __restrict__ ustm, const wreal* __restrict__ hfx, \
+    const wreal* __restrict__ qfx, const wreal* __restrict__ thb, wreal cd0, wreal hflux, \
+    int sfc, int heat, int full, int qflux
+
+static __device__ void h2_vset(H2Src& s, const wreal* fnm, const wreal* fnp, const wreal* dn,
+                               const wreal* dnw, const wreal* ustm, const wreal* hfx,
+                               const wreal* qfx, const wreal* thb, wreal cd0, wreal hflux,
+                               int sfc, int heat, int full, int qflux)
+{
+    s.fnm = fnm; s.fnp = fnp; s.dn = dn; s.dnw = dnw;
+    s.ustm = ustm; s.hfx = hfx; s.qfx = qfx; s.thb = thb;
+    s.cd0 = cd0; s.hflux = hflux; s.sfc = sfc; s.heat = heat; s.full = full; s.qflux = qflux;
+}
+
+// TL: one thread per word of the row; interior then surface increments.
+extern "C" __global__ void h2_vrow_tl(wreal* __restrict__ tend, wreal* __restrict__ tendd,
+                                      const wreal* __restrict__ st,
+                                      const wreal* __restrict__ std_,
+                                      const wreal* __restrict__ u, const wreal* __restrict__ ud,
+                                      const wreal* __restrict__ v, const wreal* __restrict__ vd,
+                                      const wreal* __restrict__ w, const wreal* __restrict__ wd,
+                                      const wreal* __restrict__ f, const wreal* __restrict__ fd,
+                                      const wreal* __restrict__ rho,
+                                      const wreal* __restrict__ rhod,
+                                      const wreal* __restrict__ km,
+                                      const wreal* __restrict__ kmd,
+                                      const wreal* __restrict__ rz,
+                                      const wreal* __restrict__ rzd,
+                                      const wreal* __restrict__ qv,
+                                      const wreal* __restrict__ qvd, H2_V_PASSIVE, int nl,
+                                      H2_GEOM)
+{
+    H2Src s = h2_src(H2_GARGS, 1);
+    s.s1 = st; s.s1d = std_; s.s2 = st; s.s2d = std_;
+    s.u = u; s.ud = ud; s.v = v; s.vd = vd; s.w = w; s.wd = wd; s.f = f; s.fd = fd;
+    s.rho = rho; s.rhod = rhod; s.km = km; s.kmd = kmd; s.rz = rz; s.rzd = rzd;
+    s.qv = qv; s.qvd = qvd;
+    h2_vset(s, fnm, fnp, dn, dnw, ustm, hfx, qfx, thb, cd0, hflux, sfc, heat, full, qflux);
+    size_t t = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    int nzs = nz + (row == 6), nys = ny + (row == 5), nxs = nx + (row == 4);
+    if (t >= (size_t)nzs * nys * nxs) return;
+    int i = (int)(t % nxs), j = (int)((t / nxs) % nys), k = (int)(t / ((size_t)nxs * nys));
+    if (row == 6 && (k == 0 || k == nz)) return;   // the primal skips the end levels
+    Dl r = h2_vrow(s, k, j, i, dl(tend[t], (wreal)0));
+    if (nl) tend[t] = r.v;
+    if (WRFPLUS_TL) tendd[t] = tendd[t] + r.d;
+}
+
+// AD: into the row's inputs' adjoints (h2_inputs, stage vrow).  The
+// tendency adjoint is read, not consumed.
+extern "C" __global__ void h2_vrow_ad(const wreal* __restrict__ atend,
+                                      const wreal* __restrict__ st,
+                                      const wreal* __restrict__ u, const wreal* __restrict__ v,
+                                      const wreal* __restrict__ w, const wreal* __restrict__ f,
+                                      const wreal* __restrict__ rho,
+                                      const wreal* __restrict__ km,
+                                      const wreal* __restrict__ rz,
+                                      const wreal* __restrict__ qv, H2_V_PASSIVE,
+                                      wreal* __restrict__ ast, wreal* __restrict__ au,
+                                      wreal* __restrict__ av, wreal* __restrict__ aw,
+                                      wreal* __restrict__ af, wreal* __restrict__ arho,
+                                      wreal* __restrict__ akm, wreal* __restrict__ arz,
+                                      wreal* __restrict__ aqv, H2_GEOM)
+{
+    H2Src s = h2_src(H2_GARGS, 0);
+    s.s1 = st; s.s1d = st; s.s2 = st; s.s2d = st;
+    s.u = u; s.ud = u; s.v = v; s.vd = v; s.w = w; s.wd = w; s.f = f; s.fd = f;
+    s.rho = rho; s.rhod = rho; s.km = km; s.kmd = km; s.rz = rz; s.rzd = rz;
+    s.qv = qv; s.qvd = qv;
+    h2_vset(s, fnm, fnp, dn, dnw, ustm, hfx, qfx, thb, cd0, hflux, sfc, heat, full, qflux);
+    size_t t = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    int q;
+    size_t at;
+    wreal acc;
+    if (!h2_ad_word(s, H2S_VROW, t, atend, atend, atend, atend, &q, &at, &acc)) return;
+    int ids[8];
+    h2_inputs(s, H2S_VROW, ids);
+    wreal* out;
+    switch (ids[q]) {
+    case H2_U: out = au; break;
+    case H2_V: out = av; break;
+    case H2_W: out = aw; break;
+    case H2_F: out = af; break;
+    case H2_RHO: out = arho; break;
+    case H2_K: out = akm; break;
+    case H2_RZ: out = arz; break;
+    case H2_QV: out = aqv; break;
+    default: out = ast; break;
+    }
     out[at] = out[at] + acc;
 }

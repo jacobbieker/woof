@@ -1583,6 +1583,13 @@ __device__ __noinline__ static void noah_glacial_column(
     real eta_e = (etp_e > 0.0f) ? esnow_e : etp_e;
     real ssoil_out = __fmul_rn(-1.0f, ssoil);
     real runoff1 = __fdiv_rn(snomlt, dt);
+#ifdef NOAH_LAND_ICE_RAIN_RUNOFF
+    // RunConfig.noah_land_ice_rain_runoff: WRF's SFLX_GLACIAL books only the
+    // snowmelt (module_sf_noahlsm_glacial_only.F:406) and drops the liquid
+    // precipitation PRCPF (:287, PRCP1 :912 never read); it leaves the
+    // glacier as surface runoff, in m s-1 like SNOMLT/DT.
+    runoff1 = __fadd_rn(runoff1, __fmul_rn(prcpf, 0.001f));
+#endif
 
     // ---------------- lsm post-update (ICE == -1 sets SOILM = 0,
     // XLAI = 0.01, RUNOFF2 = RUNOFF3 = 0, SWC = SMC = SMAV = 1; SOILW keeps

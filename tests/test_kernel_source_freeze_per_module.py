@@ -1316,7 +1316,12 @@ BASELINE_PINNED: dict[str, str] = {
         # define the preprocessed program is the previous one byte for byte
         # (tests/test_noah_smc_floor_booking.py strips the block and checks the
         # previous digest).  Previously d8739ffa.
-        '5c09214c29f2c9f6b01bec651281778b8d759facfc6c755cbb9cd02bd7237b00',
+        # RE-PINNED 2026-11-23 by the correct-mode noah_land_ice_rain_runoff (FQ8): a
+        # NOAH_LAND_ICE_RAIN_RUNOFF #ifdef block in the glacial tile adds the
+        # rain SFLX_GLACIAL drops to RUNOFF1; without the define the program is
+        # the previous one byte for byte (tests/test_noah_land_ice_rain_runoff.py
+        # strips the block and checks the previous digest).  Previously 5c09214c.
+        '6c208d40e19e5ceb1804eedb2d3c4deebee0cdcfb7b4a3e10a18991e6e9d60c9',
     # development branch (smoke, aerosol and air-quality program).  chem_bdy:
     # WRF-Chem's outer-domain flow_dep_bdy_chem, bit-identical to the
     # Fortran on 24 oracle cases (tests/test_chem_bdy_wrf471_parity.py).
@@ -1840,7 +1845,7 @@ PINNED_HEADERS = {
     'mskf_aerosol.cuh': '91fefcce94ec7bc775ba526b2d4a95eb4d4c7946ffd95da11f53474a2811bfa9',
     'mynn_scalar_mix.cu': 'abc61827d645ce7af664a7294ecfd289834de5cc57b485bff20e20d27ed17c1f',
     # noah_smc_floor_booking's #ifdef block (default program unchanged).
-    'noah_mosaic.cu': '5c09214c29f2c9f6b01bec651281778b8d759facfc6c755cbb9cd02bd7237b00',
+    'noah_mosaic.cu': '6c208d40e19e5ceb1804eedb2d3c4deebee0cdcfb7b4a3e10a18991e6e9d60c9',
     'noah_seaice_options.cuh': '033fec7afc7129e3455aba955f748e6eb49213aeab12e1ad82801b8c2dfd4b7b',
     'noah_ua.cuh': '6ffe8841f48994d15eb1e6dfeb1d2c0667e1ea0ad4b56a2f50c45ca24d07dba1',
     'noah_ua_plain.cuh': '40746bf3560c1922b28a6341a50753c4ec4946842bfa613c5c1f8b8b826f1108',
@@ -2053,4 +2058,6 @@ def test_mosaic_ucm_composed_source_is_pinned():
     assert hashlib.sha256(mosaic_ucm_source().encode()).hexdigest() == (
         # noah_smc_floor_booking's #ifdef block in noah_mosaic.cu, unread
         # without the define.  Previously ebf5a3d1.
-        '5138ec7814e19a0680e9cfd6ff29aba5fc18c3aaa894d3e3b09a3295ccc6c807')
+        # RE-PINNED 2026-11-23 by noah_land_ice_rain_runoff's #ifdef block in
+        # the same file (FQ8), likewise unread.  Previously 5138ec78.
+        '48f6b2fb06086073ead1af5922cb7cf09c55108d5fd19817cab6b135845226fe')

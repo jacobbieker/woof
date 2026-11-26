@@ -28,12 +28,13 @@ from woof import correct_mode
 from woof.config import RunConfig, validate_run_config
 
 ROOT = Path(__file__).resolve().parents[1]
-#: the fork's quirk ledger on the WRF route (woof.quirk_corrections), FQ1-FQ7, FQ12
-_FQ = ("FQ1", "FQ2", "FQ3", "FQ4", "FQ5", "FQ6", "FQ7", "FQ12")
+#: the fork's quirk ledger on the WRF route (woof.quirk_corrections), FQ1-FQ8, FQ12
+_FQ = ("FQ1", "FQ2", "FQ3", "FQ4", "FQ5", "FQ6", "FQ7", "FQ8", "FQ12")
 _FQ_KEYS = ("gf_deep_rain_evaporation_booking", "ysu_surface_heat_exner",
             "mynn_sfclay_psih_zolzt", "noah_smc_floor_booking",
             "thompson_rain_snow_closure", "rrtmg_lw_model_top",
-            "thompson_lamc_updated_rc", "diff_metrics_seam_slope")
+            "thompson_lamc_updated_rc", "noah_land_ice_rain_runoff",
+            "diff_metrics_seam_slope")
 
 # -------------------------------------------------------------- the switch --
 def test_exact_mode_authors_every_key_off():

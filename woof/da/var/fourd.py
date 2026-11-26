@@ -42,7 +42,7 @@ Derived from WRFDA 4.7.1 (``var/da/da_minimisation/da_transform_vtoy.inc``,
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -51,7 +51,8 @@ import numpy as np
 from . import transfer4d as t4
 from .cost import XA_KEYS
 
-__all__ = ["FourDObsTerm", "IdentityModel", "TLModel", "Var4D", "pt_to_rho_lin", "pt_to_rho_adj"]
+__all__ = ["FourDObsTerm", "IdentityModel", "TLModel", "Var4D", "check_var4d_bins", "pt_to_rho_lin",
+           "pt_to_rho_adj"]
 
 
 class TLModel(Protocol):
@@ -84,6 +85,9 @@ class IdentityModel:
                 out[k] = np.array(v, dtype=np.float64) if k not in out else out[k] + v
         return out
 
+    def relinearise(self, trajectory) -> None:
+        """An outer loop's new trajectory: the identity has no base state, so nothing changes."""
+
 
 @dataclass
 class Var4D:
@@ -92,11 +96,87 @@ class Var4D:
     ``model`` is a :class:`TLModel` (the identity by default); ``press`` and
     ``ph`` are :func:`~woof.da.var.transfer4d.xa_to_tl`'s word-exact
     defaults or their opt-in corrections.
+
+    ``var4d_bin`` and ``time_step`` (whole seconds) are WRFDA's namelist
+    entries; given, :func:`check_var4d_bins` refuses what WRFDA refuses (a
+    bin that does not divide the window, a time step that does not divide
+    the bin) and a slot count that is not ``window / var4d_bin + 1``.
+    ``None`` leaves the bin as the slots' spacing and the time step unchecked.
+
+    Outer loops (``max_ext_its > 1``, :mod:`woof.da.var.outer4d`) need
+    ``nl_model``: ``nl_model(it, state) -> Trajectory``, the nonlinear run
+    over the window from ``state`` (the analysis after loop ``it - 1``, a
+    :class:`~woof.da.var.analysis.FirstGuess`), WRFDA's ``da_nl_model(it)``.
+    ``model`` is relinearised about each new run (``model.relinearise``).
+    ``base_rtol``: compare a :class:`~woof.da.var.window4d.WindowModel`'s
+    base at each slot with that run's slot states in every outer loop after
+    the first (``WindowModel.check_base``), refusing a mismatch.
     """
 
     model: TLModel = field(default_factory=IdentityModel)
     press: str = "wrfda"
     ph: str = "zero"
+    nl_model: Callable | None = None
+    var4d_bin: int | None = None
+    time_step: int | None = None
+    base_rtol: float | None = None
+
+
+def _whole_seconds(name: str, value) -> int:
+    v = float(value)
+    if not np.isfinite(v) or v != int(v):
+        raise ValueError(f"{name} = {value!r}: WRFDA reads it as a whole number of seconds")
+    return int(v)
+
+
+def check_var4d_bins(time_window_min: str, time_window_max: str, nslots: int, *, var4d_bin=None,
+                     time_step=None) -> dict:
+    """``da_solve``'s 4D-Var window checks (WRFDA 4.7.1 ``da_solve.inc`` lines 109-149).
+
+    The window is in whole minutes, as ``da_get_julian_time`` reads it.  A
+    ``var4d_bin`` below ``time_step`` becomes ``time_step`` (WRFDA's
+    ``nl_set_var4d_bin``).  Refused, with WRFDA's remedies: ``time_step``
+    zero, a bin that does not divide the window, a bin the time step does
+    not divide; and (woof's own) ``nslots`` slots where WRFDA would make
+    ``num_fgat_time = window / var4d_bin + 1``.  ``var4d_bin=None`` is the
+    slots' spacing.  Returns ``var4d_bin``, ``num_fgat_time`` and
+    ``steps_per_bin`` (``None`` without ``time_step``).
+    """
+    from .obs_wrfda import _date_minutes
+
+    window_s = round((_date_minutes(time_window_max) - _date_minutes(time_window_min)) * 60.0)
+    if window_s <= 0:
+        raise ValueError(f"4D-Var: the window {time_window_min[:19]} to {time_window_max[:19]} is empty")
+    if time_step is not None:
+        time_step = _whole_seconds("time_step", time_step)
+        if time_step <= 0:
+            raise ValueError('4D-Var: "time_step" must be set to a non-zero value (WRFDA: For 4DVAR, in the '
+                             '&domains namelist, "time_step" must be set to a non-zero value)')
+    if var4d_bin is None:
+        if nslots < 2 or window_s % (nslots - 1):
+            raise ValueError(f"4D-Var: {nslots} slots do not split the {window_s} s window into whole-second "
+                             "bins; give var4d_bin")
+        var4d_bin = window_s // (nslots - 1)
+    var4d_bin = _whole_seconds("var4d_bin", var4d_bin)
+    if var4d_bin <= 0:
+        raise ValueError(f"var4d_bin = {var4d_bin}: must be positive")
+    if time_step is not None and var4d_bin < time_step:
+        var4d_bin = time_step   # WRFDA: if (var4d_bin < time_step) call nl_set_var4d_bin(1, time_step)
+    if round(window_s / var4d_bin) * var4d_bin != window_s:
+        raise ValueError(f"4DVAR assimilation window must be evenly divisible by var4d_bin! var4d_bin = "
+                         f"{var4d_bin}, time_window_max - time_window_min = {window_s} s ({time_window_min[:19]} "
+                         f"to {time_window_max[:19]}). Change var4d_bin, time_window_max, or time_window_min "
+                         "and rerun")
+    if time_step is not None and var4d_bin // time_step * time_step != var4d_bin:
+        raise ValueError(f"var4d_bin must be evenly divisible by time_step! var4d_bin = {var4d_bin}, time_step = "
+                         f"{time_step}. Change var4d_bin or time_step and rerun")
+    num = round(window_s / var4d_bin) + 1
+    if num != nslots:
+        raise ValueError(f"4D-Var: var4d_bin = {var4d_bin} s over the {window_s} s window makes {num} slots "
+                         f"(num_fgat_time), but {nslots} were given (one observation file and one first guess "
+                         "per slot)")
+    return {"var4d_bin": var4d_bin, "num_fgat_time": num,
+            "steps_per_bin": None if time_step is None else var4d_bin // time_step}
 
 
 def pt_to_rho_lin(xa: dict, xb: dict) -> np.ndarray:

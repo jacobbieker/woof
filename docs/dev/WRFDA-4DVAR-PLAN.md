@@ -3,11 +3,17 @@
 Status (2026-11-26): 4D.1 (`transfer4d.py`, #737), 4D.2
 (`FourDObsTerm`, `IdentityModel`, `analyse(var4d=)`, #741) and 4D.3
 (`WindowModel`, #742) are merged. 4D.3b makes `WindowModel` advect `g_qv`
-on a moist window (`moisture="advect"`). 4D.0 has run: the lanes L-id, L1
-and L0 converge on pb with per-slot TL, adjoint-forcing and gradient files
-(`tools/wrfda_oracle/run_4dvar.sh`). Not done: 4D.4 (outer loops and
-`woof var --4dvar`, #867), the checkpoint
-policy and its G3 receipt, and 4D.5 (L0, after P3a item 6). It is the
+on a moist window (`moisture="advect"`). 4D.4 adds outer loops
+(`outer4d.py`, `Var4D.nl_model`, `WindowModel.relinearise`) and `woof var
+--4dvar` (identity TL, one loop). Its L2-style OSSE passes. Its L1 gate
+(`max_ext_its = 2`) is a skipped, data-gated test reading
+`WOOF_WRFDA471_4DVAR_L1_DIR`. Open questions for L1: the QC carry across
+loops, the var4d transfer's LBC perturbation, and per-loop `var_scaling`
+(docs/var.md). 4D.0 has run: the lanes L-id, L1 and L0 converge on pb with
+per-slot TL, adjoint-forcing and gradient files
+(`tools/wrfda_oracle/run_4dvar.sh`). Not done: the 4D.4 L1 gate, the
+checkpoint policy and its G3 receipt, and 4D.5 (L0, after P3a item 6).
+It is the
 second half of V5 in
 [WRFDA-3DVAR-PLAN.md](WRFDA-3DVAR-PLAN.md) section 7 (V5.2 and the
 differentiable plan's P4.2). The model TL/AD is P3a's
