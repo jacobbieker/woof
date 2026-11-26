@@ -98,10 +98,13 @@ MODULE_OPTIONS = ("-std=c++17", "--fmad=false", "--ftz=false")
 #: RunConfig.thompson_rain_snow_closure (FQ5): the define goes
 #: first, ahead of the unit, which reads it in one #ifdef block.
 RAIN_SNOW_CLOSURE_PREFIX = "#define THOMPSON_RAIN_SNOW_CLOSURE 1\n"
+#: RunConfig.thompson_lamc_updated_rc (FQ7): the same, for its one block.
+LAMC_UPDATED_RC_PREFIX = "#define THOMPSON_LAMC_UPDATED_RC 1\n"
 
 
 @lru_cache(maxsize=None)
-def _module(device: int, rain_snow_closure: bool = False):
+def _module(device: int, rain_snow_closure: bool = False,
+            lamc_updated_rc: bool = False):
     import cupy as cp
     from woof import nvrtc_ptx_cache as compiler
     from woof.certify.kernel_manifest import record_module
@@ -113,6 +116,9 @@ def _module(device: int, rain_snow_closure: bool = False):
     if rain_snow_closure:
         source = RAIN_SNOW_CLOSURE_PREFIX + source
         key += "[THOMPSON_RAIN_SNOW_CLOSURE=1]"
+    if lamc_updated_rc:
+        source = LAMC_UPDATED_RC_PREFIX + source
+        key += "[THOMPSON_LAMC_UPDATED_RC=1]"
     with cp.cuda.Device(device), observe_module_compile(key):
         binary, _ = compiler.compile_using_nvrtc(
             source, ("-std=c++17", "--fmad=false", "--ftz=false"), None,
@@ -123,11 +129,11 @@ def _module(device: int, rain_snow_closure: bool = False):
     return module
 
 
-def _kernel(rain_snow_closure: bool = False):
+def _kernel(rain_snow_closure: bool = False, lamc_updated_rc: bool = False):
     import cupy as cp
-    if rain_snow_closure:
-        return _module(cp.cuda.runtime.getDevice(), True).get_function(KERNEL)
-    return _module(cp.cuda.runtime.getDevice()).get_function(KERNEL)
+    # One cache key per variant: always the three positional arguments.
+    return _module(cp.cuda.runtime.getDevice(), bool(rain_snow_closure),
+                   bool(lamc_updated_rc)).get_function(KERNEL)
 
 
 def _tile(kernel, ncol: int) -> int:
@@ -151,7 +157,8 @@ def launch_thompson_fork_column(
         nwfa2d, th_out, rainnc, rainncv, snownc, snowncv, graupelnc,
         graupelncv, sr, refl, effc, effi, effs, table_owner, ccn_table,
         dt: float, *, first_time_step: bool, do_refl: bool,
-        singular_fall: bool, rain_snow_closure: bool = False) -> None:
+        singular_fall: bool, rain_snow_closure: bool = False,
+        lamc_updated_rc: bool = False) -> None:
     """One fork microphysics call over every column, in place.
 
     ``th``/``pii``/``p``/``dz`` and the species are (nz, ny, nx) float32;
@@ -162,6 +169,9 @@ def launch_thompson_fork_column(
     false selects WRF v4.6.1's rain-share blend ("blend").
     ``rain_snow_closure`` (RunConfig.thompson_rain_snow_closure, on in
     correct mode, off in exact mode) compiles the unit with the rain-snow closure define.
+    ``lamc_updated_rc`` (RunConfig.thompson_lamc_updated_rc, FQ7) likewise
+    compiles the cloud slope lamc from the updated cloud mass; the two
+    defines compose.
     """
     import cupy as cp
 
@@ -195,7 +205,7 @@ def launch_thompson_fork_column(
                          "(7, 9, 7, 5, 4) Fortran-order array")
     tables.append(ccn_table)
     refl_arg = refl if do_refl else effc
-    kernel = _kernel(rain_snow_closure)
+    kernel = _kernel(rain_snow_closure, lamc_updated_rc)
     threads = _tile(kernel, ncol)
     d_bytes, f_bytes, b_bytes = workspace_layout(nz, threads)
     arena = cp.empty(d_bytes + f_bytes + b_bytes, dtype=cp.uint8)

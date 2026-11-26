@@ -53,7 +53,7 @@ from woof.io import history_selection as history_selection_module
 from woof import simulated_radar_config as simulated_radar_module
 from woof.config_keys import KeyRow, key_rows
 from woof.config import (DEFAULT_COLUMN_CHUNK, RADAR_HEATING_OFF, RadarHeatingConfig,
-                          KF_FAMILY_CU_SCHEMES, THOMPSON_RAIN_SNOW_MP,
+                          KF_FAMILY_CU_SCHEMES, THOMPSON_CLOUD_BALANCE_MP, THOMPSON_RAIN_SNOW_MP,
                           EXPLICIT_HORIZONTAL_DIFFUSION_LIMIT,
                           EPSSM_AUTO,
                           GRELL_FAMILY_CU_PHYSICS, GRELL_FAMILY_DEFAULTS,
@@ -338,6 +338,9 @@ _DOMAIN_RUN_OVERRIDES = (
     # The RRTMG longwave model-top correction (FQ6), on the same terms: a
     # [shared] value reaches the legacy-RRTMG longwave domains only.
     "rrtmg_lw_model_top",
+    # The Thompson cloud slope from the updated mass (FQ7), on the same
+    # terms: a [shared] value reaches the mp_physics = 28, 38 domains only.
+    "thompson_lamc_updated_rc",
     # The umbrella over the opt-in quirk corrections (woof.quirk_corrections):
     # per domain like the corrections it turns on, each where its scheme runs.
     "woof_quirk_corrections",
@@ -4221,7 +4224,7 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
 
     # ---- [shared] ------------------------------------------------------
     shared = dict(raw.get("shared", {}))
-    # wrf_reference = "4.8.0" | "4.7.1" pins the scheme generations that
+    # wrf_reference = "4.8.1" | "4.8.0" | "4.7.1" pins the scheme generations that
     # WRF release runs, resolved here into the per-scheme keys (an explicit
     # per-scheme key wins); absent, nothing changes (woof.wrf_reference).
     from woof.wrf_reference import resolve_wrf_reference
@@ -4472,6 +4475,14 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
             "mp_physics",
             dom.get("mp_physics",
                     shared.get("mp_physics", RunConfig.mp_physics))) in THOMPSON_RAIN_SNOW_MP
+        for dom in domain_tables)
+    # The Thompson cloud slope from the updated mass is read only by the
+    # aerosol-aware Thompson (mp_physics = 28, 38), on the same terms.
+    tree_runs_thompson_aerosol = any(
+        physics_mode.settings.get(
+            "mp_physics",
+            dom.get("mp_physics",
+                    shared.get("mp_physics", RunConfig.mp_physics))) in THOMPSON_CLOUD_BALANCE_MP
         for dom in domain_tables)
     # The opt-in RRTMG longwave model-top correction is read only by the
     # legacy RRTMG longwave (ra_lw_physics = 4 or the ra_physics = 4
@@ -5117,6 +5128,10 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
                     lambda name, default: kw.get(name, default))
                 and "rrtmg_lw_model_top" not in dom):
             kw["rrtmg_lw_model_top"] = False
+        if (tree_runs_thompson_aerosol
+                and kw.get("mp_physics", RunConfig.mp_physics) not in THOMPSON_CLOUD_BALANCE_MP
+                and "thompson_lamc_updated_rc" not in dom):
+            kw["thompson_lamc_updated_rc"] = False
         # an explicit woof_quirk_corrections ('all' / 'none') sets every
         # correction key the domain does not set itself (quirk_corrections).
         from woof.quirk_corrections import apply_run_corrections
@@ -6534,6 +6549,7 @@ def _public_config_value(value):
                                   ("noah_smc_floor_booking", False),
                                   ("thompson_rain_snow_closure", False),
                                   ("rrtmg_lw_model_top", False),
+                                  ("thompson_lamc_updated_rc", False),
                                   *OBSTACLE_RUN_DEFAULTS.items()):
                 value = run_document.get(name, default)
                 if isinstance(value, list):

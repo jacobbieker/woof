@@ -110,15 +110,16 @@ def test_every_key_480_added_has_an_owner():
 
 
 def test_the_release_chooses_the_vocabulary():
-    for version, reference in (("4", "4.8.0"), ("4.8", "4.8.0"),
-                               ("4.8.0", "4.8.0"), ("4.9.1", "4.8.0"),
+    for version, reference in (("4", "4.8.1"), ("4.8", "4.8.0"),
+                               ("4.8.0", "4.8.0"), ("4.8.1", "4.8.1"),
+                               ("4.9.1", "4.8.1"),
                                ("4.7.1", "4.7.1"), ("4.6.1", "4.7.1"),
                                ("3", "4.7.1"), ("3.9", "4.7.1")):
         assert registry_reference_for_wrf_version(version) == reference
     assert check_wrf_reference("v4.8.0") == "4.8.0"
     with pytest.raises(ValueError, match="4.8.0"):
         check_wrf_reference("4.6.1")
-    assert sorted(REGISTRY_TABLES) == ["4.7.1", "4.8.0"]
+    assert sorted(REGISTRY_TABLES) == ["4.7.1", "4.8.0", "4.8.1"]
 
 
 # --------------------------------------------------------- round trip
@@ -272,10 +273,20 @@ def test_the_experiment_door_pins_exactly_the_per_scheme_keys():
     default = _experiment({})
     # 4.8.0 is every engine generation default plus the stock-WRF RUC
     # SOILPROP form (REFERENCE_STOCK_SELECTORS), which the engine default
-    # deliberately is not.
+    # deliberately is not.  The default's receipt names the newest
+    # reference with the same generations, 4.8.1 (with its pending ports,
+    # tests/test_wrf481_source.py).
     assert [d.run for d in _experiment({"wrf_reference": "4.8.0"}).domains] \
         == [d.run for d in _experiment(dict(REFERENCE_STOCK_SELECTORS)).domains]
-    assert wrf_reference_receipt(default.domains[0].run)["wrf_reference"] == "4.8.0"
+    receipt = wrf_reference_receipt(default.domains[0].run)
+    assert receipt["wrf_reference"] == "4.8.1"
+    # A 4.8.0 pin runs the same generation rows, and its receipt says so.
+    pinned_480 = wrf_reference_receipt(
+        _experiment({"wrf_reference": "4.8.0"}).domains[0].run)
+    assert pinned_480["wrf_reference_matches"] == ["4.8.1", "4.8.0"]
+    assert receipt["wrf_reference_matches"] == ["4.8.1", "4.8.0"]
+    assert "wrf_reference_matches" not in wrf_reference_receipt(
+        pinned.domains[0].run)
 
 
 def test_the_legacy_door_pins_exactly_the_per_scheme_keys(tmp_path):

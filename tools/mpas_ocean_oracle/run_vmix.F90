@@ -8,7 +8,10 @@
 ! oracle_stream.F90's layout.  mpas_ocn_vmix.F and its coefficient modules
 ! (const, tanh, rich, Redi) are compiled verbatim, with the real equation of
 ! state; stubs_vmix.F90 stands in for CVMix (nothing when config_use_cvmix
-! is off).  The driver makes the calls the model makes:
+! is off) in run_vmix_{r4,r8}, while run_vmix_cvmix_r8 links CVMix v0.84-beta
+! and mpas_ocn_vmix_cvmix.F verbatim (ocn_vmix_cvmix_init reads nVertLevels
+! from the domain's block, the mesh pool here).  The driver makes the calls
+! the model makes:
 !
 !   ocn_constants_init, ocn_equation_of_state_init, ocn_vmix_init(domain, err)
 !   ocn_vmix_implicit(dt, mesh, diagnostics, state, forcing, scratch, err, timeLevelIn=1)
@@ -24,7 +27,7 @@ program run_vmix
   implicit none
   type(oracle_pools) :: pools
   type(oracle_field), allocatable :: fields(:)
-  type(domain_type) :: domain
+  type(domain_type), pointer :: domain
   real(kind=RKIND) :: dt
   integer :: err
   character(len=1024) :: inPath, outPath
@@ -35,6 +38,11 @@ program run_vmix
   call ocn_constants_init(pools % configs, pools % packages)
   call ocn_equation_of_state_init(err)
   if (err /= 0) stop 13
+  allocate(domain)
+  allocate(domain % blocklist)
+  domain % configs => pools % configs
+  domain % blocklist % configs => pools % configs
+  domain % blocklist % dimensions => pool_named(pools, 'mesh')
   call ocn_vmix_init(domain, err)
   if (err /= 0) stop 13
   call ocn_vmix_implicit(dt, pool_named(pools, 'mesh'), pool_named(pools, 'diagnostics'), pool_named(pools, 'state'), &
