@@ -103,6 +103,7 @@ from urllib.parse import unquote, urlsplit
 
 from woof.explain import explain_enabled, layered, render
 from woof.explain import split as split_layers
+from woof.run_stamp import RUN_STAMP_CHOICES
 
 JOB_SCHEMA = "woof.go-job.v1"
 LIST_SCHEMA = "woof.go-job-list.v1"
@@ -118,9 +119,9 @@ JOB_KEYS = frozenset({
 })
 
 #: ``woof go`` flags a job may add, and whether each takes a value.
-#: Everything else is refused: a flag that moves outputs, restarts from a
-#: path on someone else's disk or turns the run into a dry run is not a
-#: per-run knob.
+#: Everything else is refused: a flag that sends outputs outside the
+#: attempt's workdir and the job's own store, restarts from a path on
+#: someone else's disk or turns the run into a dry run is not a per-run knob.
 GO_ARGS: dict[str, bool] = {
     "--cycle": True,
     "--transport": True,
@@ -131,7 +132,13 @@ GO_ARGS: dict[str, bool] = {
     "--whole-cycle": False,
     "--no-memory-gate": False,
     "--no-verify-visuals": False,
+    # Only the layout under the attempt's own --workdir and the store:
+    # off writes URL/d01... instead of URL/run-<stamp>/d01...
+    "--run-stamp": True,
 }
+
+#: Values a flag above accepts, where it takes a fixed set.
+GO_ARG_CHOICES: dict[str, tuple[str, ...]] = {"--run-stamp": RUN_STAMP_CHOICES}
 
 #: Flags this wrapper sets itself, and the job key that sets them instead.
 OWNED_GO_ARGS = {"--icechunk-store": "icechunk_url",
@@ -512,9 +519,9 @@ def _go_args(raw: Any) -> tuple[str, ...]:
                 f"go_args: {flag!r} is not a flag a job may pass to woof go; "
                 f"allowed: {', '.join(sorted(GO_ARGS))}",
                 "A job runs unattended on a machine its author never sees, "
-                "so the flags it may set are a short list that cannot move "
-                "its outputs, point it at another disk's checkpoint or turn "
-                "it into a dry run."))
+                "so the flags it may set are a short list that cannot send "
+                "its outputs outside its workdir and store, point it at "
+                "another disk's checkpoint or turn it into a dry run."))
         index += 1
         if GO_ARGS[flag]:
             if not eq:
@@ -525,6 +532,10 @@ def _go_args(raw: Any) -> tuple[str, ...]:
             if any(c in value for c in "\n\0") or not value:
                 raise GoJobRefused(f"go_args: {flag} value {value!r} is "
                                    "empty or has a newline")
+            if flag in GO_ARG_CHOICES and value not in GO_ARG_CHOICES[flag]:
+                raise GoJobRefused(
+                    f"go_args: {flag} takes {' or '.join(GO_ARG_CHOICES[flag])}; "
+                    f"got {value!r}")
             out.append(f"{flag}={value}")
         else:
             if eq:
