@@ -27,6 +27,13 @@ WRF's own conditions carry over unchanged: the adjustment runs only with
 adjustment, so ``topo_shading = 1`` without ``slope_rad = 1`` computes
 nothing WRF would use.
 
+On a hex mesh (woof.hex.slope_statics, woof.hex.topo_shading) the caller
+hands the slope statics and, for ``topo_shading = 1``, the mesh's neighbour
+table and centre positions; :func:`mesh_terrain_shadow` then runs WRF's sun
+and shadow test on a march along the sun azimuth over the Voronoi cells
+(``topo_shadow_scan_mesh`` in the kernel unit says how the march differs
+from toposhad's grid rows).  Everything else above is unchanged.
+
 One patch covers the domain, as a serial wrf.exe runs it.  The kernels are
 held bit for bit to WRF's own Fortran, linked to glibc 2.43's libm, by the
 oracles in ``tools/wrf_topo_radiation_v471_oracle`` (each stage, WRF
@@ -144,6 +151,41 @@ def terrain_shadow(ht, xlat, xlong, sina, cosa, *, xtime_minutes: float,
                           np.float32(shadlen), np.int32(nx), np.int32(ny),
                           mask, ht_shad))
     return mask, ht_shad
+
+
+def mesh_terrain_shadow(ht, xlat, xlong, cells, geometry, *,
+                        xtime_minutes: float, gmt: float, radt_minutes: float,
+                        declin: float, shadlen: float):
+    """``(shadowmask, ht_shad)`` for one radiation call on a hex mesh.
+
+    The columns are a Voronoi mesh's cells, not a grid: ``cells`` is the
+    mesh's ``[max_edges, nCells]`` neighbour table and ``geometry`` the
+    ``[7, nCells]`` centre positions and spacing (woof.hex.topo_shading
+    builds both).  WRF's sun and test, on the mesh's march
+    (``topo_shadow_scan_mesh`` says how it differs from toposhad's).  A root
+    domain only: a hex mesh has no parent.
+    """
+    import cupy as cp
+
+    ht = cp.asarray(ht)
+    shape = tuple(ht.shape)
+    n = int(np.prod(shape))
+    flat = (n,)
+    cells = cp.ascontiguousarray(cp.asarray(cells, dtype=cp.int32))
+    geometry = _f32(cp, geometry, (7, n), "shadow geometry")
+    if cells.ndim != 2 or cells.shape[1] != n:
+        raise ValueError(f"shadow neighbours have shape {cells.shape}, expected "
+                         f"[max_edges, {n}]")
+    fields = [_f32(cp, cp.asarray(a).reshape(-1), flat, name) for a, name in (
+        (ht, "ht"), (xlat, "xlat"), (xlong, "xlong"))]
+    mask = cp.zeros(flat, dtype=cp.int32)
+    shad = cp.zeros(flat, dtype=cp.float32)
+    _kernel("topo_shadow_scan_mesh")(
+        *_grid(n), (*fields, cells, geometry, np.float32(xtime_minutes),
+                    np.float32(gmt), np.float32(radt_minutes),
+                    np.float32(declin), np.float32(shadlen), np.int32(n),
+                    np.int32(cells.shape[0]), mask, shad))
+    return mask.reshape(shape), shad.reshape(shape)
 
 
 def diffuse_fraction(coszen, swdown, ht, swddif, *, solcon: float,
@@ -273,7 +315,7 @@ class TopoShortwave:
     """
 
     def __init__(self, *, state, cfg, fields, latitude, longitude,
-                 start_time, slope_statics=None):
+                 start_time, slope_statics=None, shadow_mesh=None):
         import cupy as cp
 
         from woof.config import radiation_scheme_ids
@@ -301,12 +343,15 @@ class TopoShortwave:
             # and SLP_AZI built on its own geometry (the hex mesh:
             # woof.hex.slope_statics); the grid stencil would difference
             # columns that are not neighbours.  The shadow search marches
-            # that same grid, so it is refused here rather than run on it.
-            if self.shading:
+            # that same grid, so it needs the caller's mesh too
+            # (woof.hex.topo_shading), and is refused without it.
+            if self.shading and shadow_mesh is None:
                 raise ValueError(
                     "topo_shading = 1 marches the sun direction over a "
                     "structured grid's terrain; with caller-built slope "
-                    "statics the columns are not that grid")
+                    "statics the columns are not that grid, and no mesh "
+                    "neighbours (topo_shadow_cells/topo_shadow_geometry) "
+                    "were given")
             slope, slp_azi = (_f32(cp, value, self.shape, name) for value, name in
                               zip(slope_statics, ("topo_slope", "topo_slope_azimuth")))
             if not (bool(cp.all(cp.isfinite(slope))) and bool(cp.all(cp.isfinite(slp_azi)))):
@@ -314,6 +359,23 @@ class TopoShortwave:
             if bool(cp.any(slope < 0)) or bool(cp.any(slope >= np.float32(np.pi / 2))):
                 raise ValueError("topo_slope must lie in [0, pi/2) radians")
             slope, slp_azi = slope.copy(), slp_azi.copy()
+        if shadow_mesh is not None and (slope_statics is None or not self.shading
+                                        or self.nested):
+            raise ValueError(
+                "topo_shadow_cells/topo_shadow_geometry are the hex mesh's "
+                "shadow search, read only with topo_shading = 1 and the "
+                "mesh's own slope statics, on a domain without a parent")
+        self.shadow_mesh = None
+        if shadow_mesh is not None:
+            cells, geometry = shadow_mesh
+            n = int(np.prod(self.shape))
+            cells = cp.ascontiguousarray(cp.asarray(cells, dtype=cp.int32).reshape(-1, n))
+            geometry = _f32(cp, cp.asarray(geometry).reshape(-1, n), (7, n), "topo_shadow_geometry")
+            if not bool(cp.all(cp.isfinite(geometry))) or bool(cp.any(geometry[6] <= 0)):
+                raise ValueError("topo_shadow_geometry must be finite with a positive spacing")
+            if bool(cp.any(cells < -2)) or bool(cp.any(cells >= n)):
+                raise ValueError("topo_shadow_cells must index the mesh's cells (-1 unused, -2 outside)")
+            self.shadow_mesh = (cells, geometry)
         fields["slope"] = slope
         fields["slp_azi"] = slp_azi
         for name in ("diffuse_frac", "topo_coszen", "hrang", "swnorm"):
@@ -396,7 +458,15 @@ class TopoShortwave:
             f["topo_coszen"], f["swdown"], state.ht, swddif,
             solcon=float(solcon),
             scheme_splits_direct_beam=self.scheme_splits_direct_beam)
-        if self.shading:
+        if self.shading and self.shadow_mesh is not None:
+            mask, shad = mesh_terrain_shadow(
+                state.ht, self.xlat, self.xlong, *self.shadow_mesh,
+                xtime_minutes=float(xtime), gmt=float(gmt),
+                radt_minutes=float(radt), declin=float(declin),
+                shadlen=self.shadlen)
+            f["shadowmask"][...] = mask
+            f["ht_shad"][...] = shad
+        elif self.shading:
             mask, shad = terrain_shadow(
                 state.ht, self.xlat, self.xlong, state.sina, state.cosa,
                 xtime_minutes=float(xtime), gmt=float(gmt),
