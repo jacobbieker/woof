@@ -124,7 +124,13 @@ MOVED = {
     "mynn_sfclay_psih_zolzt": (
         dict(sf_sfclay_physics=5, bl_pbl_physics=5, mynn_sfclay_psih_zolzt=True),
         # MYNN PBL also binds upstream 1.1.7's default-on correct-mode keys.
-        {"mynn_sfclay_psih_zolzt", "mynn_fixes_v61", "mynn_boulac_down_sign"}),
+        {"mynn_sfclay_psih_zolzt", "mynn_fixes_v61", "mynn_boulac_down_sign",
+         "mynn_sfclay_q2_land_cap"}),
+    # Correct-mode FQ10 (on by default): echoed where the MYNN surface layer runs.
+    "mynn_sfclay_q2_land_cap": (
+        dict(sf_sfclay_physics=5, bl_pbl_physics=5),
+        {"mynn_sfclay_q2_land_cap", "mynn_sfclay_psih_zolzt", "mynn_fixes_v61",
+         "mynn_boulac_down_sign"}),
     # Noah runs here, so its default-on prognostic sea ice is bound too.
     "noah_smc_floor_booking": (
         dict(sf_surface_physics=2, noah_smc_floor_booking=True),
@@ -164,7 +170,7 @@ MOVED = {
     # sign) is read by the same PBL and is echoed with it.
     "mynn_fixes_v61": (dict(bl_pbl_physics=5, sf_sfclay_physics=5),
                        {"mynn_fixes_v61", "mynn_boulac_down_sign",
-                        "mynn_sfclay_psih_zolzt"}),
+                        "mynn_sfclay_psih_zolzt", "mynn_sfclay_q2_land_cap"}),
     # ML1's second key (3.0.3): on by default, echoed only where the BouLac
     # (8) or k-epsilon (17) PBL reads it.
     "pbl_boulac_down_sign": (dict(bl_pbl_physics=8, sf_sfclay_physics=1),
@@ -292,6 +298,9 @@ DEFAULT_OFF = frozenset({
     # The RRTMG longwave model-top correction (FQ6), absent while off or
     # while the legacy RRTMG longwave does not run.
     "rrtmg_lw_model_top",
+    # The MYNN surface-layer Q2 land cap (FQ10), absent while off or while
+    # the MYNN surface layer does not run.
+    "mynn_sfclay_q2_land_cap",
     # WRF v4.8.0 MYNN-SFC roughness keys, absent at their Registry defaults.
     "sf_mynn_sfcflux_land", "sf_mynn_sfcflux_water", "shalwater_z0",
     # The upstream MYNN v6.1 fixes (correct-mode MY1): default on, echoed

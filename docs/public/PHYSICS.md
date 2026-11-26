@@ -2752,6 +2752,21 @@ T2, TH2, Q2 and the 2 m exchange coefficients move
 = 5` at the `wrf_461` variant, off in exact mode; not yet scored against
 observations.
 
+**Correction: `mynn_sfclay_q2_land_cap` (on in correct mode, finding FQ10).** WRF 4.7.1's MYNN
+surface layer ends its 2 m diagnostics with `Q2 = MIN(Q2, 1.05*QV1D)`
+(`module_sf_mynn.F:1149`), at every point, water included. The surface
+driver applies the same limit after the schemes (`module_surface_driver.F:4452-4456`)
+and only where `XLAND < 1.5`; its comment ties it to the land source terms
+("transition periods and weak winds and vegetation source"). Over water Q2
+is the Monin-Obukhov interpolation between the saturated skin and the lowest
+level, which the cap truncates: a warm sea under cooler, drier air cannot
+show a 2 m mixing ratio more than 5 per cent above the air. With the option
+on the kernel keeps the cap where `xland < 1.5` and leaves the water value,
+which stays between the lowest level and the surface mixing ratio. Only Q2
+(and what is derived from it) moves (`tests/test_mynn_sfclay_q2_land_cap.py`).
+Read only where `sf_sfclay_physics = 5` at the `wrf_461` variant, off in
+exact mode; not yet scored against observations.
+
 ## Passive tracers (`tracer_opt`)
 
 The non-Chem EM package `tracer_opt=2` carries WRF's eight dimensionless

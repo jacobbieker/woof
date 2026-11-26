@@ -29,10 +29,11 @@ from woof.config import RunConfig, validate_run_config
 
 ROOT = Path(__file__).resolve().parents[1]
 #: the fork's quirk ledger on the WRF route (woof.quirk_corrections), FQ1-FQ6
-_FQ = ("FQ1", "FQ2", "FQ3", "FQ4", "FQ5", "FQ6")
+_FQ = ("FQ1", "FQ2", "FQ3", "FQ4", "FQ5", "FQ6", "FQ10")
 _FQ_KEYS = ("gf_deep_rain_evaporation_booking", "ysu_surface_heat_exner",
             "mynn_sfclay_psih_zolzt", "noah_smc_floor_booking",
-            "thompson_rain_snow_closure", "rrtmg_lw_model_top")
+            "thompson_rain_snow_closure", "rrtmg_lw_model_top",
+            "mynn_sfclay_q2_land_cap")
 
 # -------------------------------------------------------------- the switch --
 def test_exact_mode_authors_every_key_off():
@@ -566,8 +567,8 @@ def test_my1_a_default_mynn_run_limits_dew_instead_of_deleting_it():
     assert default.mynn_fixes_v61 is True
     assert pbl_fixes_active(default) and sfclay_fixes_active(default)
     # MY1 and ML1 (the BouLac length sign) both apply on a default MYNN run.
-    # (FQ3, the fork's MYNN surface-layer correction, follows them.)
-    assert correct_mode.in_effect(default)["findings"][-3:] == ["MY1", "ML1", "FQ3"]
+    # (FQ3 and FQ10, the fork's MYNN surface-layer corrections, follow them.)
+    assert correct_mode.in_effect(default)["findings"][-4:] == ["MY1", "ML1", "FQ3", "FQ10"]
     assert correct_mode.uncorrected(default) == []
     exact = RunConfig(**_MYNN, **correct_mode.resolve("exact").settings)
     assert exact.mynn_fixes_v61 is False and not pbl_fixes_active(exact)
