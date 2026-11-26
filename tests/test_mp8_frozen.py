@@ -317,8 +317,12 @@ CUDA_DEFINES_PIN = {
 #: network launchers take rain_snow_closure and compile the define through
 #: _closure_kernel; rain_snow_closure_due reads the key.  __all__ is
 #: unchanged; without the key no launch moved.  Previously 3f621940.
+#: RE-FROZEN 2026-11-23 (FQ7, thompson_lamc_updated_rc): LAMC_UPDATED_RC_
+#: DEFINES and lamc_updated_rc_due join the module for the aerosol-aware
+#: launch (thompson_aerosol_launch); no mp=8 launcher, __all__ entry or
+#: kernel moved.  Previously 99184329.
 THOMPSON_PY_SHA256 = (
-    '991843297d4a381ba76d49eb4f730e21e72730920066c6af00883f719e0ff947')
+    'eee952dbcd4617fb559ed5ef19589f19c4fea3d83b03784c39a8d4c0d216f15c')
 
 #: ``woof/core/thompson.py::__all__`` verbatim, in declaration order.
 #: mp=28 launchers live in the new ``thompson_aerosol_*.py`` modules; not

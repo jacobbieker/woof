@@ -19,11 +19,11 @@ def verify() -> dict:
                              mpas_ocean_forward_frazil_oracle, mpas_ocean_land_ice_oracle,
                              mpas_ocean_land_ice_diagnostics_oracle, mpas_ocean_forward_land_ice_oracle,
                              mpas_ocean_gm_oracle, mpas_ocean_redi_oracle, mpas_ocean_split_step_gm_oracle,
-                             mpas_ocean_forward_gm_oracle)
+                             mpas_ocean_forward_gm_oracle, mpas_ocean_cvmix_oracle)
 
     from . import (btr_subcycle_v842, diagnostics_v842, forward_v842, split_step_v842, eos_v842, forcing_v842, pgrad_hmix_v842, tend_tracer_v842, tend_v842,
                    tracer_advection_v842, tracer_hmix_v842, vert_transport_v842, vmix_v842, frazil_v842,
-                   land_ice_v842, gm_v842)
+                   land_ice_v842, gm_v842, cvmix_v842)
 
     pieces = []
     for label, oracle_module, port in (("tendency_terms", mpas_ocean_tend_oracle, tend_v842),
@@ -36,6 +36,7 @@ def verify() -> dict:
                                        ("tracer_hmix", mpas_ocean_tracer_hmix_oracle, tracer_hmix_v842),
                                        ("tracer_tendency", mpas_ocean_tend_tracer_oracle, tend_tracer_v842),
                                        ("vertical_mixing", mpas_ocean_vmix_oracle, vmix_v842),
+                                       ("cvmix_kpp", mpas_ocean_cvmix_oracle, cvmix_v842),
                                        ("vertical_transport", mpas_ocean_vert_transport_oracle,
                                         vert_transport_v842),
                                        ("barotropic_stage", mpas_ocean_btr_subcycle_oracle, btr_subcycle_v842),

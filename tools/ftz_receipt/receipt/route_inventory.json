@@ -9,13 +9,13 @@
     "cupy.ReductionKernel",
     "cupy.cuda.compiler.compile_using_nvrtc"
   ],
-  "site_count": 742,
+  "site_count": 743,
   "site_count_by_kind": {
     "cupy.ElementwiseKernel": 48,
     "cupy.RawKernel": 124,
     "cupy.RawModule": 317,
     "cupy.ReductionKernel": 22,
-    "cupy.cuda.compiler.compile_using_nvrtc": 231
+    "cupy.cuda.compiler.compile_using_nvrtc": 232
   },
   "site_count_by_surface": {
     "other": {
@@ -29,7 +29,7 @@
       "cupy.RawKernel": 42,
       "cupy.RawModule": 114,
       "cupy.ReductionKernel": 9,
-      "cupy.cuda.compiler.compile_using_nvrtc": 155
+      "cupy.cuda.compiler.compile_using_nvrtc": 156
     },
     "tests": {
       "cupy.ElementwiseKernel": 7,
@@ -2968,7 +2968,7 @@
     },
     {
       "file": "tests/test_mp8_frozen.py",
-      "line": 3373,
+      "line": 3377,
       "column": 8,
       "surface": "tests",
       "constructor": "cp.RawModule",
@@ -9158,7 +9158,7 @@
     },
     {
       "file": "woof/core/thompson_aerosol_launch.py",
-      "line": 167,
+      "line": 203,
       "column": 19,
       "surface": "package",
       "constructor": "nvrtc_ptx_cache.compile_using_nvrtc",
@@ -9174,7 +9174,7 @@
     },
     {
       "file": "woof/core/thompson_fork.py",
-      "line": 117,
+      "line": 123,
       "column": 20,
       "surface": "package",
       "constructor": "compiler.compile_using_nvrtc",
@@ -10893,6 +10893,22 @@
       "text": "image, _ = compile_using_nvrtc(module_source(precision), options, None,"
     },
     {
+      "file": "woof/hex/mpas_ocean/cvmix_v842.py",
+      "line": 113,
+      "column": 15,
+      "surface": "package",
+      "constructor": "compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "_module_on",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "options",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "image, _ = compile_using_nvrtc(module_source(precision), options, None, f\"ocn_cvmix_v842_{precision}.cu\")"
+    },
+    {
       "file": "woof/hex/mpas_ocean/diagnostics_v842.py",
       "line": 88,
       "column": 15,
@@ -11022,7 +11038,7 @@
     },
     {
       "file": "woof/hex/mpas_ocean/split_step_v842.py",
-      "line": 95,
+      "line": 96,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
@@ -11118,7 +11134,7 @@
     },
     {
       "file": "woof/hex/mpas_ocean/vmix_v842.py",
-      "line": 76,
+      "line": 82,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
@@ -12032,7 +12048,7 @@
     },
     {
       "file": "woof/hex/obs_nudging.py",
-      "line": 394,
+      "line": 434,
       "column": 17,
       "surface": "package",
       "constructor": "cp.RawModule",
@@ -12048,7 +12064,7 @@
     },
     {
       "file": "woof/hex/obs_nudging.py",
-      "line": 631,
+      "line": 671,
       "column": 28,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
