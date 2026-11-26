@@ -6313,6 +6313,10 @@ def _noah_sflx(ffrozp, dt, nsoil, sldpth, lwdn, soldn, solnet, sfcprs,
         frcsoi = dsoil / dtot
         df1h = (sncond * df1) / (frcsoi * sncond + frcsno * df1)
         df1a = frcsno * sncond + frcsoi * df1
+        if flags.get("snow_series_conductivity"):
+            # RunConfig.noah_snow_series_conductivity (FQ9): the series
+            # DF1H WRF computes and never reads (:649) replaces DF1A (:656)
+            df1a = df1h
         df1 = df1a * sncovr + df1 * (1.0 - sncovr)
         ssoil = df1 * (t1 - stc[0]) / dtot
 
@@ -6484,7 +6488,8 @@ def _noah_sflx(ffrozp, dt, nsoil, sldpth, lwdn, soldn, solnet, sfcprs,
 def np_noah_column(col, params, dt, dzs, isurban=None, isice=None,
                    xice_threshold=0.5, frpcpn=False, usemonalb=False,
                    rdlai2d=False, opt_thcnd=1, ua_phys=False,
-                   smc_floor_booking=False, land_ice_rain_runoff=False):
+                   smc_floor_booking=False, land_ice_rain_runoff=False,
+                   snow_series_conductivity=False):
     """Float64 mirror of one Noah column step: the WRF v4.6.1 driver
     ``lsm`` prep + ``SFLX`` + post-update, for a single (i, j).
 
@@ -6499,7 +6504,9 @@ def np_noah_column(col, params, dt, dzs, isurban=None, isice=None,
     ``smc_floor_booking`` is RunConfig.noah_smc_floor_booking (default
     off: WRF's word-exact floor).  ``land_ice_rain_runoff`` is
     RunConfig.noah_land_ice_rain_runoff (default off: WRF drops the rain
-    that falls on land ice).
+    that falls on land ice).  ``snow_series_conductivity`` is
+    RunConfig.noah_snow_series_conductivity (default off: WRF blends the
+    arithmetic DF1A, not its series DF1H, over snow).
     """
     if isurban is None or isice is None:
         # the dataset's own ISURBAN/ISICE, as launch_noah resolves them
@@ -6509,7 +6516,8 @@ def np_noah_column(col, params, dt, dzs, isurban=None, isice=None,
         isice = dataset_isice if isice is None else isice
     tresh, a2, a3, a4 = 0.95, 17.67, 273.15, 29.65
     a23m4 = a2 * (a3 - a4)
-    flags = dict(near_branch=False, clamped=False, smc_floor_booking=bool(smc_floor_booking))
+    flags = dict(near_branch=False, clamped=False, smc_floor_booking=bool(smc_floor_booking),
+                 snow_series_conductivity=bool(snow_series_conductivity))
     out = {k: (np.array(v, np.float64) if k in ("smois", "tslb", "sh2o")
                else v) for k, v in col.items()}
     out.update(skip=0, ebal_case=-1, reslin=0.0, noahres=0.0,

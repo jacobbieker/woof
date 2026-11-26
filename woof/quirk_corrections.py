@@ -25,7 +25,7 @@ The rules, the same on every route:
   coupling, the MPAS-Seaice ``ice_velocity_at_cell`` without the
   velocity solver's pools) it stays off; the WRF route's run receipt
   lists such a finding as uncorrected (woof.correct_mode.uncorrected).
-* On the WRF route the RunConfig keys are correct-mode findings FQ1-FQ6 and FQ8
+* On the WRF route the RunConfig keys are correct-mode findings FQ1-FQ6, FQ8 and FQ9
   of woof.correct_mode: their defaults are ``CORRECT_KEYS_DEFAULT``,
   exact mode authors them off with every other correct-mode key, and the
   checkpoint echo binds one only where it is on and read.
@@ -120,6 +120,10 @@ CORRECTIONS: tuple[QuirkCorrection, ...] = (
     QuirkCorrection(
         "noah_land_ice_rain_runoff", "wrf", False, True, "sf_surface_physics = 2, land-ice points",
         "Noah books the liquid rain that falls on land ice as surface runoff, where WRF's glacial arm drops it",
+        active=lambda get: int(get("sf_surface_physics")) == 2),
+    QuirkCorrection(
+        "noah_snow_series_conductivity", "wrf", False, True, "sf_surface_physics = 2, snow-covered land points",
+        "Noah blends the series snow-soil conductivity into the soil heat flux, where WRF computes it and uses the arithmetic mean",
         active=lambda get: int(get("sf_surface_physics")) == 2),
     # hex (MPAS) regional route
     QuirkCorrection(

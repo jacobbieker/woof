@@ -456,6 +456,18 @@ def composed_units(root: Path) -> list[Unit]:
         units.append(Unit(f"composed:noah_mosaic_ucm[{label}]",
                           prefix + mosaic.mosaic_ucm_source(),
                           tuple(mosaic.MOSAIC_NVRTC_OPTIONS)))
+    # noah_snow_series_conductivity (FQ9) alone and in the full correct-mode
+    # tier (all three Noah corrections), composed the same way.
+    for floor_rain in (False, True):
+        label = ",".join(f"{key}={value}"
+                         for key, value in noah_define_tier(floor_rain, floor_rain, True))
+        prefix = noah_define_prefix(floor_rain, floor_rain, True)
+        units.append(Unit(f"composed:noah_mosaic[{label}]",
+                          prefix + module_source("noah_mosaic", kernel_dir=kdir),
+                          tuple(mosaic.MOSAIC_NVRTC_OPTIONS)))
+        units.append(Unit(f"composed:noah_mosaic_ucm[{label}]",
+                          prefix + mosaic.mosaic_ucm_source(),
+                          tuple(mosaic.MOSAIC_NVRTC_OPTIONS)))
     # RRTMG-K's three units, as woof.core.rrtmgk._load compiles them.
     rk = module("rrtmgk")
     units.extend((

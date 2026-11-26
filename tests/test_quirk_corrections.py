@@ -179,6 +179,7 @@ _WRF_SCHEMES = {
     "thompson_rain_snow_closure": dict(mp_physics=8, moist=True),
     "rrtmg_lw_model_top": dict(ra_physics=4, ra_rrtmg_variant="rrtmg_legacy"),
     "noah_land_ice_rain_runoff": dict(sf_surface_physics=2, bl_pbl_physics=1, sf_sfclay_physics=1),
+    "noah_snow_series_conductivity": dict(sf_surface_physics=2, bl_pbl_physics=1, sf_sfclay_physics=1),
 }
 
 

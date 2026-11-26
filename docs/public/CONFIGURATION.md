@@ -377,7 +377,7 @@ consumed `RunConfig` field -- the knob-parity battery
 consuming kernel/module rather than being decorative -- and every one
 is importable from a WRF namelist.
 
-**Which keys a `[[domain]]` table may override.** Exactly these 472,
+**Which keys a `[[domain]]` table may override.** Exactly these 473,
 and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
 
     madwrf_opt  madwrf_cldinit  madwrf_dt_relax  madwrf_dt_nudge  ra_call_offset
@@ -408,12 +408,12 @@ and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
     cu_physics  shcu_physics  icloud_bl  cudt_minutes  bmj_rad_feedback  clos_choice
     ishallow  cugd_avedx  gf_deep_rain_evaporation_booking  ysu_surface_heat_exner
     noah_smc_floor_booking  thompson_rain_snow_closure  rrtmg_lw_model_top
-    noah_land_ice_rain_runoff  woof_quirk_corrections  mynn_sfclay_psih_zolzt
-    urban_param_file  obstacle_opt  obstacle_file  obstacle_solid_fraction
-    obstacle_relax_factor  obstacle_drag_coefficient  obstacle_wall_z0  kf_edrates
-    maxiens  maxens  maxens2  maxens3  ensdim  cu_diag  convtrans_avglen_m
-    sas_pgcon  nsas_dx_factor  shalconv  radt  radt_minutes  bldt  grav_settling
-    ra_physics  ra_lw_physics  ra_sw_physics  ra_rrtmg_variant
+    noah_land_ice_rain_runoff  noah_snow_series_conductivity  woof_quirk_corrections
+    mynn_sfclay_psih_zolzt  urban_param_file  obstacle_opt  obstacle_file
+    obstacle_solid_fraction  obstacle_relax_factor  obstacle_drag_coefficient
+    obstacle_wall_z0  kf_edrates  maxiens  maxens  maxens2  maxens3  ensdim  cu_diag
+    convtrans_avglen_m  sas_pgcon  nsas_dx_factor  shalconv  radt  radt_minutes
+    bldt  grav_settling  ra_physics  ra_lw_physics  ra_sw_physics  ra_rrtmg_variant
     wrf_rrtmg_compatibility  o3input  use_mp_re  swrad_scat  diff_6th_factor  epssm
     spec_exp  mp_physics  moist  moist_cq  nest_microphysics_transition  spp_conv
     spp_pbl  km_opt  bl_pbl_physics  sf_sfclay_physics  c_s  c_k  tke_adv_opt
@@ -641,14 +641,27 @@ writes only `sfcrunoff`, never the routing planes. Off, and in exact mode,
 the arithmetic is WRF's word for word. It is not a WRF namelist key; set it
 in the TOML.
 
+`noah_snow_series_conductivity` (default `true`; finding FQ9) is a
+correction to Noah's soil heat flux under snow (`sf_surface_physics = 2`),
+per domain on the same terms. WRF's `module_sf_noahlsm.F` (`SFLX`) computes
+the series (harmonic) conductivity of the snowpack and the half first soil
+layer, `DF1H` (:649), and never reads it; the flux blends the
+thickness-weighted arithmetic mean `DF1A` (:656, :663), the conductivity of
+layers side by side, though the heat crosses them in series. With `true`,
+`DF1H` is blended with the snow-free `DF1` by the snow cover, as the
+commented line at :654-655 shows was meant. A snow-free point and a fully
+covered one (`SNCOVR > 0.97`) are unchanged. Off, and in exact mode, the
+arithmetic is WRF's word for word. It is not a WRF namelist key; set it in
+the TOML.
+
 `woof_quirk_corrections` (default unset) is the umbrella over the
 corrections of WRF 4.7.1 / MPAS v8.4.2 quirks (`woof/quirk_corrections.py`).
 They follow the physics mode: unset, every correction is on in correct
 mode (the default) where its scheme runs, and off in exact mode, where the
 run is the WRF / MPAS oracle's arithmetic word for word (parity tests run
 there). On the WRF route exact mode is a strict `GPUWM_WRF_EXACT=1`
-process, or every correct-mode key set `false` (the seven WRF-route keys
-below are correct-mode findings FQ1-FQ6 and FQ8, in the table under "Correct
+process, or every correct-mode key set `false` (the eight WRF-route keys
+below are correct-mode findings FQ1-FQ6, FQ8 and FQ9, in the table under "Correct
 mode"); on the hex door it is `--physics-mode exact`; in an MPAS-Ocean,
 MALI or MPAS-Seaice config dict it is `config_physics_mode = 'exact'`.
 A correction's own key, when set, wins over the mode, which is how one is
@@ -670,7 +683,8 @@ likewise. In correct mode, or under `"all"`, these are on:
   `thompson_rain_snow_closure = true` (`mp_physics = 8`, `28` or `38`) and
   `rrtmg_lw_model_top = true` (`ra_lw_physics = 4` with
   `ra_rrtmg_variant = "rrtmg_legacy"`) and
-  `noah_land_ice_rain_runoff = true` (`sf_surface_physics = 2`).
+  `noah_land_ice_rain_runoff = true` and `noah_snow_series_conductivity = true`
+  (both `sf_surface_physics = 2`).
 - Hex regional route: `--undriven-species-boundary wrf-flow-dependent`
   (a regional run, `--lbc-dir`, on the WOOF-physics one-card drivers; it
   stays off on the MPAS suite route, local time stepping, partial nest and
@@ -904,7 +918,7 @@ for the retained proof and the limits of the forecast evidence.
 ### Correct mode (`[shared]`)
 
 Correct mode is the default. It fixes defects that WRF itself carries
-(water budgets, and the fork's quirk ledger FQ1-FQ6 and FQ8, see
+(water budgets, and the fork's quirk ledger FQ1-FQ6, FQ8 and FQ9, see
 `woof_quirk_corrections`), one key per scheme, each `true` by default and read only by the
 schemes named in its row. Setting a key to `false` in `[shared]` runs that
 scheme's WRF-matched arithmetic. Strict WRF mode (`GPUWM_WRF_EXACT=1`)
@@ -929,6 +943,7 @@ configuration has no `[physics]` table; `physics.mode` is not an engine key.
 | `thompson_rain_snow_closure` | Thompson (`mp_physics = 8, 28, 38`) | FQ5 | below 0 C the rain-snow collection's graupel gain equals what rain and snow lose after their limiters |
 | `rrtmg_lw_model_top` | legacy RRTMG longwave (`ra_lw_physics = 4`, `ra_rrtmg_variant = "rrtmg_legacy"`) | FQ6 | the model-top interface and top layer temperatures are kept, and the standard profile above them is anchored at the model-top interface |
 | `noah_land_ice_rain_runoff` | Noah (`sf_surface_physics = 2`), land-ice points | FQ8 | liquid rain that falls on land ice is booked as surface runoff, where WRF drops it |
+| `noah_snow_series_conductivity` | Noah (`sf_surface_physics = 2`), snow-covered land points | FQ9 | the soil heat flux under snow blends the series (harmonic) snow-soil conductivity WRF computes and never reads, not the arithmetic mean |
 
 A checkpoint resumes only under the arithmetic it was written with; a
 mismatch is refused, and the refusal names the key to set.

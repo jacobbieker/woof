@@ -435,19 +435,21 @@ def _variant_jobs(experiment, modules):
                 tiers.append((defines if name in AEROSOL_KERNEL_MODULES else ())
                              + RAIN_SNOW_CLOSURE_DEFINES)
             if name == "noah":
-                # FQ4 and FQ8: the integer-define tier launch_noah compiles.
+                # FQ4, FQ8 and FQ9: the integer-define tier launch_noah compiles.
                 from woof.core.noah import noah_define_tier
                 tier = noah_define_tier(_reads(run, "noah_smc_floor_booking"),
-                                        _reads(run, "noah_land_ice_rain_runoff"))
+                                        _reads(run, "noah_land_ice_rain_runoff"),
+                                        _reads(run, "noah_snow_series_conductivity"))
                 if tier:
                     tiers.append(tier)
             if name in ("noah_ua", "noah_mosaic_ua"):
-                # FQ4 and FQ8 (on in correct mode): the unit with the Noah
+                # FQ4, FQ8 and FQ9 (on in correct mode): the unit with the Noah
                 # correction defines first, composed as the run launches it
                 # (woof.core.noah.noah_define_module).
                 from woof.core.noah import noah_define_module, noah_define_tier
                 booked = noah_define_tier(_reads(run, "noah_smc_floor_booking"),
-                                          _reads(run, "noah_land_ice_rain_runoff"))
+                                          _reads(run, "noah_land_ice_rain_runoff"),
+                                          _reads(run, "noah_snow_series_conductivity"))
                 if booked and (name, "booking", booked) not in seen:
                     seen.add((name, "booking", booked))
                     jobs.append((name + "[" + ",".join(f"{k}={v}" for k, v in booked) + "]",

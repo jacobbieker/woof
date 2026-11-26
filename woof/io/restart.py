@@ -3563,6 +3563,9 @@ def _drop_default_off_run_keys(values: dict) -> None:
     # The Noah land-ice rain runoff (FQ8): absent while off.
     if values.get("noah_land_ice_rain_runoff", False) is False:
         values.pop("noah_land_ice_rain_runoff", None)
+    # The Noah snow series conductivity (FQ9): absent while off.
+    if values.get("noah_snow_series_conductivity", False) is False:
+        values.pop("noah_snow_series_conductivity", None)
     # The opt-in resolved obstacles (woof.core.obstacles): every key at its
     # default is what every earlier header ran, so each is echoed only when
     # it differs; obstacle_opt = 1 always echoes with its file.
@@ -5858,6 +5861,7 @@ _RESTART_ABSENT_RUN_DEFAULTS = {
     'thompson_rain_snow_closure': False,
     'rrtmg_lw_model_top': False,
     'noah_land_ice_rain_runoff': False,
+    'noah_snow_series_conductivity': False,
     'obstacle_opt': 0,
     'obstacle_file': '',
     'obstacle_solid_fraction': 0.5,
@@ -6514,6 +6518,7 @@ ECHO_ABSENT_RUN_VALUES = {"nest_accumulation_archive": False,
                           "thompson_rain_snow_closure": False,
                           "rrtmg_lw_model_top": False,
                           "noah_land_ice_rain_runoff": False,
+                          "noah_snow_series_conductivity": False,
                           "obstacle_opt": 0, "obstacle_file": "",
                           "obstacle_solid_fraction": 0.5,
                           "obstacle_relax_factor": 10.0,

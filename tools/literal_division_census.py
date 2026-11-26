@@ -418,6 +418,19 @@ def production_units(root) -> list[Unit]:
             units.append(Unit(f"kernels:{name}[{label}]",
                               noah_define_prefix(floor, True) + K.module_source(name, kernel_dir=kdir),
                               K.module_options(name), []))
+    # Noah's snow series conductivity (FQ9, noah_snow_series_conductivity):
+    # alone and in the full correct-mode tier (all three Noah corrections).
+    for floor_rain in (False, True):
+        tier = noah_define_tier(floor_rain, floor_rain, True)
+        label = ",".join(f"{key}={value}" for key, value in tier)
+        units.append(Unit(f"kernels:noah[{label}]",
+                          K.module_source_int_defines("noah", tier, kernel_dir=kdir),
+                          K.module_options("noah"), []))
+        for name in ("noah_ua", "noah_mosaic_ua"):
+            units.append(Unit(f"kernels:{name}[{label}]",
+                              noah_define_prefix(floor_rain, floor_rain, True)
+                              + K.module_source(name, kernel_dir=kdir),
+                              K.module_options(name), []))
     # Correct-mode ML1 (RunConfig.pbl_boulac_down_sign and
     # mynn_boulac_down_sign, both on by default): the BouLac downward length
     # sign define on the shipped tier (woof.core.boulac, keps, mynn_pbl_gpu).

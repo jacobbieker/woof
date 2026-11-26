@@ -730,12 +730,12 @@ Notes on the 1.1.7 sync:
     turns every one on / off whatever the mode (the hex door takes
     `--quirk-corrections all|none`); a key set false next to `"all"` is
     refused by name, and a key set next to `"none"` wins. On the WRF route
-    the keys are correct-mode findings FQ1-FQ6 and FQ8, so the run receipt's
+    the keys are correct-mode findings FQ1-FQ6, FQ8 and FQ9, so the run receipt's
     `correct_mode` block names them.
     It covers `gf_deep_rain_evaporation_booking`, `ysu_surface_heat_exner`,
     `mynn_sfclay_psih_zolzt`, `noah_smc_floor_booking`,
-    `thompson_rain_snow_closure`, `rrtmg_lw_model_top` and
-    `noah_land_ice_rain_runoff` (WRF route);
+    `thompson_rain_snow_closure`, `rrtmg_lw_model_top`,
+    `noah_land_ice_rain_runoff` and `noah_snow_series_conductivity` (WRF route);
     `--undriven-species-boundary wrf-flow-dependent` (hex, regional, where its drivers carry it; the only
     flag `--quirk-corrections` sets); `woof_land_ice_isomip_freezing_salinity`,
     `woof_bottom_drag_dry_edges`, `woof_rayleigh_bottom_friction` and
@@ -792,6 +792,12 @@ Notes on the 1.1.7 sync:
     glacier leaves the water budget unbooked. The option adds it to the
     surface runoff (finding FQ8); a WRF-Hydro coupling carries it. Not yet
     scored against observations.
+  - `noah_snow_series_conductivity` (Noah, `sf_surface_physics = 2`, snow-covered
+    land points, WRF route). WRF's `SFLX` computes the series (harmonic)
+    snow-soil conductivity `DF1H` and never reads it; the soil heat flux
+    blends the arithmetic `DF1A`, which overstates the conductivity of a thin
+    pack. The option blends `DF1H` (finding FQ9); a snow-free or fully
+    covered point is unchanged. Not yet scored against observations.
 - **Observation-driven corrections, each opt-in and off by default** (GF's
   is also a quirk correction, so it is on in correct mode):
   - `gf_deep_rain_evaporation_booking` (Grell-Freitas, `cu_physics = 3`).

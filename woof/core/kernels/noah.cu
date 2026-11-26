@@ -2097,6 +2097,15 @@ void noah_column_body(const int* __restrict__ ivgtyp,
         real frcsno = snowhk / dtot;
         real frcsoi = dsoil / dtot;
         real df1a = frcsno * sncond + frcsoi * df1;
+#ifdef NOAH_SNOW_SERIES_CONDUCTIVITY
+        // RunConfig.noah_snow_series_conductivity: WRF computes the series
+        // (harmonic) conductivity DF1H (module_sf_noahlsm.F:649) and never
+        // reads it; the flux it blends is the thickness-weighted arithmetic
+        // (parallel-flow) DF1A (:656, :663).  Heat crossing the snow and
+        // then the half soil layer is in series: DF1H takes DF1A's place in
+        // the SNCOVR blend, as the commented line at :654-655 intended.
+        df1a = (sncond * df1) / (frcsoi * sncond + frcsno * df1);
+#endif
         df1 = df1a * sncovr + df1 * (1.0f - sncovr);
         ssoil = df1 * (t1 - stc[0]) / dtot;
     }

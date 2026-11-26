@@ -96,7 +96,7 @@ MY1  WRF 4.6.1's MYNN (and every MYNN-EDMF before NCAR/MYNN-EDMF f3c9d9e,
      MY1 as uncorrected; GSD MYNN 4.1 (gsd_41) adds the flux with its sign
      and does not carry it.
 
-FQ1-FQ6 and FQ8 are the fork's quirk ledger on the WRF route (woof.quirk_corrections,
+FQ1-FQ6, FQ8 and FQ9 are the fork's quirk ledger on the WRF route (woof.quirk_corrections,
 ``woof_quirk_corrections``): corrections of WRF 4.7.1 arithmetic that
 contradicts itself, each with its own key.  Like the findings above they are
 on in correct mode and off in exact mode (and in a strict WRF process).
@@ -132,6 +132,13 @@ FQ8  Noah (sf_surface_physics = 2) on a land-ice point keeps the liquid rain
      the rain leaves the water budget; the key books it as surface runoff
      (``noah_land_ice_rain_runoff``).  A WRF-Hydro coupling carries it (the
      glacial arm writes SFCRUNOFF, never the routing planes).
+FQ9  Noah (sf_surface_physics = 2) on a snow-covered land point computes the
+     series (harmonic) snow-soil conductivity DF1H and never reads it; the
+     soil heat flux blends the thickness-weighted arithmetic mean DF1A, a
+     parallel-flow mean of layers the heat crosses in series, which
+     overstates the conductivity of a thin snowpack over soil.  The key
+     blends DF1H (``noah_snow_series_conductivity``); a snow-free column and
+     a fully snow-covered one (SNCOVR > 0.97) are unchanged.
 
 WHICH SCHEMES CARRY EACH FINDING is data too (:attr:`Correction.carriers`),
 separate from which schemes a key corrects (:data:`KEY_SCOPE`).  A domain
@@ -342,6 +349,14 @@ CORRECTIONS: tuple[Correction, ...] = (
             "runoff, where WRF drops it"),
         carriers=(("sf_surface_physics", (2,)),),
     ),
+    Correction(
+        finding="FQ9",
+        keys=("noah_snow_series_conductivity",),
+        summary=(
+            "Noah blends the series snow-soil conductivity into the soil "
+            "heat flux, where WRF computes it and uses the arithmetic mean"),
+        carriers=(("sf_surface_physics", (2,)),),
+    ),
 )
 
 #: Finding -> ``(selector, absent value, values)``: a carrier that is a
@@ -397,7 +412,7 @@ KEY_SCOPE: Mapping[str, tuple[str, tuple[int, ...]]] = {
     "mynn_boulac_down_sign": ("bl_pbl_physics", (5,)),
     # ML1's second key: the BouLac (8) and k-epsilon (17) length kernels.
     "pbl_boulac_down_sign": ("bl_pbl_physics", (8, 17)),
-    # FQ1-FQ6 and FQ8, the fork's quirk ledger (woof.quirk_corrections).
+    # FQ1-FQ6, FQ8 and FQ9, the fork's quirk ledger (woof.quirk_corrections).
     "gf_deep_rain_evaporation_booking": ("cu_physics", (3,)),
     "ysu_surface_heat_exner": ("bl_pbl_physics", (1,)),
     "mynn_sfclay_psih_zolzt": ("sf_sfclay_physics", (5,)),
@@ -408,6 +423,8 @@ KEY_SCOPE: Mapping[str, tuple[str, tuple[int, ...]]] = {
     "rrtmg_lw_model_top": ("ra_lw_physics", (4,)),
     # FQ8: Noah's glacial arm (sf_surface_physics = 2, land-ice points).
     "noah_land_ice_rain_runoff": ("sf_surface_physics", (2,)),
+    # FQ9: Noah's land SFLX under snow (sf_surface_physics = 2).
+    "noah_snow_series_conductivity": ("sf_surface_physics", (2,)),
 }
 
 #: Key -> ``(selector, values)``: selections inside :data:`KEY_SCOPE` under

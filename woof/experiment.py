@@ -341,6 +341,9 @@ _DOMAIN_RUN_OVERRIDES = (
     # The Noah land-ice rain runoff (FQ8), on the same terms as FQ4: a
     # [shared] value reaches the sf_surface_physics = 2 domains only.
     "noah_land_ice_rain_runoff",
+    # The Noah snow series conductivity (FQ9), on the same terms: a [shared]
+    # value reaches the sf_surface_physics = 2 domains only.
+    "noah_snow_series_conductivity",
     # The umbrella over the opt-in quirk corrections (woof.quirk_corrections):
     # per domain like the corrections it turns on, each where its scheme runs.
     "woof_quirk_corrections",
@@ -5114,6 +5117,9 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
         if (tree_runs_noah and kw.get("sf_surface_physics", RunConfig.sf_surface_physics) != 2
                 and "noah_land_ice_rain_runoff" not in dom):
             kw["noah_land_ice_rain_runoff"] = False
+        if (tree_runs_noah and kw.get("sf_surface_physics", RunConfig.sf_surface_physics) != 2
+                and "noah_snow_series_conductivity" not in dom):
+            kw["noah_snow_series_conductivity"] = False
         if (tree_runs_thompson
                 and kw.get("mp_physics", RunConfig.mp_physics) not in THOMPSON_RAIN_SNOW_MP
                 and "thompson_rain_snow_closure" not in dom):
@@ -6541,6 +6547,7 @@ def _public_config_value(value):
                                   ("thompson_rain_snow_closure", False),
                                   ("rrtmg_lw_model_top", False),
                                   ("noah_land_ice_rain_runoff", False),
+                                  ("noah_snow_series_conductivity", False),
                                   *OBSTACLE_RUN_DEFAULTS.items()):
                 value = run_document.get(name, default)
                 if isinstance(value, list):

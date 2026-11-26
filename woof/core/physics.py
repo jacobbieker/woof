@@ -5341,7 +5341,8 @@ class PhysicsDriver:
                            use_wudapt_lcz=int(getattr(cfg, "use_wudapt_lcz", 0)),
                            urban_water_balance=getattr(cfg, "urban_water_balance", None),
                            smc_floor_booking=_run_reads(cfg, "noah_smc_floor_booking"),
-                           land_ice_rain_runoff=_run_reads(cfg, "noah_land_ice_rain_runoff"))
+                           land_ice_rain_runoff=_run_reads(cfg, "noah_land_ice_rain_runoff"),
+                           snow_series_conductivity=_run_reads(cfg, "noah_snow_series_conductivity"))
         self._run_noah_seaice(cfg, use_scheme_sr,
                               xice_threshold=setup.xice_threshold)
         if active(cfg): after_lsm(f)
@@ -5478,6 +5479,7 @@ class PhysicsDriver:
                            else coupler.noah_kernel_args()),
                     smc_floor_booking=_noah_smc_floor_booking(cfg, hydro),
                     land_ice_rain_runoff=_run_reads(cfg, "noah_land_ice_rain_runoff"),
+                    snow_series_conductivity=_run_reads(cfg, "noah_snow_series_conductivity"),
                     **hydro)
         if self.noah_myj:
             noah_chklowq_myj(f)
