@@ -43,9 +43,13 @@ KERNELS = Path(__file__).resolve().parent / "kernels"
 @lru_cache(maxsize=None)
 def _device_module(real: str, device: int, build: tuple = ()):
     import cupy as cp
+    from woof.certify.kernel_manifest import record_module
     source = (KERNELS / "bigstep.cu").read_text(encoding="utf-8")
-    return cp.RawModule(code=source,
-                        options=("--fmad=false", f"-DWRFPLUS_REAL={real}") + build)
+    options = ("--fmad=false", f"-DWRFPLUS_REAL={real}") + build
+    module = cp.RawModule(code=source, options=options)
+    record_module("woof.grad.wrfplus.bigstep", source=source, options=options,
+                  module=module)
+    return module
 
 
 def _kernel(name: str, dtype):
