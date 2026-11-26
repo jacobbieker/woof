@@ -868,6 +868,12 @@ Notes on the 1.1.7 sync:
     `--w-damping` and `--inflow-perturbation` run on both the WOOF column
     route and the MPAS v8.4.2 suite route (R2), where the depth is the
     suite's `hpbl`;
+  - WRF diffusion and advection settings (`diff_opt`, `khdif`, `kvdif`,
+    `c_s`, `mix_full_fields` and the `*_adv_order` options) pass on hex
+    only where MPAS-A runs the same operator (`diff_opt=0` with
+    `--horiz-mixing off`, `v_mom_adv_order=3`, `mix_full_fields=true`,
+    `khdif=0`, `kvdif=0`). Every other value is refused with the reason
+    the two operators differ and MPAS's own option for it;
   - WRF's flow-dependent specified zone for the microphysics species a
     regional boundary stream does not drive (`woof hex forecast
     --undriven-species-boundary wrf-flow-dependent`: outflow copies the
