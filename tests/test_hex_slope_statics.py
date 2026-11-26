@@ -215,3 +215,24 @@ def test_the_engine_holds_caller_statics_to_its_shape_and_refusals():
         build((np.full(shape, 1.6, np.float32), good[1]))
     with pytest.raises(ValueError, match="finite"):
         build((good[0], np.full(shape, np.nan, np.float32)))
+
+
+def test_a_terrain_of_another_size_and_a_missing_mesh_are_refused():
+    mesh, x, _ = _mesh()
+    with pytest.raises(ValueError, match="terrain has"):
+        ss.mesh_slope_aspect(mesh, np.append(x, 0.0))
+    with pytest.raises(ValueError, match="mesh and terrain"):
+        ss.derive(None, {"slope_mesh": {"mesh": None, "terrain_height_m": x}}, 0)
+
+
+def test_preflight_names_a_planar_grid(tmp_path):
+    import netCDF4
+
+    for flag, refused in (("YES", False), ("NO", True)):
+        path = tmp_path / f"{flag}.grid.nc"
+        with netCDF4.Dataset(path, "w") as dataset:
+            dataset.on_a_sphere = flag
+        problem = ss.planar_mesh_problem(path)
+        assert (problem is not None) == refused
+        if refused:
+            assert "slope_rad = 0" in problem

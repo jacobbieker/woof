@@ -71,26 +71,34 @@ def slope_aspect(lat_rad, lon_rad, cells_on_cell, n_edges_on_cell, height_m, *, 
         raise ValueError(f"sphere radius {radius_m!r} must be finite and positive")
     if not np.all(np.isfinite(h)):
         raise ValueError("terrain height must be finite")
-    slot = np.arange(cells.shape[1])[None, :]
-    present = (slot < counts[:, None]) & (cells >= 0) & (cells < n)
-    neighbour = np.where(present, cells, np.arange(n)[:, None])
     p = _unit(lat, lon)
     east = np.stack([-np.sin(lon), np.cos(lon), np.zeros_like(lon)], axis=-1)
     north = np.stack([-np.sin(lat) * np.cos(lon), -np.sin(lat) * np.sin(lon), np.cos(lat)], axis=-1)
-    d = p[neighbour] - p[:, None, :]
-    de = np.einsum("ijk,ik->ij", d, east)
-    dn = np.einsum("ijk,ik->ij", d, north)
-    chord_plane = np.hypot(de, dn)
-    angle = 2.0 * np.arcsin(np.clip(np.linalg.norm(d, axis=-1) / 2.0, 0.0, 1.0))
-    scale = np.where(chord_plane > 0, radius_m * angle / np.where(chord_plane > 0, chord_plane, 1.0), 0.0)
-    de = np.where(present, de * scale, 0.0)
-    dn = np.where(present, dn * scale, 0.0)
-    dh = np.where(present, h[neighbour] - h[:, None], 0.0)
-    a11 = np.sum(de * de, axis=1)
-    a12 = np.sum(de * dn, axis=1)
-    a22 = np.sum(dn * dn, axis=1)
-    b1 = np.sum(de * dh, axis=1)
-    b2 = np.sum(dn * dh, axis=1)
+    a11 = np.zeros(n)
+    a12 = np.zeros(n)
+    a22 = np.zeros(n)
+    b1 = np.zeros(n)
+    b2 = np.zeros(n)
+    # One neighbour slot at a time: O(nCells) memory on a global 3 km mesh.
+    for slot in range(cells.shape[1]):
+        other = cells[:, slot]
+        present = (slot < counts) & (other >= 0) & (other < n)
+        other = np.where(present, other, np.arange(n))
+        d = p[other] - p
+        de = np.einsum("ik,ik->i", d, east)
+        dn = np.einsum("ik,ik->i", d, north)
+        chord_plane = np.hypot(de, dn)
+        angle = 2.0 * np.arcsin(np.clip(np.linalg.norm(d, axis=-1) / 2.0, 0.0, 1.0))
+        scale = np.where(present & (chord_plane > 0),
+                         radius_m * angle / np.where(chord_plane > 0, chord_plane, 1.0), 0.0)
+        de *= scale
+        dn *= scale
+        dh = np.where(present, h[other] - h, 0.0)
+        a11 += de * de
+        a12 += de * dn
+        a22 += dn * dn
+        b1 += de * dh
+        b2 += dn * dh
     det = a11 * a22 - a12 * a12
     # Fewer than two independent directions: no plane, no gradient.
     solvable = det > 1e-12 * np.maximum(a11 * a22, np.finfo(np.float64).tiny)
@@ -125,7 +133,9 @@ def mesh_slope_aspect(mesh: Any, height_m) -> tuple[np.ndarray, np.ndarray]:
     if cells.ndim != 2 or cells.shape[0] != counts.size:
         raise ValueError(f"cellsOnCell {cells.shape} does not fit nEdgesOnCell {counts.shape}")
     radius = float(_mesh_value(mesh, "sphere_radius", 6371229.0))
-    height = np.asarray(height_m, dtype=np.float64).reshape(-1)[: lat.size]
+    height = np.asarray(height_m, dtype=np.float64).reshape(-1)
+    if height.size != lat.size:
+        raise ValueError(f"terrain has {height.size} cells, the mesh {lat.size}")
     return slope_aspect(lat, lon, cells, counts, height, radius_m=radius)
 
 
@@ -134,12 +144,25 @@ def derive(cfg, context: Mapping[str, Any], which: int) -> np.ndarray:
     is ``{"mesh": ..., "terrain_height_m": ...}`` of the run's own cells."""
 
     del cfg
-    staged = context.get("slope_mesh")
-    if not staged:
+    staged = context.get("slope_mesh") or {}
+    if staged.get("mesh") is None or staged.get("terrain_height_m") is None:
         raise ValueError("slope_rad's SLOPE/SLP_AZI are built from the run's mesh and terrain, "
                          "and bind was given neither")
-    key = ("mesh", id(staged["mesh"]))
-    cache = staged.setdefault("_computed", {})
-    if key not in cache:
-        cache[key] = mesh_slope_aspect(staged["mesh"], staged["terrain_height_m"])
-    return cache[key][which]
+    # SLOPE and SLP_AZI come from one fit; the second derivation reuses it.
+    if "_computed" not in staged:
+        staged["_computed"] = mesh_slope_aspect(staged["mesh"], staged["terrain_height_m"])
+    return staged["_computed"][which]
+
+
+def planar_mesh_problem(grid) -> str | None:
+    """Preflight: why slope_rad's mesh fit cannot run on ``grid``, or None."""
+
+    import netCDF4
+
+    with netCDF4.Dataset(str(grid)) as dataset:
+        on_sphere = getattr(dataset, "on_a_sphere", "YES")
+    if str(on_sphere).strip().upper() in ("YES", "TRUE", "1"):
+        return None
+    return (f"slope_rad = 1 builds SLOPE/SLP_AZI on a spherical mesh; {grid} is planar "
+            "(on_a_sphere = NO), whose periodic neighbours the fit does not unwrap; "
+            "run slope_rad = 0")

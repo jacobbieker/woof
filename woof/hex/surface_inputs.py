@@ -313,7 +313,8 @@ _TOPO_SLOPE = SurfaceInput(
     "topo_slope", "SLOPE", "derived", "float32", True,
     "slope_rad's SLOPE (radians) from the least-squares terrain plane through each cell's "
     "cellsOnCell neighbours (woof.hex.slope_statics), in place of WRF's grid stencil",
-    bounds=(0.0, 1.5707964), derive=_slope_derive(0))
+    bounds=(0.0, float(np.nextafter(np.float32(np.pi / 2), np.float32(0)))),
+    derive=_slope_derive(0))
 _TOPO_SLOPE_AZIMUTH = SurfaceInput(
     "topo_slope_azimuth", "SLP_AZI", "derived", "float32", True,
     "slope_rad's SLP_AZI (radians clockwise from north, the downslope-facing direction) from the "
@@ -323,7 +324,7 @@ _TOPO_SLOPE_AZIMUTH = SurfaceInput(
 def _slope_rad_active(cfg) -> bool:
     from woof.core.topo_radiation import topo_shortwave_active
 
-    return bool(int(_value(cfg, "slope_rad"))) and topo_shortwave_active(cfg)
+    return int(_value(cfg, "slope_rad")) == 1 and topo_shortwave_active(cfg)
 
 
 #: Every WRF column scheme that reads per-cell inputs beyond the dozen the hex
