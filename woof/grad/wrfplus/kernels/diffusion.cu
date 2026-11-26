@@ -1448,7 +1448,7 @@ static __device__ Dl h2_vrow_u(const H2Src& s, int k, int j, int i, Dl t)
     Dl vv = (wreal)0.25 * (((h2_v0(s, j, ic) + h2_v0(s, j + 1, ic)) + h2_v0(s, j, im))
                            + h2_v0(s, j + 1, im));
     Dl uu = h2_u0(s, jj, i);
-    Dl speed = h2_addc(h2_sqrt((uu * uu) + (vv * vv)), (wreal)1.0e-15f);
+    Dl speed = h2_addc(h2_sqrt((uu * uu) + (vv * vv)), (wreal)1.0e-15);
     Dl stress;
     if (s.sfc == 1) {
         wreal ustar = (wreal)0.5 * (s.ustm[(size_t)jj * s.nx + ic] + s.ustm[(size_t)jj * s.nx + im]);
@@ -1469,7 +1469,7 @@ static __device__ Dl h2_vrow_v(const H2Src& s, int k, int j, int i, Dl t)
     Dl uu = (((h2_u0(s, jc, i) + h2_u0(s, jm, i)) + h2_u0(s, jc, i + 1)) + h2_u0(s, jm, i + 1))
             / (wreal)4;
     Dl vv = h2_v0(s, j, ii);
-    Dl speed = h2_addc(h2_sqrt((vv * vv) + (uu * uu)), (wreal)1.0e-15f);
+    Dl speed = h2_addc(h2_sqrt((vv * vv) + (uu * uu)), (wreal)1.0e-15);
     Dl stress;
     if (s.sfc == 1) {
         wreal ustar = (wreal)0.5 * (s.ustm[(size_t)jc * s.nx + ii] + s.ustm[(size_t)jm * s.nx + ii]);
@@ -1521,7 +1521,7 @@ static __device__ Dl h2_vrow_s(const H2Src& s, int k, int j, int i, Dl t)
     } else if (s.heat == 2) {   // hflux CASE(1): hfx / cpm
         Dl vapor = s.moist ? h2_in(s, H2_QV, s.qv, s.qvd, R3(0, j, i, s.ny, s.nx))
                            : dl((wreal)0, (wreal)0);
-        Dl cpm = DF_CP * ((wreal)1 + ((wreal)0.8f * vapor));
+        Dl cpm = DF_CP * ((wreal)1 + ((wreal)0.8 * vapor));
         Dl heat_flux = s.hfx[h] / cpm;
         t = t - ((DF_G * heat_flux) / s.dnw[0]);
     }
