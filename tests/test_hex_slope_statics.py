@@ -104,6 +104,19 @@ def test_a_cell_without_two_independent_neighbours_gets_no_gradient():
     a = ss.slope_aspect(lat, lon, noisy, counts, 0.1 * x + 0.05 * y, radius_m=RADIUS)
     b = ss.slope_aspect(lat, lon, cells, counts, 0.1 * x + 0.05 * y, radius_m=RADIUS)
     np.testing.assert_array_equal(a[0], b[0])
+    # Past nEdgesOnCell: an interior cell counting five edges ignores its sixth
+    # slot, whatever cell sits there.
+    centre = int(np.argmin(np.hypot(x, y)))
+    short = counts.copy()
+    short[centre] = 5
+    far = int(np.argmax(np.hypot(x, y)))
+    other = cells.copy()
+    other[centre, 5] = far
+    height = 0.1 * x + 0.05 * y + 1e-3 * (x * y)
+    a = ss.slope_aspect(lat, lon, cells, short, height, radius_m=RADIUS)
+    b = ss.slope_aspect(lat, lon, other, short, height, radius_m=RADIUS)
+    np.testing.assert_array_equal(a[0], b[0])
+    np.testing.assert_array_equal(a[1], b[1])
 
 
 def test_the_fit_refuses_disagreeing_arrays_and_non_finite_terrain():
