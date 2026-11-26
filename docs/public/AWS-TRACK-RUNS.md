@@ -263,8 +263,9 @@ the queue prefix.
 role cannot write, such as a Source Cooperative repository, give the Icechunk
 writer its own keys. `rw_icechunk` reads `WOOF_ICECHUNK_AWS_ACCESS_KEY_ID` and
 `WOOF_ICECHUNK_AWS_SECRET_ACCESS_KEY` (both or neither, plus an optional
-`WOOF_ICECHUNK_AWS_SESSION_TOKEN`) and `WOOF_ICECHUNK_AWS_ENDPOINT_URL` for
-the store alone. The queue, the inputs, the static data and `result_url` keep
+`WOOF_ICECHUNK_AWS_SESSION_TOKEN`), `WOOF_ICECHUNK_AWS_ENDPOINT_URL` and
+`WOOF_ICECHUNK_AWS_REGION` (set it when the store's bucket is in another
+region than the job) for the store alone. The queue, the inputs, the static data and `result_url` keep
 the job role. Map the variables from Secrets Manager in the job definition's
 `secrets`, with an execution role that may read the secret, so no key is in
 the job document, the queue or the logs:

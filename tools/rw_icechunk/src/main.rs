@@ -4,8 +4,8 @@ use bytes::Bytes;
 use futures::{StreamExt, TryStreamExt, stream};
 use icechunk::{
     Repository, Store,
-    format::ByteRange,
     config::{S3Credentials, S3StaticCredentials},
+    format::ByteRange,
     storage::{S3Options, new_local_filesystem_storage, new_s3_storage},
 };
 use netcdf_reader::{NcAttribute, NcFile, NcSliceInfo, NcSliceInfoElem, NcType};
@@ -379,19 +379,25 @@ fn chunks(a: &Array, time: usize, shape: &[usize]) -> Result<Vec<(String, Bytes)
 /// `WOOF_ICECHUNK_AWS_SESSION_TOKEN`.  Unset, the ambient chain (instance
 /// role, job role, `AWS_PROFILE`, `AWS_*`) is used as before, so the queue,
 /// inputs and results keep the job's identity either way.
-fn store_credentials(
-    var: impl Fn(&str) -> Option<String>,
-) -> Result<Option<S3Credentials>> {
-    let key = var("WOOF_ICECHUNK_AWS_ACCESS_KEY_ID").filter(|s| !s.is_empty());
-    let secret = var("WOOF_ICECHUNK_AWS_SECRET_ACCESS_KEY").filter(|s| !s.is_empty());
+fn store_credentials(var: impl Fn(&str) -> Option<String>) -> Result<Option<S3Credentials>> {
+    let set = |name: &str| set_var(&var, name);
+    let key = set("WOOF_ICECHUNK_AWS_ACCESS_KEY_ID");
+    let secret = set("WOOF_ICECHUNK_AWS_SECRET_ACCESS_KEY");
+    let session_token = set("WOOF_ICECHUNK_AWS_SESSION_TOKEN");
     match (key, secret) {
-        (None, None) => Ok(None),
+        (None, None) => {
+            ensure!(
+                session_token.is_none(),
+                "WOOF_ICECHUNK_AWS_SESSION_TOKEN needs WOOF_ICECHUNK_AWS_ACCESS_KEY_ID \
+                 and WOOF_ICECHUNK_AWS_SECRET_ACCESS_KEY"
+            );
+            Ok(None)
+        }
         (Some(access_key_id), Some(secret_access_key)) => {
             Ok(Some(S3Credentials::Static(S3StaticCredentials {
                 access_key_id,
                 secret_access_key,
-                session_token: var("WOOF_ICECHUNK_AWS_SESSION_TOKEN")
-                    .filter(|s| !s.is_empty()),
+                session_token,
                 expires_after: None,
             })))
         }
@@ -402,12 +408,30 @@ fn store_credentials(
     }
 }
 
+/// A variable's value with surrounding whitespace (a secret's trailing
+/// newline) removed; blank counts as unset.
+fn set_var(var: &impl Fn(&str) -> Option<String>, name: &str) -> Option<String> {
+    var(name)
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
 /// The store's endpoint: `WOOF_ICECHUNK_AWS_ENDPOINT_URL` for the store
 /// alone, else the ambient `AWS_ENDPOINT_URL_S3` / `AWS_ENDPOINT_URL`.
 fn store_endpoint(var: impl Fn(&str) -> Option<String>) -> Option<String> {
-    ["WOOF_ICECHUNK_AWS_ENDPOINT_URL", "AWS_ENDPOINT_URL_S3", "AWS_ENDPOINT_URL"]
-        .into_iter()
-        .find_map(|name| var(name).filter(|s| !s.is_empty()))
+    [
+        "WOOF_ICECHUNK_AWS_ENDPOINT_URL",
+        "AWS_ENDPOINT_URL_S3",
+        "AWS_ENDPOINT_URL",
+    ]
+    .into_iter()
+    .find_map(|name| set_var(&var, name))
+}
+
+/// The store's region when it differs from the job's:
+/// `WOOF_ICECHUNK_AWS_REGION`, else the ambient chain's.
+fn store_region(var: impl Fn(&str) -> Option<String>) -> Option<String> {
+    set_var(&var, "WOOF_ICECHUNK_AWS_REGION")
 }
 
 async fn repository(url: &str) -> Result<Repository> {
@@ -427,6 +451,9 @@ async fn repository(url: &str) -> Result<Repository> {
             .with_force_path_style(endpoint.is_some());
         if let Some(endpoint) = endpoint {
             opts = opts.with_endpoint_url(endpoint);
+        }
+        if let Some(region) = store_region(env) {
+            opts = opts.with_region(region);
         }
         new_s3_storage(
             opts,
@@ -655,17 +682,21 @@ mod tests {
     use super::*;
 
     fn vars(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
-        let map: BTreeMap<String, String> =
-            pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        let map: BTreeMap<String, String> = pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
         move |name: &str| map.get(name).cloned()
     }
 
     #[test]
     fn store_credentials_absent_uses_ambient_chain() {
         assert!(store_credentials(vars(&[])).unwrap().is_none());
-        assert!(store_credentials(vars(&[("WOOF_ICECHUNK_AWS_ACCESS_KEY_ID", "")]))
-            .unwrap()
-            .is_none());
+        assert!(
+            store_credentials(vars(&[("WOOF_ICECHUNK_AWS_ACCESS_KEY_ID", "")]))
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -692,7 +723,10 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("must be set together"), "{err}");
-        assert!(!err.contains("AKID"), "the key must not reach the message: {err}");
+        assert!(
+            !err.contains("AKID"),
+            "the key must not reach the message: {err}"
+        );
     }
 
     #[test]
@@ -709,5 +743,42 @@ mod tests {
             Some("https://generic".into())
         );
         assert_eq!(store_endpoint(vars(&[])), None);
+    }
+
+    #[test]
+    fn store_credentials_trim_a_secret_newline() {
+        match store_credentials(vars(&[
+            ("WOOF_ICECHUNK_AWS_ACCESS_KEY_ID", "AKIDEXAMPLE\n"),
+            ("WOOF_ICECHUNK_AWS_SECRET_ACCESS_KEY", " secret\n"),
+            ("WOOF_ICECHUNK_AWS_SESSION_TOKEN", "  "),
+        ])) {
+            Ok(Some(S3Credentials::Static(c))) => {
+                assert_eq!(c.access_key_id, "AKIDEXAMPLE");
+                assert_eq!(c.secret_access_key, "secret");
+                assert_eq!(c.session_token, None);
+            }
+            other => panic!("expected static credentials, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn store_session_token_without_a_pair_is_refused() {
+        let err = store_credentials(vars(&[("WOOF_ICECHUNK_AWS_SESSION_TOKEN", "tok")]))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("needs WOOF_ICECHUNK_AWS_ACCESS_KEY_ID"),
+            "{err}"
+        );
+        assert!(!err.contains("tok\""), "{err}");
+    }
+
+    #[test]
+    fn store_region_only_from_the_store_variable() {
+        assert_eq!(
+            store_region(vars(&[("WOOF_ICECHUNK_AWS_REGION", "us-west-2\n")])),
+            Some("us-west-2".into())
+        );
+        assert_eq!(store_region(vars(&[("AWS_REGION", "us-east-1")])), None);
     }
 }
