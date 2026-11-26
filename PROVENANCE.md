@@ -210,7 +210,7 @@ bytes are outside the numerical oracle.
     (compiler.compile_using_nvrtc), and 5 other site(s)
   - `--fmad=false` -- `woof/chem_micm.py:684` (cp.RawKernel), and 2 other
     site(s)
-  - `-fmad=false` -- `woof/core/dycore.py:327` (cp.ElementwiseKernel), and 2
+  - `-fmad=false` -- `woof/core/dycore.py:338` (cp.ElementwiseKernel), and 2
     other site(s)
   - `--std=c++17` `--use_fast_math` -- `woof/hex/waves.py:486`
     (cp.RawModule), and 1 other site(s)

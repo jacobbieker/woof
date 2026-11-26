@@ -415,7 +415,7 @@
     },
     {
       "file": "README.md",
-      "line": 1203,
+      "line": 1206,
       "kind": "prose",
       "anchor": "pairs was checked under both subnormal modes",
       "anchor_sha256": "2d72bca9880fb9136b484ba3ebdab81af419d5df3061964499ecb9120e7d562e",
@@ -1449,7 +1449,7 @@
     },
     {
       "file": "docs/public/CONFIGURATION.md",
-      "line": 833,
+      "line": 842,
       "kind": "prose",
       "anchor": "| `ysu_version` | no stock namelist spelling | `\"wrf_480\"` | `\"wrf_480\"`, `\"wrf_461\"` | Corrected YSU default. WRF 4.8 MMM `550b5b4` removes the old efficiency offset and caps `0.2*8*tmp1` at 0.4. `[shared]` selects the generation; namelist import uses the corrected default and preserves an explicit physics-selector comment (`! gpuwm-physics-selectors-v1: {...}`). `wrf_461` under default arithmetic reproduces 2.8.9's YSU kernel, under its restart identity. Under `GPUWM_WRF_EXACT=1` it matches WRF 4.6.1 `bl_ysu_run` word for word on the 1,188-column test set, with the same declared exceptions as `wrf_480` (YSU surface drag removed on mixed BEP urban columns; the bounded PBL-height search on four-level columns), under its own restart identity, so a strict-mode `wrf_461` checkpoint from 2.9.0 or earlier is refused rather than continued with different arithmetic. Four-level shallow columns use the declared bounded PBL-height search and zero final TKE word. A generation change is refused on restart; old headers without a selector mean `wrf_461`. The corrected path uses the shared no-FTZ loader and WOOF's own math routines |",
       "anchor_sha256": "fce15ee2f0dbd461c7726780e0bbe513e810bf65e03e7facb97c388cdb96fb51",
@@ -17597,7 +17597,7 @@
     },
     {
       "file": "tests/test_kernel_source_freeze_per_module.py",
-      "line": 360,
+      "line": 361,
       "kind": "prose",
       "anchor": "# Native bulk source/units bridge, both GPU receipts; FTZ disabled.",
       "anchor_sha256": "9c5b1bfcad7d5bf11f4f32b966fd7da5524c05ee6f2123afa2fca3c1d512c6b1",
@@ -17608,7 +17608,7 @@
     },
     {
       "file": "tests/test_kernel_source_freeze_per_module.py",
-      "line": 393,
+      "line": 394,
       "kind": "prose",
       "anchor": "# gp-closure: gathered seeding with explicit subnormal rounding.",
       "anchor_sha256": "a3be39cfd747d4d6336b7e46a3764a0f3bfc687e1a9643c90a4367ed28a58e78",
@@ -17619,7 +17619,7 @@
     },
     {
       "file": "tests/test_kernel_source_freeze_per_module.py",
-      "line": 416,
+      "line": 417,
       "kind": "prose",
       "anchor": "# 6106e4e31 feat(ftz): measure FP32 subnormal handling on all five compile routes",
       "anchor_sha256": "aeaff2cf5e0a44ed514211a378f7df40b0f2453a2b53ec4e24eaab150458f236",
@@ -17630,7 +17630,7 @@
     },
     {
       "file": "tests/test_kernel_source_freeze_per_module.py",
-      "line": 417,
+      "line": 418,
       "kind": "prose",
       "anchor": "\"ftz_probe\":",
       "anchor_sha256": "d634ad37cf3c8eaa3dcd7b71893f4029a557b07e1fbce46b4225d8cc5d02a20c",
@@ -17641,7 +17641,7 @@
     },
     {
       "file": "tests/test_kernel_source_freeze_per_module.py",
-      "line": 691,
+      "line": 692,
       "kind": "prose",
       "anchor": "# 72 flushed subnormal tendencies (du 93207, dv 46603, tke 2022, el 13,",
       "anchor_sha256": "2704b2207eb63b10f2bb455dfea093eeb02848e87adea80abe16b78821ac4f0f",
@@ -17652,7 +17652,7 @@
     },
     {
       "file": "tests/test_kernel_source_freeze_per_module.py",
-      "line": 1074,
+      "line": 1075,
       "kind": "prose",
       "anchor": "# rounded reciprocal for sm_120 under -ftz=true.  sm_89 compiles the",
       "anchor_sha256": "65f7d7b6e8716f3e9287b3d322e8d89e411873d4f1bee04bc9503db47a459d66",
@@ -17663,7 +17663,7 @@
     },
     {
       "file": "tests/test_kernel_source_freeze_per_module.py",
-      "line": 1088,
+      "line": 1089,
       "kind": "prose",
       "anchor": "# NVRTC loader (woof/core/terrain_drag.py), -fmad=false --ftz=false.",
       "anchor_sha256": "e093e01f408f7a852f2f5bfc26ed2f57fe4ebe5d5032920e0f87d002484e083b",
@@ -17674,7 +17674,7 @@
     },
     {
       "file": "tests/test_kernel_source_freeze_per_module.py",
-      "line": 1114,
+      "line": 1115,
       "kind": "prose",
       "anchor": "# loader (woof/fire/_device.py), -fmad=false --ftz=false, with",
       "anchor_sha256": "256f4c889b78910d886d5711bc73e3d4345ec08490f8b807a1a14afc818f50dc",
@@ -17685,7 +17685,7 @@
     },
     {
       "file": "tests/test_kernel_source_freeze_per_module.py",
-      "line": 1174,
+      "line": 1175,
       "kind": "prose",
       "anchor": "# NaNs, subnormals, division extremes, broadcasts and alias fallbacks.",
       "anchor_sha256": "1b0d625ba8d6bc1e98db90ae7b14aec3b184597d8343edb3656aae8e265f4ddd",
@@ -17696,7 +17696,7 @@
     },
     {
       "file": "tests/test_kernel_source_freeze_per_module.py",
-      "line": 1308,
+      "line": 1309,
       "kind": "prose",
       "anchor": "# WRF column oracle at every non-FTZ word",
       "anchor_sha256": "3e0b346ebd3c9373d111fd292b13931a5c2794a4eb90d89d17d0da08eaddcd53",
@@ -17707,21 +17707,10 @@
     },
     {
       "file": "tests/test_kernel_source_freeze_per_module.py",
-      "line": 1624,
+      "line": 1627,
       "kind": "prose",
       "anchor": "# ABS sign clearing includes negative zero, subnormals and signed NaNs;",
       "anchor_sha256": "2316c8314eaf19a4219ba9b29a5d5fe8a4c63479e275c556b00b09c1d0319d02",
-      "route": null,
-      "mechanism": null,
-      "asserted_token": null,
-      "attribution": "unattributed"
-    },
-    {
-      "file": "tests/test_kernel_source_freeze_per_module.py",
-      "line": 1750,
-      "kind": "prose",
-      "anchor": "# Selected Group A loader header from the delivered 58-sfclay-noftz-mynn-mm5-eta",
-      "anchor_sha256": "af71af75c23481d8516a7ad61f5d06630200538f9a10ee7d5b77655ca1f738eb",
       "route": null,
       "mechanism": null,
       "asserted_token": null,
@@ -17751,7 +17740,7 @@
     },
     {
       "file": "tests/test_kernel_source_freeze_per_module.py",
-      "line": 1761,
+      "line": 1759,
       "kind": "prose",
       "anchor": "# Selected Group A loader header from the delivered 58-sfclay-noftz-mynn-mm5-eta",
       "anchor_sha256": "af71af75c23481d8516a7ad61f5d06630200538f9a10ee7d5b77655ca1f738eb",
@@ -17762,7 +17751,18 @@
     },
     {
       "file": "tests/test_kernel_source_freeze_per_module.py",
-      "line": 1763,
+      "line": 1764,
+      "kind": "prose",
+      "anchor": "# Selected Group A loader header from the delivered 58-sfclay-noftz-mynn-mm5-eta",
+      "anchor_sha256": "af71af75c23481d8516a7ad61f5d06630200538f9a10ee7d5b77655ca1f738eb",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/test_kernel_source_freeze_per_module.py",
+      "line": 1766,
       "kind": "prose",
       "anchor": "'surface_subnormal.cuh': '99d0aaf80b1de9e243c11cbdcebbb16198b76bd40c8207847d9284718f8021d4',",
       "anchor_sha256": "55f7e59c312ffb7b640f7e4aad2ed72ddae5b6424cba333511568e37c2fe0b80",
@@ -17773,7 +17773,7 @@
     },
     {
       "file": "tests/test_kernel_source_freeze_per_module.py",
-      "line": 2038,
+      "line": 2042,
       "kind": "prose",
       "anchor": "# WRF 4.8 water balance and the inherited source-scoped no-FTZ loader.",
       "anchor_sha256": "da8870c403912a185f3cfcf9234acb9ee838c784530fb527bddf8bad7038caa7",
@@ -19896,7 +19896,7 @@
     },
     {
       "file": "tests/test_mp8_frozen.py",
-      "line": 2301,
+      "line": 2307,
       "kind": "prose",
       "anchor": "# columns whose WRF words are subnormal.  Previously 0028b0c2/d6798c07",
       "anchor_sha256": "2273552ce8c301938067130e83c1fde912e3fbce040eb3053f36ad2882d078e0",
@@ -19907,7 +19907,7 @@
     },
     {
       "file": "tests/test_mp8_frozen.py",
-      "line": 2392,
+      "line": 2398,
       "kind": "prose",
       "anchor": "# number: the registry and the FTZ claim census cite them).  Reading:",
       "anchor_sha256": "4a90007bd681f41f447080bf160abb38d140001fc74d06e1c068d6c1b24682f2",
@@ -19918,7 +19918,7 @@
     },
     {
       "file": "tests/test_mp8_frozen.py",
-      "line": 2394,
+      "line": 2400,
       "kind": "prose",
       "anchor": "# and after (compute_120 and compute_89, -std=c++17 -ftz=true, the",
       "anchor_sha256": "912c01b4eba12ceb0b9a38e7e12f2d6be4678c197ef8beb37531d3bad6e96fda",
@@ -19929,7 +19929,7 @@
     },
     {
       "file": "tests/test_mp8_frozen.py",
-      "line": 2403,
+      "line": 2409,
       "kind": "prose",
       "anchor": "# (ysu_topo.cuh), because sm_120 DAZes a positive subnormal br in a",
       "anchor_sha256": "95213682b1f4ff47858a38971c980c067c00293727981d421601d9355547e059",
@@ -19940,7 +19940,7 @@
     },
     {
       "file": "tests/test_mp8_frozen.py",
-      "line": 2425,
+      "line": 2431,
       "kind": "prose",
       "anchor": "# 11 FTZ-flushed subnormal tendencies; the BEP table and the topo_wind",
       "anchor_sha256": "1f3263dcf2348d5c9cc210e13e4f0207ed41f6aadff8aae306ad531d26843353",
@@ -19951,7 +19951,7 @@
     },
     {
       "file": "tests/test_mp8_frozen.py",
-      "line": 3496,
+      "line": 3502,
       "kind": "prose",
       "anchor": "\"mynn_surface\": (\"mynn_libm.cuh\", \"surface_subnormal.cuh\"),",
       "anchor_sha256": "24b08eabb0e45d67c39c2086348cd5c3537c319c8eafd2b64b5f5d177974101b",
@@ -64182,7 +64182,7 @@
     },
     {
       "file": "woof/core/dycore.py",
-      "line": 6190,
+      "line": 6203,
       "kind": "prose",
       "anchor": "from woof.core.kernels import load_module_no_ftz",
       "anchor_sha256": "f591a05bab906b8405ad74ecab52ea21be6c5078f3e4dc681c7f7521fcbcca4e",
@@ -64193,7 +64193,7 @@
     },
     {
       "file": "woof/core/dycore.py",
-      "line": 6198,
+      "line": 6211,
       "kind": "prose",
       "anchor": "module = load_module_no_ftz('idealized_forcing', no_fmad=True)",
       "anchor_sha256": "f73ecac069e97465419378b1b58a0fbab99cd2742b7d3fb12c9972aadf67d76f",
@@ -70012,7 +70012,7 @@
     },
     {
       "file": "woof/core/kernels/smag2d.cu",
-      "line": 1362,
+      "line": 1376,
       "kind": "prose",
       "anchor": "// right; halving the rho sum first differs once g*tao is subnormal.",
       "anchor_sha256": "f24c4f981b7191479adf7fdd7abfb7aec382942df9d18cf09a17ad3bcb37d47e",
@@ -70023,7 +70023,7 @@
     },
     {
       "file": "woof/core/kernels/smag2d.cu",
-      "line": 1403,
+      "line": 1417,
       "kind": "prose",
       "anchor": "// right; halving the rho sum first differs once g*tao is subnormal.",
       "anchor_sha256": "f24c4f981b7191479adf7fdd7abfb7aec382942df9d18cf09a17ad3bcb37d47e",
@@ -70034,7 +70034,7 @@
     },
     {
       "file": "woof/core/kernels/smag2d.cu",
-      "line": 2823,
+      "line": 2837,
       "kind": "prose",
       "anchor": "// right; halving the rho sum first differs once g*tao is subnormal.",
       "anchor_sha256": "f24c4f981b7191479adf7fdd7abfb7aec382942df9d18cf09a17ad3bcb37d47e",
@@ -70045,7 +70045,7 @@
     },
     {
       "file": "woof/core/kernels/smag2d.cu",
-      "line": 2861,
+      "line": 2875,
       "kind": "prose",
       "anchor": "// right; halving the rho sum first differs once g*tao is subnormal.",
       "anchor_sha256": "f24c4f981b7191479adf7fdd7abfb7aec382942df9d18cf09a17ad3bcb37d47e",

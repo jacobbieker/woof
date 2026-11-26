@@ -522,10 +522,10 @@ def _common(state):
     values = [_array(state, name) for _, name in _common_fields(state)]
     values += [_F(1.0 / cfg.dx), _F(1.0 / cfg.dy), _F(cfg.dx), _F(cfg.dy),
                _F(state.cf1), _F(state.cf2), _F(state.cf3), np.int32(cfg.moist)]
-    from woof.core.dycore import _boundary_x, _boundary_y
+    from woof.core.dycore import smag_boundary_flags
     dims = tuple(np.int32(value) for value in (
         cfg.nz, cfg.ny, cfg.nx, len(state.storage.specs["phb"].shape) == 3,
-        _boundary_x(cfg), _boundary_y(cfg)))
+        *smag_boundary_flags(cfg)))
     return tuple(values), dims
 
 

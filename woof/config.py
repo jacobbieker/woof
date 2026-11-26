@@ -2686,6 +2686,18 @@ class RunConfig:
     # Correct-mode finding FQ6: on by default, off in physics.mode = 'exact'.
     rrtmg_lw_model_top: bool = _config_field(
         default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
+    # Correction of a WRF 4.7.1 quirk (P3a item 5 follow-up), appended.
+    # compute_diff_metrics (module_diffusion_em.F:7037-7067, 7087-7117)
+    # fills a periodic axis's seam slope (zx at ids and ide, zy at jds and
+    # jde) for levels 1..ktf only, so at the top w level the seam keeps its
+    # cold zero and the top mass level's deformation (defor11, defor22,
+    # defor12) reads a zero slope there.  True takes the true slope at the
+    # seam's top w level, as at every other face; False is WRF's
+    # arithmetic word for word.  Read where diff_opt = 1 or 2 runs and inert
+    # on a bounded axis.  Every earlier woof release ran True.  Correct-mode
+    # finding FQ12: on by default, off in physics.mode = 'exact'.
+    diff_metrics_seam_slope: bool = _config_field(
+        default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
 
 
 def _validate_solar_tsi(cfg) -> None:
@@ -10170,6 +10182,8 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
         raise ConfigurationRefused("thompson_rain_snow_closure must be true or false")
     if type(cfg.rrtmg_lw_model_top) is not bool:
         raise ConfigurationRefused("rrtmg_lw_model_top must be true or false")
+    if type(cfg.diff_metrics_seam_slope) is not bool:
+        raise ConfigurationRefused("diff_metrics_seam_slope must be true or false")
     from woof.quirk_corrections import check_run_config
     check_run_config(cfg)
     # The quirk-ledger keys (correct-mode findings FQ1-FQ6) are on by
