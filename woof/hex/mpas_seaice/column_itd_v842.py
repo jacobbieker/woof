@@ -103,7 +103,8 @@ def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
     """Refuse, by name, what the ITD thermodynamics port does not carry."""
     c = configs
     cv.refuse_unported(c, dims, biogeochemistry=True, z_tracers=True)
-    if ZAP_SNOW_AREA in cv.corrections(c) and not cv.vertical_tracers(c):
+    # refused only when named; under woof_quirk_corrections = 'all' alone it changes nothing
+    if ZAP_SNOW_AREA in cv.named_corrections(c) and not cv.vertical_tracers(c):
         _refuse("woof_v842_corrections", ZAP_SNOW_AREA,
                 "it corrects zap_small_areas' vertical tracer flux, which runs only with the vertical tracers",
                 "config_use_vertical_tracers = .true. with config_use_column_biogeochemistry, or without it")

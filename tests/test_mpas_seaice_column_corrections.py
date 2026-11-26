@@ -293,6 +293,11 @@ def test_zap_snow_area_without_the_vertical_tracers_is_refused():
     case = _case(co.BGC_CARRY_CASES, "itd_bgc_brine_mushy_level_ponds", **{KEY: "zap_snow_area"})
     with pytest.raises(ConfigurationRefusal, match="zap_snow_area"):
         citd.refuse_unported(case["config"], {**case["dims"], "nSnowLayers": 1})
+    # the umbrella alone names no correction: no refusal where the scheme does not run
+    umbrella = _case(co.BGC_CARRY_CASES, "itd_bgc_brine_mushy_level_ponds", woof_quirk_corrections="all")
+    umbrella["config"].pop(KEY, None)
+    assert "zap_snow_area" in cv.corrections(umbrella["config"])
+    citd.refuse_unported(umbrella["config"], {**umbrella["dims"], "nSnowLayers": 1})
 
 
 @requires_gpu

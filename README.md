@@ -747,7 +747,7 @@ Notes on the 1.1.7 sync:
     `set_sfcflux_order`, `ice_velocity_at_cell`,
     `ccsm3_absorbed_solar_layers`, `dedd_zero_volume_ice`,
     `zbgc_c2n_proteins`, `bgc_inactive_diagnostics`, `zsal_solve`,
-    `bgc_snow_new_category` and `subcycle_snow_ice_tracers`;
+    `bgc_snow_new_category`, `subcycle_snow_ice_tracers` and `zap_snow_area`;
     and the MPAS-Seaice velocity solver's `planar_metric_terms`,
     `periodic_local_coords` and `weak_ridge_delta`.
     The list and its values are in
