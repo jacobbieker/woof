@@ -37,6 +37,10 @@ rm -rf "$R"; mkdir -p "$R"; cd "$R"
 for f in "$PLUS"/run/*; do b=$(basename "$f")
   case $b in namelist.input|*.exe|wrfinput_d01|wrfbdy_d01|README*) ;; *) ln -sf "$f" "$b";; esac
 done
+# WRFPLUS (and so da_wrfvar.exe's nonlinear model) is a real*8 build: its
+# radiation reads the _DBL tables under the plain names, as WRFPLUS's run
+# directory is set up
+for f in "$PLUS"/run/*_DBL; do [ -e "$f" ] && ln -sf "$f" "$(basename "${f%_DBL}")"; done
 ln -sf "$S/var/build/da_wrfvar.exe" .
 ln -sf "$S/run/LANDUSE.TBL" .
 cp "${BE:-$D/be/be.dat}" be.dat
@@ -68,7 +72,9 @@ want = {
 if lane == "l1":
     want["physics"] = {k: "0" for k in ("mp_physics", "cu_physics", "bl_pbl_physics", "ra_lw_physics",
                                         "ra_sw_physics", "sf_sfclay_physics", "sf_surface_physics",
-                                        "mp_physics_ad", "cu_physics_ad", "bl_pbl_physics_ad")}
+                                        "mp_physics_ad")}
+    # WRFPLUS has no cu/bl_pbl _ad keys: its simplified TL/AD PBL and
+    # cumulus (98) follow cu_physics / bl_pbl_physics being non-zero
     want["dynamics"]["diff_opt"] = "0"
 lines = open(src).read().splitlines()
 out, group, seen = [], None, set()
@@ -106,6 +112,8 @@ grep -qi "^var4d=.true.," namelist.input && grep -qi "^use_theta_m=0," namelist.
   && grep -qi "^var4d_detail_out=.true.," namelist.input \
   || { echo "the 4D-Var settings did not reach namelist.input" >&2; exit 2; }
 status=0
+# WRF's automatic arrays (dolph's DFI weights onward) overrun the default 8 MB stack
+ulimit -s unlimited
 /usr/bin/time -v ./da_wrfvar.exe > wrfda.out 2> time.txt || status=$?
 grep -E "Elapsed|Maximum resident" time.txt
 grep -q "WRF-Var completed successfully" rsl.out.0000 wrfda.out 2>/dev/null \
