@@ -4561,7 +4561,7 @@
    },
    {
     "file": "woof/core/kernels/sfs_output.cu",
-    "sha256": "f8df238d672aae46bfbe83e71fdd322feced36a8bda503544f9a9c2701236da9"
+    "sha256": "ccd9df3122703ac600d46a1840120e18581e98b090959f14d1a82fa6518f61bc"
    },
    {
     "file": "woof/core/kernels/shcu_deng.cu",
@@ -4593,7 +4593,7 @@
    },
    {
     "file": "woof/core/kernels/smag2d.cu",
-    "sha256": "379c2013faaaa3df1ae7fbdbc68cc15cf9f6334d55bf2511083287d126b88b0f"
+    "sha256": "854ee250c242baa7d9fd6aba459d6e5f460261f51070d61a420fc9442c6d9dc1"
    },
    {
     "file": "woof/core/kernels/smag2d_theta_m.cu",
@@ -4601,7 +4601,7 @@
    },
    {
     "file": "woof/core/kernels/smag2d_tke_faces.cu",
-    "sha256": "421c718311e7724d3fd5ba733bfd3c59eca0cf828a753d284bac6e3142128f59"
+    "sha256": "36b322176076c25c1d14bb2512af740c635fe21a820495be183c39642f067d8e"
    },
    {
     "file": "woof/core/kernels/smag2d_uv_faces.cu",
@@ -5181,7 +5181,7 @@
    },
    {
     "file": "woof/grad/wrfplus/kernels/diffusion.cu",
-    "sha256": "9e1bb2643bf94b015db6beeba44dda08d151dc6380e0da9483abba05a1921018"
+    "sha256": "704980a6319a4b2ac665da555226d7d7cd7a23b60312b942101c91a905c6e009"
    },
    {
     "file": "woof/grad/wrfplus/kernels/lbc.cu",
@@ -5683,7 +5683,7 @@
    },
    {
     "file": "woof/core/dycore.py",
-    "sha256": "c4bae2df8f3514f56a483fd9d7f85dfc2d96aa9bf9f0f3bf079f7183f28ad886"
+    "sha256": "f15d7870daa49cf813de0e15bd1c10bf360d91c8814debd83431e551e2c73fde"
    },
    {
     "file": "woof/core/etanew.py",
