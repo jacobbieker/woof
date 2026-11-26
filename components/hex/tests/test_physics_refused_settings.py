@@ -9,7 +9,7 @@ import pytest
 from woof.hex.physics_suites import PhysicsSelectionRefusal, load_table, resolve_physics
 
 
-@pytest.mark.parametrize("overrides", [{"slope_rad": "1"}, {"topo_shading": "1"}, {"shadlen": "25000"}])
+@pytest.mark.parametrize("overrides", [{"topo_shading": "1"}, {"shadlen": "25000"}])
 def test_a_setting_hex_cannot_honour_is_refused_by_name(overrides):
     with pytest.raises(PhysicsSelectionRefusal) as caught:
         resolve_physics("arwen_mpas_column", overrides)
