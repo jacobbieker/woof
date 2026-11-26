@@ -1,9 +1,10 @@
 """Which WRF release WOOF-ArWen is pinned against: ``wrf_reference``.
 
 WOOF-ArWen's bitwise referee moved from WRF 4.7.1 to WRF v4.8.0 (released
-2026-06-08).  4.7.1 stays selectable as the previous pin.  This module is
-the one authority for that choice: data plus resolvers, importing nothing
-heavy at module scope.
+2026-06-08), and the fork moves it on to WRF v4.8.1 (bug-fix release,
+2026-11-23).  4.8.0 and 4.7.1 stay selectable as the previous pins.  This
+module is the one authority for that choice: data plus resolvers, importing
+nothing heavy at module scope.
 
 * ``wrf_reference`` is one user-facing key: ``[shared]`` of an experiment
   TOML, ``[run]`` of a legacy RunConfig TOML, ``woof import-namelist
@@ -17,15 +18,21 @@ heavy at module scope.
   does today.
 * Omitted, the engine runs its defaults: the newest generation of every
   scheme (decided 2026-11-08: defaults are the latest upstream versions,
-  pins are for bitwise proof).  ``"4.8.0"`` pins the schemes WRF 4.8.0
-  itself ships, ``"4.7.1"`` the ones WRF 4.7.1 ships.  Which generation
+  pins are for bitwise proof).  ``"4.8.1"``, ``"4.8.0"`` and ``"4.7.1"``
+  pin the schemes each of those releases itself ships.  Which generation
   each release runs is the importer's release table
   (:data:`woof.namelist_import.WRF_RELEASE_GENERATIONS`): one table for
   the namelist door and the run door, so the two cannot disagree.
-* The namelist vocabulary follows the same choice: the 4.8.0 Registry
-  table for a 4.8 release (and for a bare ``4``, the newest), the 4.7.1
-  table for 4.7.1, every older release and the WRF 3 line
-  (:func:`registry_reference_for_wrf_version`).
+* The namelist vocabulary follows the same choice: the 4.8.1 Registry
+  table for 4.8.1 and later (and for a bare ``4``, the newest), the 4.8.0
+  table for 4.8 and 4.8.0, the 4.7.1 table for 4.7.1, every older release
+  and the WRF 3 line (:func:`registry_reference_for_wrf_version`).  The
+  4.8.1 and 4.8.0 namelist vocabularies are the same keys with the same
+  defaults; only their provenance differs.
+* WRF 4.8.1's scheme changes land family by family.  Until a family's port
+  lands its change is listed in :data:`WRF481_PENDING`, and a run receipt
+  that resolves to ``"4.8.1"`` names the pending changes beside it, so a
+  receipt never claims 4.8.1 arithmetic the engine does not yet run.
 
 The ports that change words (GFL, MYNN-EDMF 8f8e8b5, MYNN-SFC, KIM
 drag, Shin-Hong, Fitch induction, TEMPO, lightning) each add their row to
@@ -37,13 +44,23 @@ from __future__ import annotations
 from typing import MutableMapping
 
 #: The WRF releases ArWen can be pinned against, newest first.
-WRF_REFERENCES = ("4.8.0", "4.7.1")
+WRF_REFERENCES = ("4.8.1", "4.8.0", "4.7.1")
 
 #: The Registry vocabulary read when nothing names a release.
-WRF_REFERENCE_DEFAULT = "4.8.0"
+WRF_REFERENCE_DEFAULT = "4.8.1"
+#: The references that read the WRF 4.8 namelist vocabulary (4.8.1's
+#: Registry declares exactly 4.8.0's keys at 4.8.0's defaults, so every
+#: 4.8.0 vocabulary rule holds for 4.8.1 unchanged).
+WRF48_SERIES = ("4.8.1", "4.8.0")
 
 #: The tags and commits the packaged Registry tables were extracted from.
+#: 4.8.1's pin is the tag commit plus its submodule commits: the v4.8.1
+#: release assets (tar.gz and zip) ship the submodule directories empty,
+#: unlike v4.8.0's, so the physics_mmm, MYNN, GFL and TEMPO sources come
+#: from the gitlinks (tools/wrf481_source/source-v4.8.1.json).
 WRF_REFERENCE_SOURCES = {
+    "4.8.1": {"tag": "v4.8.1",
+              "commit": "e209f84a1a811424990a8f2f373a0b77c0d35f0d"},
     "4.8.0": {"tag": "v4.8.0",
               "commit": "06d4240ae989cc3e50af412bb472df3d9048783c"},
     "4.7.1": {"tag": "v4.7.1",
@@ -70,15 +87,18 @@ def registry_reference_for_wrf_version(wrf_version) -> str:
 
     A dotted release before 4.8 (4.6.1, 4.7, 4.7.1) and the WRF 3 line
     read the 4.7.1 table, the one every import used before 4.8.0 was
-    packaged; a release at or after 4.8 and a bare ``4`` read the 4.8.0
-    table.
+    packaged; 4.8 and 4.8.0 read the 4.8.0 table; 4.8.1, any later release
+    and a bare ``4`` read the 4.8.1 table.
     """
     from woof.namelist_import import wrf_line_of, wrf_release_of
 
     release = wrf_release_of(wrf_version)
     if release is None:
-        return "4.7.1" if wrf_line_of(wrf_version) == "3" else "4.8.0"
-    return "4.8.0" if release[:2] >= (4, 8) else "4.7.1"
+        return "4.7.1" if wrf_line_of(wrf_version) == "3" else "4.8.1"
+    release = (release + (0,))[:3]
+    if release >= (4, 8, 1):
+        return "4.8.1"
+    return "4.8.0" if release >= (4, 8, 0) else "4.7.1"
 
 
 #: Selectors whose ENGINE default is deliberately not the code stock WRF
@@ -129,7 +149,10 @@ def wrf_reference_receipt(cfg) -> dict:
 
     ``wrf_reference`` names the newest reference whose every generation
     row ``cfg`` runs, or ``"custom"`` when the keys mix releases;
-    ``scheme_generations`` lists the keys themselves.
+    ``scheme_generations`` lists the keys themselves.  When the keys match
+    more than one reference (4.8.1 and 4.8.0 have the same generation rows
+    until a 4.8.1 family lands its row), ``wrf_reference_matches`` lists
+    every one, newest first, so a run pinned to 4.8.0 is still named.
     """
     from dataclasses import fields
 
@@ -140,14 +163,52 @@ def wrf_reference_receipt(cfg) -> dict:
     defaults = {field.name: field.default for field in fields(RunConfig)
                 if field.name in keys}
     generations = {key: getattr(cfg, key, None) for key in keys}
-    matched = "custom"
-    for reference in WRF_REFERENCES:
-        pinned = reference_generations(reference)
-        if all(generations[key] == pinned.get(key, defaults.get(key))
-               for key in keys):
-            matched = reference
-            break
-    return {"wrf_reference": matched, "scheme_generations": generations}
+    matches = [reference for reference in WRF_REFERENCES
+               if all(generations[key] == reference_generations(reference).get(
+                   key, defaults.get(key)) for key in keys)]
+    matched = matches[0] if matches else "custom"
+    receipt = {"wrf_reference": matched, "scheme_generations": generations}
+    if len(matches) > 1:
+        receipt["wrf_reference_matches"] = matches
+    if matched == "4.8.1" and WRF481_PENDING:
+        receipt["wrf_reference_pending"] = sorted(WRF481_PENDING)
+    return receipt
+
+
+#: WRF 4.8.1 changes (4.8.0 -> 4.8.1) to code WOOF-ArWen ports whose port
+#: has not landed, by change id, with the WRF files and the fork phase that
+#: owns it (~/.cache/woofcoord/WRF-4.8.1-PLAN.md section 2).  The engine
+#: runs 4.8.0's arithmetic for each until its port lands and removes its
+#: row; :func:`wrf_reference_receipt` names the rows a "4.8.1" receipt
+#: still waits on.  Changes outside the ported code (Noah-MP v5.2.2, the
+#: CFBM fire_behavior submodule, fast RRTMG longwave, build files) are not
+#: listed.
+WRF481_PENDING: dict[str, str] = {
+    "R1": "dyn_em solve_em/module_small_step_em: lateral MU relaxation in "
+          "all three RK stages (P1b)",
+    "R2": "dyn_em horizontal_diffusion 'v': column mass in the y "
+          "coefficients, diff_opt = 1 (P1c)",
+    "R3": "dyn_em free_atmos_length/nonlocal_flux: km_opt = 5 fixes (P1c)",
+    "R4": "dyn_em couple_or_uncouple_em: mass boundary values for open and "
+          "symmetric boundaries (P1b)",
+    "R5": "dyn_em start_em: tiles set before stochastic initialisation "
+          "(with the SPP lanes)",
+    "P1/P2": "BouLac and k-epsilon downward length sign (P5a)",
+    "P3": "Shin-Hong PBL restructure, MMM-physics 20261118 (P5b)",
+    "P4": "KIM gravity-wave drag, MMM-physics 20261118 (P5c)",
+    "P5": "Grell-Devenyi gdinit APR fields on restart (P4)",
+    "P6": "HAILCAST icefactor divisor (P3)",
+    "P7": "fog deposition gravitational settling flux (P3)",
+    "P8": "NSSL two-moment microphysics (P3b)",
+    "P9": "NTU microphysics gamma intrinsics and diagnostics (P3c)",
+    "P10": "UDM rain sedimentation (P3)",
+    "P11": "WDM7 sedimentation and wet growth (P3)",
+    "P12": "RUC LSM thin-snow layer count (P6)",
+    "P13": "fractional sea-ice surface-layer USTM (P5c)",
+    "P15": "SFIRE fire_upwind_split = 1 x-advection (P7)",
+    "C4-C7": "WRF-Chem chem_prep dry theta, LW dust optics, convective "
+             "wet scavenging density, volcanic emissions (P8)",
+}
 
 
 #: Namelist keys WRF 4.8.0's Registry declares and WRF 4.7.1's does not,

@@ -320,7 +320,8 @@ def _value_rules() -> dict[tuple[str, str], dict]:
     # WRF 4.8.0's new keys import at their own Registry default only, under
     # the 4.8.0 vocabulary the contract is read with (woof.wrf_reference).
     from woof.wrf_namelist_registry import active_reference
-    if active_reference() == "4.8.0":
+    from woof.wrf_reference import WRF48_SERIES
+    if active_reference() in WRF48_SERIES:
         from woof.wrf_namelist_registry import wrf_namelist_keys
         from woof.wrf_reference import WRF480_ONLY_KEYS
         registry = wrf_namelist_keys()
