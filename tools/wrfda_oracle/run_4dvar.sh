@@ -41,6 +41,9 @@ ln -sf "$S/var/build/da_wrfvar.exe" .
 ln -sf "$S/run/LANDUSE.TBL" .
 cp "${BE:-$D/be/be.dat}" be.dat
 cp "$D/rc/2008020512/wrfinput_d01" fg
+# WRFPLUS's nonlinear model (the trajectory run inside da_wrfvar.exe) opens
+# wrfinput_d01 by name; the tutorial links it to fg
+ln -sf fg wrfinput_d01
 cp "$D/rc/2008020512/wrfbdy_d01" wrfbdy_d01
 for n in 1 2 3 4 5 6 7; do h=$((11 + n)); cp "$D/ob/20080205$h/ob0$n.ascii" "ob0$n.ascii"; done
 python3 - "$NL" "$LANE" > namelist.input <<'PY'
