@@ -149,7 +149,10 @@ for g in "auxhist8_d01_* 7" "af_d01_* 7" "gradient_d01_* 1"; do
     [ "$(stat -c %s "$x")" -gt 65536 ] || { echo "$x holds no fields" >&2; exit 1; }
   done
 done
+# not analysis_increments: da_write_increments writes q/ph/mu_cgrid over
+# 1:ix+1, 1:jy+1 and their last row and column are never set, so the file
+# differs run to run there (the analysis itself is wrfvar_output)
 files=(namelist.input fg wrfbdy_d01 be.dat ob0?.ascii wrfvar_output cost_fn grad_fn
-       analysis_increments woof_*.bin tl_d01_* af_d01_* gradient_d01_* gradient_wrfplus_d01_*
+       woof_*.bin tl_d01_* af_d01_* gradient_d01_* gradient_wrfplus_d01_*
        auxhist*_d01_* nl_d01_*)
 sha256sum "${files[@]}" > files.sha256
