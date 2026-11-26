@@ -2580,7 +2580,7 @@ def kcoef2(exe: str, runner: list[str], seed: int = 20261230) -> dict:
             for w, mem in enumerate(imgs):
                 # relative to the word itself (deformations span 1e-4 to
                 # 0.1 /s: a step of the field's scale would swamp a small one)
-                h = 1e-3 * max(abs(float(x[w])), 1e-3 * scale)
+                h = 1e-3 * max(abs(float(x[w])), 1e-2 * scale)
                 cols.append((a, w, h))
                 for m in (1, -1, 2, -2):
                     recs.append((m * h, [KC_FIELD_IDS[a]] * len(mem), mem))
