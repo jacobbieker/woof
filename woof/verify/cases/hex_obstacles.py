@@ -26,7 +26,6 @@ from __future__ import annotations
 import math
 from dataclasses import replace
 from pathlib import Path
-import sys
 
 import numpy as np
 
@@ -37,14 +36,6 @@ DRIVE_TAU_S = 10.0
 RADIUS = 12.0 * H / (2.0 * math.pi)
 #: Phase-1 gates (obstacle_cube.GATES); wide bands.
 CUBE_GATES = {"reattach": (0.8, 2.6), "separate": (0.2, 1.6), "leak": (None, 0.05)}
-
-
-def _tests_dir() -> Path:
-    here = Path(__file__).resolve().parents[3] / "components" / "hex" / "tests"
-    if not (here / "test_mesh_validation.py").is_file():
-        raise RuntimeError("the hex obstacle cases build their sphere with the hex test suite's "
-                           "graded_sphere_mesh; run them from a woof source checkout")
-    return here
 
 
 def _rotation_to(target: np.ndarray) -> np.ndarray:
@@ -63,10 +54,7 @@ def _rotation_to(target: np.ndarray) -> np.ndarray:
 def sphere_mesh(level: int = 4, zoom: float = 1.0, radius: float = RADIUS):
     """The case mesh: refined point (if any) at lat 0, lon 0; angleEdge,
     fEdge = 0, deriv_two and the deformation weights filled in."""
-    tests = str(_tests_dir())
-    if tests not in sys.path:
-        sys.path.insert(0, tests)
-    from test_mesh_validation import graded_sphere_mesh
+    from woof.hex.graded_mesh import graded_sphere_mesh
     from woof.hex.transport import initialize_deriv_two
 
     mesh = graded_sphere_mesh(level=level, zoom=float(zoom), radius=float(radius))

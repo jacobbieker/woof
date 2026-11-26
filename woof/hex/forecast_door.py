@@ -2472,6 +2472,21 @@ def resolve_request(
         dynamics_override_sources = {
             key: dynamics_override_sources[key] for key in dynamics_overrides}
 
+    if physics is not None:
+        # A WRF dynamics value passed as MPAS's own operator (refused_settings:
+        # diff_opt=0, mix_full_fields=true, khdif=0, kvdif=0) must be the
+        # operator this run's dycore options select.
+        from .physics_suites import wrf_dynamics_problems
+
+        for problem in wrf_dynamics_problems(
+                getattr(physics, "overrides", None), horiz_mixing=horiz_mixing,
+                les_model=str(getattr(arguments, "les_model", None) or "off"),
+                dynamics={**(getattr(arguments, "_native_dynamics_overrides", None) or {}),
+                          **dynamics_overrides}):
+            if collected is None:
+                raise _refuse(problem)
+            collected.append(problem)
+
     if imported_namelist is not None and imported_namelist.dycore_options:
         dynamics_problems = namelist_dycore_problems(
             imported_namelist, arguments,
@@ -3236,6 +3251,18 @@ def resolve_surface_statics(arguments, physics, mesh, grid, collected):
         if collected is None:
             raise _refuse(problem)
         collected.append(problem)
+    if selection and int(selection.get("slope_rad", 0) or 0) == 1:
+        # slope_rad's statics are fitted on the mesh at host preparation
+        # (woof.hex.slope_statics); a planar mesh is refused here, before the
+        # card is reserved, not there.
+        from .slope_statics import planar_mesh_problem
+
+        named = getattr(arguments, "grid", None)
+        problem = planar_mesh_problem(named if named is not None else grid)
+        if problem is not None:
+            if collected is None:
+                raise _refuse(problem)
+            collected.append(problem)
     needed = surface_inputs.reads_surface_statics(selection)
     if (not needed and given is not None and physics is not None
             and physics.column_profile is not None
@@ -3376,10 +3403,17 @@ def _resolve_obstacles(arguments, collected: list[str] | None = None) -> dict | 
     return settings.as_dict()
 
 
-def _resolve_undriven_species_boundary(arguments) -> str | None:
-    """``wrf-flow-dependent`` when asked for, else None (``free``, the default: nothing changes)."""
+def _resolve_undriven_species_boundary(arguments, native_config=None) -> str | None:
+    """``wrf-flow-dependent`` when asked for, else None (``free``, the default: nothing changes).
+
+    ``native_config`` is the MPAS suite route's configuration when the run takes that route: the rule then
+    attaches to the route's one-card MPAS-A regional runtime (mpasphys.runtime_v842) only when the flag asks
+    for it; same-host ranks, --hosts and a moving region are refused by suite_route_seat_refusal, a fork-dycore
+    row and a global mesh here.
+    """
 
     from woof import quirk_corrections
+    fork_dycore = False
     try:
         # --quirk-corrections all asks for wrf-flow-dependent on a regional run whose drivers carry the rule; the
         # local-timestep, partial-nest and partitioned same-host drivers do not, so there it stays off (an
@@ -3387,6 +3421,12 @@ def _resolve_undriven_species_boundary(arguments) -> str | None:
         carried = not any(getattr(arguments, flag, False)
                           for flag in ("local_timestep", "fullstep_local_timestep", "partial_nest")) \
             and getattr(arguments, "samehost_devices", None) is None
+        if native_config is not None:
+            # The suite route carries the rule only when the flag asks for it: --quirk-corrections all and
+            # correct mode leave it off there, so a default suite run keeps native MPAS's boundary treatment.
+            from .mpasphys.route_table import route_row
+            fork_dycore = route_row(native_config).get("dycore") is not None
+            carried = False
         mode = quirk_corrections.hex_undriven_species_boundary(arguments, carried=carried)
     except ValueError as error:
         raise _refuse(str(error)) from error
@@ -3394,6 +3434,13 @@ def _resolve_undriven_species_boundary(arguments) -> str | None:
         return None
     if mode != "wrf-flow-dependent":
         raise _refuse(f"--undriven-species-boundary {mode!r} must be free or wrf-flow-dependent")
+    if native_config is not None and getattr(arguments, "lbc_dir", None) is None:
+        raise _refuse("--undriven-species-boundary wrf-flow-dependent sets a regional mesh's specified zone; this "
+                      "run names no --lbc-dir, so its mesh is global")
+    if fork_dycore:
+        raise _refuse("--undriven-species-boundary wrf-flow-dependent acts in the MPAS-A v8.4.2 regional dycore; "
+                      "this suite row runs a fork dycore whose driver does not stage the mass flux the rule reads, "
+                      "so it would be accepted and never applied")
     for flag in ("local_timestep", "fullstep_local_timestep", "partial_nest"):
         if getattr(arguments, flag, False):
             raise _refuse(
@@ -3431,19 +3478,22 @@ def _resolve_inflow_perturbation(arguments) -> dict | None:
 
 
 def suite_route_seat_refusal(arguments, environ: Mapping[str, str] | None = None) -> str | None:
-    """Why the MPAS suite route cannot carry this run's --w-damping / --inflow-perturbation, or None.
+    """Why the MPAS suite route cannot carry this run's --w-damping / --inflow-perturbation /
+    --undriven-species-boundary, or None.
 
-    Both attach to the one-card resident dycore and regional runtime (mpasphys.runtime_v842).  A same-host
+    Each attaches to the one-card resident dycore and regional runtime (mpasphys.runtime_v842).  A same-host
     rank execution, a multi-host run and a moving region run on other dycores or remap onto other meshes,
     so the terms would be accepted and never applied.  Reads the door's resolved values
-    (``w_damping_crit_cfl``, ``inflow_perturbation_options``).
+    (``w_damping_crit_cfl``, ``inflow_perturbation_options``, ``undriven_species_boundary_mode``).
     """
     from .fullstep_lts_admission import moving_launch_switches
 
     environ = os.environ if environ is None else environ
     flags = [flag for flag, on in (
         ("--w-damping", getattr(arguments, "w_damping_crit_cfl", None) is not None),
-        ("--inflow-perturbation", bool(getattr(arguments, "inflow_perturbation_options", None)))) if on]
+        ("--inflow-perturbation", bool(getattr(arguments, "inflow_perturbation_options", None))),
+        ("--undriven-species-boundary wrf-flow-dependent",
+         getattr(arguments, "undriven_species_boundary_mode", None) is not None)) if on]
     if not flags:
         return None
     if getattr(arguments, "samehost_devices", None) is not None:
@@ -5396,11 +5446,12 @@ def _run_forecast(arguments: argparse.Namespace) -> int:
             raise ValueError("--history-field adds to MPAS's default output stream on the MPAS-physics route; "
                              "this run is on the WOOF-ArWen-physics route, whose history does not read it")
         if native_config is not None:
-            # --w-damping and --inflow-perturbation attach in the suite runtime's resident dycore and regional
-            # runtime (runtime_v842), the same seats the WOOF-physics route uses.  Resolved and refused here,
+            # --w-damping, --inflow-perturbation and --undriven-species-boundary attach in the suite runtime's
+            # resident dycore and regional runtime (runtime_v842), the same seats the WOOF-physics route uses.  Resolved and refused here,
             # before --hosts starts the other hosts and before any preparation.
             arguments.w_damping_crit_cfl = _resolve_w_damping(arguments)
             arguments.inflow_perturbation_options = _resolve_inflow_perturbation(arguments)
+            arguments.undriven_species_boundary_mode = _resolve_undriven_species_boundary(arguments, native_config)
             seat_refusal = suite_route_seat_refusal(arguments)
             if seat_refusal is not None:
                 raise ValueError(seat_refusal)
@@ -5431,10 +5482,6 @@ def _run_forecast(arguments: argparse.Namespace) -> int:
                     or any(getattr(arguments, key, None) is not None for key in _OBSTACLE_KEYS):
                 raise ValueError("--obstacle-opt and the other --obstacle-* flags are carried by the WOOF-physics "
                                  "route's dycore driver; the MPAS suite route would accept them and never apply them")
-            # (--quirk-corrections all leaves the rule off here: this route does not carry it)
-            if getattr(arguments, "undriven_species_boundary", None) not in (None, "free"):
-                raise ValueError("--undriven-species-boundary wrf-flow-dependent is carried by the WOOF-physics "
-                                 "route's regional runtime; the MPAS suite route would accept it and never apply it")
             from .mpasphys.resident_v842 import ported_route_refusal
             from .mpasphys.forecast_v842 import named_library_route
             suite_refusal = ported_route_refusal(native_config)
@@ -6057,12 +6104,12 @@ def add_forecast_arguments(parser: argparse.ArgumentParser) -> None:
                         help="the specified zone of the microphysics species the boundary stream does not drive: "
                              "free (default, transported like the interior) or wrf-flow-dependent (WRF's "
                              "flow_dep_bdy: outflow copies the first inner cell, inflow sets 0, or ccn_conc for "
-                             "nn/qnn); regional mesh, WOOF-physics route only")
+                             "nn/qnn); regional mesh, one card (WOOF-physics route or MPAS v8.4.2 suite route)")
     parser.add_argument("--quirk-corrections", default=None, choices=("none", "all"),
                         help="woof_quirk_corrections: 'all' / 'none' turns on / off every correction of a WRF/MPAS "
                              "quirk this door carries: --undriven-species-boundary wrf-flow-dependent on a regional "
-                             "run whose drivers carry it (not the MPAS suite route, local time stepping, partial "
-                             "nest or the partitioned same-host executor). Unset (default), they follow "
+                             "run whose drivers carry it (not the MPAS suite route, where it is the flag's alone, local "
+                             "time stepping, partial nest or the partitioned same-host executor). Unset (default), they follow "
                              "--physics-mode: on in correct mode, off in exact. The RunConfig corrections (GF, "
                              "YSU, ...) are not hex flags and are not set by it")
     parser.add_argument("--wind-farms", default=None, metavar="uswtdb|TABLE|off",

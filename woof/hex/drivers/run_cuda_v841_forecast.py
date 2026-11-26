@@ -783,6 +783,10 @@ def _suite_host(
             # aer_opt = 2's auxinput15 records, remapped to this mesh's cells
             # for the run's length (woof.hex.aerosol_inputs).
             "aerosol": {"mesh": mesh, "run_seconds": run_seconds},
+            # slope_rad's SLOPE/SLP_AZI from the mesh's own neighbours
+            # (woof.hex.slope_statics), on the init's terrain.
+            "slope_mesh": {"mesh": mesh,
+                           "terrain_height_m": np.asarray(values["terrain_height_m"])[:n_real]},
         })
     if bound:
         lake = bound.get("lakemask")
