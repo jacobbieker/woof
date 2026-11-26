@@ -1911,12 +1911,6 @@ on it:
   - the MPAS WSM6 unit of the water-budget gates (binary64) once had not
     finished its cold compile after 1 h 45 min; it now compiles cold in
     about 4 minutes, but its gates have not been re-run on Metal.
-- **WRF v4.8.0 Grell-Freitas-Li is refused on Metal for now.** `cu_physics = 3`
-  with the default `cu_gf_version = 'gfl_873b414'` (also the hex suites'
-  default cumulus) stops at setup on Metal with a message naming the
-  Metal-ready `cu_gf_version = 'wrf_461'` (WRF v4.6.1 GF). Nothing switches
-  to it silently. Its lane-interleaved CUDA unit does not translate to Metal
-  yet; the port is in progress.
 - **Virtual Macs are not supported.** GitHub's hosted macOS runners expose an
   "Apple Paravirtual device" that computes wrong answers (NaN) where an
   M-series GPU matches WRF, so CI runs the Metal parity gates only on real
