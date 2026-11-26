@@ -279,15 +279,18 @@ def test_admission_prices_observation_nudging_storage(tmp_path):
 # the MPAS v8.4.2 suite route (R2)
 # ----------------------------------------------------------------------------
 
-def test_suite_route_door_admits_one_card_cold_starts_and_refuses_the_rest(tmp_path):
+def test_suite_route_door_admits_one_card_cold_starts_and_refuses_the_rest(tmp_path, monkeypatch):
     from argparse import Namespace
 
     from woof.hex.forecast_door import suite_route_obs_nudging_refusal as refusal
 
+    monkeypatch.setattr(obs, "_reader", lambda: tmp_path / "rw_fddaobs")
     config = _toml(tmp_path)
     reports = tmp_path / "OBS_DOMAIN101"
-    reports.write_text("")
     assert refusal(Namespace(), environ={}) is None
+    # WRF's default observation file beside the configuration, checked before any preparation
+    assert "HEX_OBS_NUDGING_INPUT" in refusal(Namespace(obs_nudging=str(config)), environ={})
+    reports.write_text("")
     assert "give the configuration" in refusal(Namespace(obs_nudging_input=str(reports)), environ={})
     assert "does not exist" in refusal(Namespace(obs_nudging=str(tmp_path / "none.toml")), environ={})
     bad = tmp_path / "bad.toml"
@@ -301,10 +304,16 @@ def test_suite_route_door_admits_one_card_cold_starts_and_refuses_the_rest(tmp_p
     arguments = Namespace(obs_nudging=str(config), obs_nudging_input=str(reports))
     assert refusal(arguments, environ={}) is None
     assert arguments.obs_nudging == config.resolve() and arguments.obs_nudging_input == reports.resolve()
+    monkeypatch.setattr(obs, "_reader", lambda: None)
+    assert "HEX_OBS_NUDGING_READER" in refusal(Namespace(obs_nudging=str(config)), environ={})
 
 
 def test_suite_surface_reads_wrf_inputs_from_diag_physics():
-    import cupy as cp
+    cp = pytest.importorskip("cupy")
+    try:
+        cp.zeros(1)
+    except Exception as error:  # no device on this host
+        pytest.skip(f"cupy has no device: {error}")
 
     nc = 5
     words = {"hpbl": np.array([300., 800., 50., 1200.], np.float32), "kpbl": np.array([3, 6, 1, 9], np.int32),
@@ -314,20 +323,29 @@ def test_suite_surface_reads_wrf_inputs_from_diag_physics():
     active = {"pbl": True, "surface_layer": True}
     config = SimpleNamespace(active=lambda slot: active[slot])
     dz1 = cp.full(nc, 60., dtype=cp.float32)
-    read = obs.suite_surface(session, config, nc, z_mid=None, ht=None, dz1=dz1)
-    out = read()
-    assert out["stepbl"] == 1 and out["sfclay"] == 1
+    out = obs.suite_surface(session, config, nc, z_mid=None, ht=None, dz1=dz1, stepbl=3)()
+    assert out["stepbl"] == 3 and out["sfclay"] == 1
     assert cp.asnumpy(out["kpbl"]).tolist() == [3, 6, 1, 9, 0]
-    assert cp.asnumpy(out["regime"]).tolist() == [1., 4., 2., 3., 0.]
+    # the padding column past the suite's cells reads the no-surface-layer regime (1 at zero PBL height), not 0
+    assert cp.asnumpy(out["regime"]).tolist() == [1., 4., 2., 3., 1.]
     assert cp.asnumpy(out["th2"]).tolist()[:4] == [291.] * 4
-    # Without a surface layer: WRF's no-surface-layer ratios and forecast.cu's regime fallback.
-    active["surface_layer"] = False
-    out = obs.suite_surface(session, config, nc, z_mid=None, ht=None, dz1=dz1)()
-    assert out["sfclay"] == 0 and cp.asnumpy(out["regime"]).tolist() == [4., 4., 1., 4., 1.]
-    assert cp.asnumpy(out["u10"]).tolist() == [0.] * nc
-    active["pbl"] = False
-    with pytest.raises(obs.HexObsNudgingRefusal, match="HEX_OBS_NUDGING_PBL"):
-        obs.suite_surface(session, config, nc, z_mid=None, ht=None, dz1=dz1)
+    for slot in ("surface_layer", "pbl"):
+        active[slot] = False
+        with pytest.raises(obs.HexObsNudgingRefusal, match="HEX_OBS_NUDGING_PBL"):
+            obs.suite_surface(session, config, nc, z_mid=None, ht=None, dz1=dz1)
+        active[slot] = True
+
+
+def test_suite_stepbl_follows_the_pbl_cadence_the_suite_runs():
+    def config(interval, corrected):
+        return SimpleNamespace(execution_options={"config_pbl_interval": interval},
+                               correct=lambda finding: corrected and finding == "RP6")
+    assert obs.suite_stepbl(config("none", True), 30.0) == 1
+    # native and exact modes call the PBL every step whatever the interval (RP6)
+    assert obs.suite_stepbl(config("00:03:00", False), 30.0) == 1
+    assert obs.suite_stepbl(config("00:03:00", True), 30.0) == 6
+    with pytest.raises(obs.HexObsNudgingRefusal, match="whole number"):
+        obs.suite_stepbl(config("00:00:45", True), 30.0)
 
 
 def test_suite_route_attach_refuses_partitioned_and_resumed_runs(tmp_path):
@@ -340,3 +358,7 @@ def test_suite_route_attach_refuses_partitioned_and_resumed_runs(tmp_path):
         obs.attach_v842(arguments, partitioned=True, resumed=False, **common)
     with pytest.raises(obs.HexObsNudgingRefusal, match="HEX_OBS_NUDGING_RESTART"):
         obs.attach_v842(arguments, partitioned=False, resumed=True, **common)
+    no_pbl = SimpleNamespace(execution_options={"config_pbl_interval": "none"}, correct=lambda finding: False,
+                             active=lambda slot: slot != "surface_layer")
+    with pytest.raises(obs.HexObsNudgingRefusal, match="HEX_OBS_NUDGING_PBL"):
+        obs.attach_v842(arguments, partitioned=False, resumed=False, **{**common, "config": no_pbl})

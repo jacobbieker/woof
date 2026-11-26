@@ -2300,7 +2300,8 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
                 arguments, session=session, config=config, mesh=mesh, prep_geometry=geometry,
                 geometry_mesh=geometry_mesh, zgrid=grid.vertical_grid.zgrid, names=names, dt=dt, cache=dycore.cache,
                 start_time=layout.configs['config_start_time'], partitioned=nudging_partitioned(execution, moving),
-                resumed=bool(resumed))
+                resumed=bool(resumed) or bool(layout.configs.get('config_do_restart', False)),
+                physics_geometry=getattr(coupling.nudging, 'physics_geometry', None))
             receipt['obs_nudging'] = coupling.obs_nudging.receipt()
             print(json.dumps({'obs_nudging': receipt['obs_nudging']}, default=str), flush=True)
         # --w-damping and --inflow-perturbation (the door resolved them: forecast_door._resolve_w_damping /

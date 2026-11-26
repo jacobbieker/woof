@@ -2565,23 +2565,15 @@ def resolve_request(
         nudging_analyses = tuple(Path(value).expanduser().resolve() for value in nudging_analyses)
     obs_nudging = getattr(arguments, "obs_nudging", None)
     obs_nudging_input = getattr(arguments, "obs_nudging_input", None)
-    if obs_nudging_input is not None and obs_nudging is None:
-        raise _refuse("--obs-nudging-input names the observation file of --obs-nudging; give the configuration too")
-    if obs_nudging is not None:
-        for value in (obs_nudging, obs_nudging_input):
-            if value is not None and not Path(value).expanduser().is_file():
-                raise _refuse(f"observation-nudging input {value} does not exist")
-        if fullstep_enabled or local_timestep:
-            raise _refuse("HEX_OBS_NUDGING_LTS: observation nudging runs on fixed-step hex runs; "
-                          "drop the local time step")
-        from .obs_nudging import HexObsNudgingRefusal, load_config as load_obs_config, refusals as obs_refusals
+    from .obs_nudging import door_problems as obs_door_problems
 
-        try:
-            problems = obs_refusals(load_obs_config(obs_nudging, input_file=obs_nudging_input))
-        except HexObsNudgingRefusal as error:
-            problems = [error]
-        if problems:
-            raise _refuse("; ".join(str(problem) for problem in problems))
+    if obs_nudging is not None and (fullstep_enabled or local_timestep):
+        raise _refuse("HEX_OBS_NUDGING_LTS: observation nudging runs on fixed-step hex runs; "
+                      "drop the local time step")
+    problems = obs_door_problems(obs_nudging, obs_nudging_input)
+    if problems:
+        raise _refuse("; ".join(problems))
+    if obs_nudging is not None:
         obs_nudging = Path(obs_nudging).expanduser().resolve()
         obs_nudging_input = (None if obs_nudging_input is None
                              else Path(obs_nudging_input).expanduser().resolve())
@@ -3518,23 +3510,16 @@ def suite_route_obs_nudging_refusal(arguments, environ: Mapping[str, str] | None
     """
     from .fullstep_lts_admission import moving_launch_switches
 
+    from .obs_nudging import door_problems
+
     environ = os.environ if environ is None else environ
     config = getattr(arguments, "obs_nudging", None)
     reports = getattr(arguments, "obs_nudging_input", None)
-    if config is None:
-        if reports is not None:
-            return "--obs-nudging-input names the observation file of --obs-nudging; give the configuration too"
-        return None
-    for value in (config, reports):
-        if value is not None and not Path(value).expanduser().is_file():
-            return f"observation-nudging input {value} does not exist"
-    from .obs_nudging import HexObsNudgingRefusal, load_config, refusals
-    try:
-        problems = refusals(load_config(config, input_file=reports))
-    except HexObsNudgingRefusal as error:
-        return str(error)
+    problems = door_problems(config, reports)
     if problems:
-        return str(problems[0])
+        return problems[0]
+    if config is None:
+        return None
     where = None
     if getattr(arguments, "samehost_devices", None) is not None:
         where = "--samehost-devices runs rank dycores that have no observation-nudging seat"
@@ -5501,6 +5486,11 @@ def _run_forecast(arguments: argparse.Namespace) -> int:
             seat_refusal = suite_route_seat_refusal(arguments)
             if seat_refusal is not None:
                 raise ValueError(seat_refusal)
+            # WRF observation nudging attaches at the suite runtime's IAU seat (runtime_v842,
+            # woof.hex.obs_nudging.attach_v842); admitted here, before --hosts starts and before any preparation.
+            obs_refusal = suite_route_obs_nudging_refusal(arguments)
+            if obs_refusal is not None:
+                raise ValueError(obs_refusal)
         if getattr(arguments, "hosts", None) is not None or os.environ.get("WOOF_HEX_HOSTS"):
             if native_config is None:
                 raise ValueError("--hosts runs the MPAS-physics route (--physics-backend mpasphys, the hex default "
@@ -5520,11 +5510,6 @@ def _run_forecast(arguments: argparse.Namespace) -> int:
             raise ValueError("--nudging and --nudging-analysis go together: a nudging configuration reads its "
                              "analyses, and an analysis without a configuration would never be read")
         if native_config is not None:
-            # WRF observation nudging attaches at the suite runtime's IAU seat (runtime_v842,
-            # woof.hex.obs_nudging.attach_v842); admitted here, before --hosts starts and before any preparation.
-            obs_refusal = suite_route_obs_nudging_refusal(arguments)
-            if obs_refusal is not None:
-                raise ValueError(obs_refusal)
             if getattr(arguments, "obstacle_opt", None) or getattr(arguments, "obstacle_file", None) is not None \
                     or any(getattr(arguments, key, None) is not None for key in _OBSTACLE_KEYS):
                 raise ValueError("--obstacle-opt and the other --obstacle-* flags are carried by the WOOF-physics "
@@ -6515,7 +6500,8 @@ def add_forecast_arguments(parser: argparse.ArgumentParser) -> None:
              "(or [run]) table of WRF's obs_* keys (obs_nudge_wind/temp/mois, obs_coef_*, obs_rinxy, obs_twindo, "
              "obs_ionf, obs_idynin/obs_dtramp, obs_sfcfact/sfcfacr, obs_nudgez*, max_obs, fdda_start/fdda_end, "
              "...); reports within obs_rinxy km on the sphere (a cell KD-tree), one cell is one WRF column; "
-             "WOOF-physics route, fixed step; off by default (woof.hex.obs_nudging)")
+             "both routes on one card, fixed step (the MPAS suite route from a cold start); off by default "
+             "(woof.hex.obs_nudging)")
     parser.add_argument(
         "--obs-nudging-input", type=Path, default=None, metavar="OBS_DOMAIN101",
         help="the WRF OBS_DOMAIN observation file (its 02, 03, ... volumes are read beside it); default: the "
