@@ -1055,8 +1055,8 @@ def _couple(d, geom, names=None):
 
 def _held_start_tl(x, dx, geom, snap, tl):
     """prepare_fixed_tendencies' dry work at the step start: the held
-    rows (and with the moist mixing the species' held sources) zeroed; with the mixing (a cold step's diagnosis first) the
-    deformation and smag2d_km of the time-t winds and geopotential, the
+    rows (and with the moist mixing the species' held sources) zeroed;
+    with the mixing (a cold step's diagnosis first) the deformation and smag2d_km of the time-t winds and geopotential, the
     rows' mass mub2d + mup0, the u, v, w and theta rows into the held rows
     and, unless a specified domain's fold takes it, the map-factor
     coupling."""
