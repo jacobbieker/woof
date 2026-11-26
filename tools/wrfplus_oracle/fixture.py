@@ -2578,10 +2578,11 @@ def kcoef2(exe: str, runner: list[str], seed: int = 20261230) -> dict:
             x = tr[a].ravel()
             scale = float(np.sqrt(np.mean(tr[a] ** 2)))
             for w, mem in enumerate(imgs):
-                # ph' rides on phb (1e4): a step of its scale.  The others
+                # ph' rides on phb (1e4) and the winds on each other in
+                # the shears: a step of the field's scale.  The others
                 # relative to the word itself (deformations span 1e-4 to
                 # 0.1 /s, and strain's sqrt bends sharply near 0)
-                h = (1e-3 * max(abs(float(x[w])), scale) if a == "php"
+                h = (1e-3 * max(abs(float(x[w])), scale) if a in ("php", "u", "v", "w")
                      else 1e-4 * max(abs(float(x[w])), 1e-2 * scale))
                 cols.append((a, w, h))
                 for m in (1, -1, 2, -2):
