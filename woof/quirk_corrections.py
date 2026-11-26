@@ -25,7 +25,7 @@ The rules, the same on every route:
   coupling, the MPAS-Seaice ``ice_velocity_at_cell`` without the
   velocity solver's pools) it stays off; the WRF route's run receipt
   lists such a finding as uncorrected (woof.correct_mode.uncorrected).
-* On the WRF route the RunConfig keys are correct-mode findings FQ1-FQ6 and FQ8
+* On the WRF route the RunConfig keys are correct-mode findings FQ1-FQ8
   of woof.correct_mode: their defaults are ``CORRECT_KEYS_DEFAULT``,
   exact mode authors them off with every other correct-mode key, and the
   checkpoint echo binds one only where it is on and read.
@@ -48,6 +48,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+
+from woof import correct_mode as _correct_mode
 
 #: The umbrella's key on every route (RunConfig field, MPAS config dicts,
 #: and the hex door's ``--quirk-corrections``).
@@ -117,6 +119,10 @@ CORRECTIONS: tuple[QuirkCorrection, ...] = (
         active=lambda get: (int(get("ra_physics") if int(get("ra_lw_physics")) == -1
                                 else get("ra_lw_physics")) == 4
                             and get("ra_rrtmg_variant") == "rrtmg_legacy")),
+    QuirkCorrection(
+        "thompson_lamc_updated_rc", "wrf", False, True, "mp_physics = 28 or 38",
+        "Thompson's cloud-water mass/number balance forms the cloud slope from the updated cloud mass, not the entry mass",
+        active=lambda get: int(get("mp_physics")) in _correct_mode.THOMPSON_CLOUD_BALANCE_MP),
     QuirkCorrection(
         "noah_land_ice_rain_runoff", "wrf", False, True, "sf_surface_physics = 2, land-ice points",
         "Noah books the liquid rain that falls on land ice as surface runoff, where WRF's glacial arm drops it",

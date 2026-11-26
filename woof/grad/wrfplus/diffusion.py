@@ -303,3 +303,220 @@ def hd_ad(adj_state, traj, adj, geom: HDGeometry):
     sh = hd_shapes(geom)
     n = sum(int(np.prod(sh[k])) for k in HD_ACTIVE)
     _kernel("hd_ad", dtype)(_blocks(n), (THREADS,), arrs + geom.args(dtype))
+
+
+# --------------------------------- horizontal_diffusion_2 (diff_opt 2)
+
+#: The rows of WRF horizontal_diffusion_2 (woof wrf_smag_hd_u / _v / _w
+#: and wrf_smag_flux_s + wrf_smag_hd_s): the kernel's row code.  Theta is
+#: the scalar row on woof's strict thp (= theta - 300, WRF's t_2).
+H2_ROWS = {"u": 1, "v": 2, "w": 3, "t": 0, "s": 0}
+H2_STATE = ("tend",)
+H2_PASSIVE = ("phb", "msft", "msfu", "msfv", "fnm", "fnp", "dn", "dnw")
+#: Each row's active inputs, before ``qv`` (moist density).
+_H2_ACTIVE = {1: ("defor11", "defor12", "xk", "alt", "php"),
+              2: ("defor22", "defor12", "xk", "alt", "php"),
+              3: ("u", "v", "w", "xk", "alt", "php"),
+              0: ("field", "xk", "alt", "php")}
+
+
+@dataclass(frozen=True)
+class H2Geometry:
+    """horizontal_diffusion_2's scalars: ``rdx = 1/dx`` and ``rdy = 1/dy``
+    as the primal rounds them, the bottom extrapolation weights cf1-cf3,
+    the row (``u``, ``v``, ``w``; ``t`` theta and ``s`` a scalar, both the
+    scalar operator), the bounded (open or specified) axes and ``moist``
+    (the density 1/alt times 1 + qv, wrf_rho's moist branch)."""
+    nz: int
+    ny: int
+    nx: int
+    rdx: float
+    rdy: float
+    cf1: float
+    cf2: float
+    cf3: float
+    row: str = "s"
+    boundary_x: int = 0
+    boundary_y: int = 0
+    moist: int = 0
+
+    def __post_init__(self):
+        if self.row not in H2_ROWS:
+            raise ValueError(f"row is one of {sorted(H2_ROWS)}, got {self.row!r}")
+
+    @property
+    def code(self) -> int:
+        return H2_ROWS[self.row]
+
+    def args(self, dtype) -> tuple:
+        i, r = np.int32, np.dtype(dtype).type
+        return (r(self.rdx), r(self.rdy), r(self.cf1), r(self.cf2), r(self.cf3),
+                i(self.boundary_x), i(self.boundary_y), i(self.nz), i(self.ny), i(self.nx),
+                i(self.code), i(self.moist))
+
+    def validate(self) -> None:
+        _axes(self)
+        if self.nz < 3:
+            raise ValueError(f"horizontal_diffusion_2 needs nz >= 3 (the scalar faces' "
+                             f"bottom extrapolation reads levels 0-2), got {self.nz}")
+        if self.moist not in (0, 1):
+            raise ValueError(f"moist is 0 or 1, got {self.moist}")
+        if not (np.isfinite(self.rdx) and np.isfinite(self.rdy)
+                and self.rdx > 0 and self.rdy > 0):
+            raise ValueError("rdx and rdy must be positive and finite")
+
+
+def h2_active(geom) -> tuple:
+    return _H2_ACTIVE[geom.code] + (("qv",) if geom.moist else ())
+
+
+def h2_shapes(geom) -> dict:
+    nz, ny, nx, c = geom.nz, geom.ny, geom.nx, geom.code
+    mass, wlev = (nz, ny, nx), (nz + 1, ny, nx)
+    tend = {1: (nz, ny, nx + 1), 2: (nz, ny + 1, nx), 3: wlev, 0: mass}[c]
+    return {"tend": tend, "defor11": mass, "defor22": mass, "defor12": mass, "xk": mass,
+            "alt": mass, "qv": mass, "field": mass, "u": (nz, ny, nx + 1),
+            "v": (nz, ny + 1, nx), "w": wlev, "php": wlev, "phb": wlev, "msft": (ny, nx),
+            "msfu": (ny, nx + 1), "msfv": (ny + 1, nx), "fnm": (nz,), "fnp": (nz,),
+            "dn": (nz,), "dnw": (nz,)}
+
+
+def _h2_temp_shapes(geom) -> dict:
+    """The stored intermediates (kernels/diffusion.cu, diff_opt 2)."""
+    nz, ny, nx = geom.nz, geom.ny, geom.nx
+    sh = {"zx": (nz + 1, ny, nx + 1), "zy": (nz + 1, ny + 1, nx), "rdzw": (nz, ny, nx),
+          "rdz": (nz + 1, ny, nx), "rho": (nz, ny, nx)}
+    sh.update({1: {"s1": (nz, ny, nx), "s2": (nz, ny + 1, nx + 1)},
+               2: {"s1": (nz, ny, nx), "s2": (nz, ny + 1, nx + 1)},
+               3: {"s1": (nz + 1, ny, nx + 1), "s2": (nz + 1, ny + 1, nx)},
+               0: {"s1": (nz, ny, nx + 1), "s2": (nz, ny + 1, nx)}}[geom.code])
+    return sh
+
+
+def _h2_temps(geom, dtype, fill=None) -> dict:
+    import cupy as cp
+    make = cp.empty if fill is None else cp.zeros
+    return {n: make(s, dtype=dtype) for n, s in _h2_temp_shapes(geom).items()}
+
+
+def _h2_check(geom, named) -> None:
+    geom.validate()
+    _check(geom, named, h2_shapes(geom), min_nz=3)
+
+
+def _h2_launch(name, dtype, n, args, geom):
+    _kernel(name, dtype)(_blocks(n), (THREADS,), args + geom.args(dtype))
+
+
+def _h2_sizes(geom) -> dict:
+    return {n: int(np.prod(s)) for n, s in _h2_temp_shapes(geom).items()}
+
+
+def _h2_forward(traj, pert, geom, dtype, tl):
+    """The staged forward: the intermediates (and with ``tl`` their
+    tangents).  Returns (values, tangents); with ``tl`` 0 the tangents are
+    one-word placeholders the kernels never touch."""
+    import cupy as cp
+    T = _h2_temps(geom, dtype)
+    D = _h2_temps(geom, dtype) if tl else {n: cp.zeros(1, dtype=dtype) for n in T}
+    P = pert if tl else traj
+    sz, c, flag = _h2_sizes(geom), geom.code, np.int32(tl)
+    _h2_launch("h2_met_tl", dtype, sz["zx"] + sz["zy"] + sz["rdzw"] + sz["rdz"],
+               (traj["php"], P["php"], traj["phb"], T["zx"], D["zx"], T["zy"], D["zy"],
+                T["rdzw"], D["rdzw"], T["rdz"], D["rdz"], flag), geom)
+    qv = traj["qv"] if geom.moist else traj["alt"]
+    qvd = P["qv"] if geom.moist else P["alt"]
+    _h2_launch("h2_rho_tl", dtype, sz["rho"],
+               (traj["alt"], P["alt"], qv, qvd, T["rho"], D["rho"], flag), geom)
+    if c in (1, 2):
+        da = "defor11" if c == 1 else "defor22"
+        _h2_launch("h2_tuv_tl", dtype, sz["s1"] + sz["s2"],
+                   (T["rho"], D["rho"], traj["xk"], P["xk"], traj[da], P[da],
+                    traj["defor12"], P["defor12"], T["s1"], D["s1"], T["s2"], D["s2"], flag),
+                   geom)
+    elif c == 3:
+        _h2_launch("h2_tw_tl", dtype, sz["s1"] + sz["s2"],
+                   (traj["u"], P["u"], traj["v"], P["v"], traj["w"], P["w"], T["zx"], D["zx"],
+                    T["zy"], D["zy"], T["rdz"], D["rdz"], T["rho"], D["rho"], traj["xk"],
+                    P["xk"], traj["msft"], traj["msfu"], traj["msfv"], traj["fnm"],
+                    traj["fnp"], T["s1"], D["s1"], T["s2"], D["s2"], flag), geom)
+    else:
+        _h2_launch("h2_hs_tl", dtype, sz["s1"] + sz["s2"],
+                   (traj["field"], P["field"], traj["xk"], P["xk"], T["rho"], D["rho"],
+                    T["zx"], D["zx"], T["zy"], D["zy"], T["rdzw"], D["rdzw"], traj["msfu"],
+                    traj["msfv"], traj["fnm"], traj["fnp"], traj["dn"], traj["dnw"],
+                    T["s1"], D["s1"], T["s2"], D["s2"], flag), geom)
+    return T, D
+
+
+def _h2_rz(geom) -> str:
+    return "rdz" if geom.code == 3 else "rdzw"
+
+
+def _h2_row_passive(traj) -> tuple:
+    return tuple(traj[n] for n in ("msft", "msfu", "msfv", "fnm", "fnp", "dn", "dnw"))
+
+
+def h2_tl(state, pert_state, traj, pert, geom: H2Geometry, *, nl=True):
+    """WRF horizontal_diffusion_2's row (horizontal_diffusion_u_2, _v_2,
+    _w_2 or _s) on woof's strict wrf_smag_hd_u / _v / _w or wrf_smag_flux_s
+    + wrf_smag_hd_s: ``tend`` (accumulated) of the row's active inputs
+    (:func:`h2_active`)."""
+    act = h2_active(geom)
+    _h2_check(geom, _named("state", H2_STATE, state) + _named("pert_state", H2_STATE, pert_state)
+              + _named("traj", act + H2_PASSIVE, traj) + _named("pert", act, pert))
+    dtype = _dtype((state["tend"], pert_state["tend"]) + tuple(traj[n] for n in act + H2_PASSIVE)
+                   + tuple(pert[n] for n in act))
+    T, D = _h2_forward(traj, pert, geom, dtype, 1)
+    rz = _h2_rz(geom)
+    _h2_launch("h2_row_tl", dtype, int(np.prod(h2_shapes(geom)["tend"])),
+               (state["tend"], pert_state["tend"], T["s1"], D["s1"], T["s2"], D["s2"],
+                T["zx"], D["zx"], T["zy"], D["zy"], T[rz], D[rz]) + _h2_row_passive(traj)
+               + (np.int32(bool(nl)),), geom)
+
+
+def h2_ad(adj_state, traj, adj, geom: H2Geometry):
+    """Adjoint of :func:`h2_tl`: add into ``adj`` (the row's active
+    inputs).  The tendency accumulates, so its adjoint is left as it is.
+    Runs the base forward into the intermediates, then each stage's
+    adjoint in reverse order."""
+    act = h2_active(geom)
+    _h2_check(geom, _named("adj", H2_STATE, adj_state) + _named("traj", act + H2_PASSIVE, traj)
+              + _named("adj", act, adj))
+    dtype = _dtype((adj_state["tend"],) + tuple(traj[n] for n in act + H2_PASSIVE)
+                   + tuple(adj[n] for n in act))
+    T, _ = _h2_forward(traj, None, geom, dtype, 0)
+    A = _h2_temps(geom, dtype, fill=0)
+    sz, c, rz = _h2_sizes(geom), geom.code, _h2_rz(geom)
+    _h2_launch("h2_row_ad", dtype, sz["s1"] + sz["s2"] + sz["zx"] + sz["zy"] + sz[rz],
+               (adj_state["tend"], T["s1"], T["s2"], T["zx"], T["zy"], T[rz])
+               + _h2_row_passive(traj) + (A["s1"], A["s2"], A["zx"], A["zy"], A[rz]), geom)
+    m = sz["rho"]
+    if c in (1, 2):
+        da = "defor11" if c == 1 else "defor22"
+        _h2_launch("h2_tuv_ad", dtype, 4 * m,
+                   (A["s1"], A["s2"], T["rho"], traj["xk"], traj[da], traj["defor12"],
+                    A["rho"], adj["xk"], adj[da], adj["defor12"]), geom)
+    elif c == 3:
+        sh = h2_shapes(geom)
+        n = (sum(int(np.prod(sh[k])) for k in ("u", "v", "w")) + sz["zx"] + sz["zy"]
+             + sz["rdz"] + 2 * m)
+        _h2_launch("h2_tw_ad", dtype, n,
+                   (A["s1"], A["s2"], traj["u"], traj["v"], traj["w"], T["zx"], T["zy"],
+                    T["rdz"], T["rho"], traj["xk"], traj["msft"], traj["msfu"], traj["msfv"],
+                    traj["fnm"], traj["fnp"], adj["u"], adj["v"], adj["w"], A["zx"], A["zy"],
+                    A["rdz"], A["rho"], adj["xk"]), geom)
+    else:
+        _h2_launch("h2_hs_ad", dtype, 3 * m + sz["zx"] + sz["zy"] + sz["rdzw"],
+                   (A["s1"], A["s2"], traj["field"], traj["xk"], T["rho"], T["zx"], T["zy"],
+                    T["rdzw"], traj["msfu"], traj["msfv"], traj["fnm"], traj["fnp"],
+                    traj["dn"], traj["dnw"], adj["field"], adj["xk"], A["rho"], A["zx"],
+                    A["zy"], A["rdzw"]), geom)
+    import cupy as cp
+    qv = traj["qv"] if geom.moist else traj["alt"]
+    aqv = adj["qv"] if geom.moist else cp.zeros(1, dtype=dtype)
+    _h2_launch("h2_rho_ad", dtype, m * (2 if geom.moist else 1),
+               (A["rho"], traj["alt"], qv, adj["alt"], aqv), geom)
+    _h2_launch("h2_met_ad", dtype, int(np.prod(h2_shapes(geom)["php"])),
+               (A["zx"], A["zy"], A["rdzw"], A["rdz"], traj["php"], traj["phb"], adj["php"]),
+               geom)

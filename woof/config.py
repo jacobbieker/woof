@@ -2687,6 +2687,17 @@ class RunConfig:
     rrtmg_lw_model_top: bool = _config_field(
         default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
     # Correction of a WRF 4.7.1 quirk (quirk pass 2026-11-23), appended.
+    # Thompson's cloud-water mass/number balance forms the cloud slope lamc
+    # from the entry cloud mass rc(k) (module_mp_thompson.F:3003, a copy of
+    # :1833) although the balance's mass is the updated xrc; the clamp
+    # branches then rediagnose the number from xrc.  True forms lamc from
+    # xrc; False is WRF's arithmetic word for word.  It changes the cloud
+    # number tendency, which only the aerosol-aware schemes carry out of the
+    # call (mp_physics = 28, 38).  Correct-mode finding FQ7: on by default,
+    # off in physics.mode = 'exact'.
+    thompson_lamc_updated_rc: bool = _config_field(
+        default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
+
     # Noah's land-ice arm (SFLX_GLACIAL, sf_surface_physics = 2) keeps liquid
     # rain in PRCPF/PRCP1 (module_sf_noahlsm_glacial_only.F:287, :912) and
     # books only the snowmelt as RUNOFF1 (:406), so rain on a glacier point
@@ -2960,7 +2971,7 @@ CORRECT_MODE_RESTART_BREAK_NOTICE = (
     "gf_deep_rain_evaporation_booking, ysu_surface_heat_exner, "
     "mynn_sfclay_psih_zolzt, noah_smc_floor_booking, "
     "thompson_rain_snow_closure, rrtmg_lw_model_top, "
-    "noah_land_ice_rain_runoff); otherwise "
+    "thompson_lamc_updated_rc, noah_land_ice_rain_runoff); otherwise "
     "restart from t = 0.")
 
 #: The same accuracy for the 2.8.9 WRF-folder default (D8): a fixed-step
@@ -3185,8 +3196,10 @@ NOAHMP_OPTION_VALUES: dict[str, tuple[int, ...]] = {
 #: the ``wrf_reference`` selector owns). "4.7.1" is today's engine
 #: byte for byte: None keeps the existing resolution (wrf_461, or wrf_471
 #: when a 4.7.1-only control is named). "4.8.0" is the MYNN-EDMF 8f8e8b59
-#: column, replay-qualified against native WRF 4.8.0 strict.
-MYNN_VERSION_BY_WRF_REFERENCE: dict[str, str | None] = {"4.7.1": None, "4.8.0": "wrf_480"}
+#: column, replay-qualified against native WRF 4.8.0 strict; "4.8.1" pins
+#: the same MYNN-EDMF gitlink, so it resolves to the same column.
+MYNN_VERSION_BY_WRF_REFERENCE: dict[str, str | None] = {
+    "4.7.1": None, "4.8.0": "wrf_480", "4.8.1": "wrf_480"}
 
 MYNN471_OPTION_VALUES = {
     "bl_mynn_closure": (2.5, 2.6, 3.0), "bl_mynn_cloudpdf": (0, 1, 2),
@@ -5150,6 +5163,10 @@ THOMPSON_AEROSOL_FAMILY: dict[int, ThompsonAerosolMember] = {
 #: RunConfig.thompson_rain_snow_closure corrects: classic (8), aerosol-aware
 #: (28, either generation) and hail-aware (38).  RCON (29) is not carried.
 THOMPSON_RAIN_SNOW_MP = frozenset({8, 28, 38})
+#: The Thompson schemes RunConfig.thompson_lamc_updated_rc corrects: the
+#: aerosol-aware ones, whose cloud number leaves the call (not RCON, 29, which
+#: is in THOMPSON_AEROSOL_FAMILY).
+THOMPSON_CLOUD_BALANCE_MP = frozenset(_correct_mode.THOMPSON_CLOUD_BALANCE_MP)
 
 
 def thompson_aerosol_aware(mp_physics) -> bool:
@@ -10180,11 +10197,13 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
         raise ConfigurationRefused("thompson_rain_snow_closure must be true or false")
     if type(cfg.rrtmg_lw_model_top) is not bool:
         raise ConfigurationRefused("rrtmg_lw_model_top must be true or false")
+    if type(cfg.thompson_lamc_updated_rc) is not bool:
+        raise ConfigurationRefused("thompson_lamc_updated_rc must be true or false")
     if type(cfg.noah_land_ice_rain_runoff) is not bool:
         raise ConfigurationRefused("noah_land_ice_rain_runoff must be true or false")
     from woof.quirk_corrections import check_run_config
     check_run_config(cfg)
-    # The quirk-ledger keys (correct-mode findings FQ1-FQ6 and FQ8) are on by
+    # The quirk-ledger keys (correct-mode findings FQ1-FQ8) are on by
     # default and read only where their scheme runs (correct_mode.KEY_SCOPE,
     # KEY_GENERATIONS, KEY_UNREAD: YSU's not with BEP/BEM, MYNN's only at
     # wrf_461), so an unread one is inert, not refused.

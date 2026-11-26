@@ -574,6 +574,9 @@ DEFAULT_TOLERANT_IDENTITY_FIELDS = frozenset({
     # The RRTMG longwave model-top correction (FQ6, the legacy RRTMG longwave
     # only, on in correct mode): step-time; preparation never reads it.
     "run.rrtmg_lw_model_top",
+    # The Thompson cloud slope from the updated mass (FQ7, mp_physics = 28,
+    # 38 only, on in correct mode): step-time; preparation never reads it.
+    "run.thompson_lamc_updated_rc",
     # The Noah land-ice rain runoff (FQ8, sf_surface_physics = 2 only, on in
     # correct mode): step-time; preparation never reads it.
     "run.noah_land_ice_rain_runoff",

@@ -566,6 +566,30 @@ compiled in by a define, so exact mode runs WRF's program unchanged
 (`tests/test_thompson_rain_snow_closure.py`). The hex MPAS-suite Thompson
 and RCON (`mp_physics = 29`) do not carry it.
 
+**Correction: `thompson_lamc_updated_rc` (on in correct mode, finding FQ7).**
+WRF 4.7.1's Thompson balances the cloud water mass and number after the
+sources (`module_mp_thompson.F:2996-3019`): it forms the updated mass
+`xrc = (qc1d + qcten*dt)*rho` and number `xnc`, and diagnoses the slope
+`lamc` from them to keep the mean size between `D0c` and `2*D0r`. :3003
+divides by the entry mass `rc(k)` rather than `xrc` (a copy of :1833, where
+`rc` is the current mass), while the clamp branches (:3006, :3010) already
+use `xrc`. The clamp decision, and so the rediagnosed cloud number
+`ncten`, then answer a mass the cloud no longer holds. The sources only
+remove cloud water (`qcten` holds sinks), so `xrc <= rc(k)` and the entry mass
+gives a mean size that is too large, never too small: a shrinking cloud is
+clamped to `2*D0r` that the updated mass does not reach, or escapes the
+`D0c` clamp that the updated mass needs. With the correction on, `lamc` divides by
+`xrc`. The number tendency only leaves the call in the aerosol-aware
+schemes, so it is per domain, read only where `mp_physics = 28` or `38`
+(every `thompson_version`); the classic Thompson's fixed droplet number never
+leaves the call. It is compiled in by a define in the two units that hold the
+balance (`thompson_aerosol_warm.cu` and the WRF 3.9 fork's
+`thompson_fork.cu`, WRF 3.9 `module_mp_thompson.F:2839`), so exact mode runs
+WRF's program unchanged (`tests/test_thompson_lamc_updated_rc.py`). The fork
+column itself runs only in a strict `GPUWM_WRF_EXACT=1` process, where the
+correct-mode keys default off, so its block takes effect there only when the
+key is set `true` by hand; a default `wrf_39_noaa` run uses the aerosol units.
+
 ### Ferrier-Aligo with advected rime (`mp_physics = 15`)
 
 Option 15 transports total ice and `QRIMEF`, the ice mass multiplied by

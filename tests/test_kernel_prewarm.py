@@ -691,3 +691,65 @@ def test_the_thompson_closure_variants_the_run_launches_are_warmed(mode):
     on = mode == "correct"
     assert ("thompson[THOMPSON_RAIN_SNOW_CLOSURE=1]" in labels) is on
     assert ("thompson_aerosol_warm[THOMPSON_RAIN_SNOW_CLOSURE=1]" in labels) is on
+    # mp_physics = 8 never reads FQ7: no lamc tier
+    assert not any("THOMPSON_LAMC_UPDATED_RC" in label for label in labels)
+
+
+def _thompson_run(mp, mode, **extra):
+    from woof import correct_mode
+    from woof.config import RunConfig, validate_run_config
+    return validate_run_config(RunConfig(
+        nx=8, ny=8, nz=12, dx=3000.0, dy=3000.0, ztop=12000.0, dt=10.0, run_seconds=60.0, moist=True,
+        mp_physics=mp, **extra, **correct_mode.resolve(mode).settings))
+
+
+@pytest.mark.parametrize("mode", ["correct", "exact"])
+def test_the_thompson_lamc_variant_the_run_launches_is_warmed(mode):
+    """FQ7 compiles the aerosol warm unit with the lamc define, composed with
+    the FQ5 closure define, where it is on (mp_physics = 28 here); the
+    closure-only warm unit is then never launched, so it is not warmed."""
+    experiment = SimpleNamespace(domains=(SimpleNamespace(run=_thompson_run(28, mode)),))
+    labels = {job[0] for job in kernel_prewarm._variant_jobs(
+        experiment, ("thompson_aerosol_warm", "thompson_aerosol_cold"))}
+    on = mode == "correct"
+    assert ("thompson_aerosol_warm[THOMPSON_RAIN_SNOW_CLOSURE=1,THOMPSON_LAMC_UPDATED_RC=1]"
+            in labels) is on
+    assert "thompson_aerosol_warm[THOMPSON_RAIN_SNOW_CLOSURE=1]" not in labels
+    # the cold unit takes the closure alone
+    assert ("thompson_aerosol_cold[THOMPSON_RAIN_SNOW_CLOSURE=1]" in labels) is on
+
+
+@pytest.mark.parametrize("mode", ["correct", "exact"])
+def test_the_hail_aware_thompson_warms_the_hail_images_the_run_launches(mode):
+    """mp_physics = 38 launches thompson_aerosol_launch._hail_module's image,
+    so that is what the pre-warm compiles, never the plain unit."""
+    from woof.core.thompson_aerosol_launch import _hail_module
+    experiment = SimpleNamespace(domains=(SimpleNamespace(run=_thompson_run(38, mode)),))
+    jobs = kernel_prewarm._variant_jobs(
+        experiment, ("thompson_aerosol_warm", "thompson_aerosol_cold", "thompson_aerosol_sed"))
+    on = mode == "correct"
+    got = {label: (factory, args) for label, factory, args in jobs}
+    for name, closure, lamc in (("thompson_aerosol_warm", on, on),
+                                ("thompson_aerosol_cold", on, False),
+                                ("thompson_aerosol_sed", False, False)):
+        label = (name + "[THOMPSON_AA_HAIL=1" + ",THOMPSON_RAIN_SNOW_CLOSURE=1" * closure
+                 + ",THOMPSON_LAMC_UPDATED_RC=1" * lamc + "]")
+        assert got[label] == (_hail_module.__wrapped__, (name, closure, lamc)), label
+    assert not any("HAIL" not in label and "[" in label for label in got)
+
+
+@pytest.mark.parametrize("mode", ["correct", "exact"])
+def test_the_thompson_fork_column_variants_the_run_launches_are_warmed(monkeypatch, mode):
+    monkeypatch.setattr(kernel_prewarm, "static_modules", lambda experiment: ("thompson_fork_unit",))
+    monkeypatch.setattr(kernel_prewarm, "_inline_jobs", lambda modules: [])
+    run = _thompson_run(28, mode, thompson_version="wrf_39_noaa")
+    # a wrf_461 domain never launches the fork column: it adds no variant
+    other = _thompson_run(28, mode)
+    experiment = SimpleNamespace(domains=(SimpleNamespace(run=run), SimpleNamespace(run=other)))
+    jobs = [job for job in kernel_prewarm.static_jobs(experiment)
+            if job[0].startswith("thompson_fork_unit")]
+    on = mode == "correct"
+    assert {(job[0], job[2]) for job in jobs} == (
+        {("thompson_fork_unit", ("thompson_fork_unit", False, False)),
+         ("thompson_fork_unit[closure=1,lamc=1]", ("thompson_fork_unit", True, True))}
+        if on else {("thompson_fork_unit", ("thompson_fork_unit", False, False))})
