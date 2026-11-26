@@ -94,6 +94,16 @@ def _step_inputs() -> tuple:
     return M.STEP_INPUTS
 
 
+def _refuse_metal() -> None:
+    """The window on Metal: refused, as Metal has no binary64 (the 4D-Var
+    window is binary64 only; PERF-QUEUE holds the Metal port)."""
+    from woof import backend
+
+    if backend.active() == "mlx":
+        raise NotImplementedError("4D-Var's window model on Metal: the window must be binary64 and Metal has no "
+                                  "binary64; run it on CUDA or the host backend (WOOF_BACKEND=host)")
+
+
 def _default_to_device(a: np.ndarray, dtype):
     import cupy as cp
 
@@ -131,6 +141,11 @@ class WindowModel:
     window, not WRFPLUS's: a warm window then differs from WRFPLUS's base).  The
     boundary tables are not perturbed (WRFDA's ``var4d_lbc = .false.``)
     and their adjoint is dropped.
+
+    :meth:`relinearise` moves the base to a new nonlinear run (an outer
+    loop's :class:`~woof.da.var.outer4d.Trajectory`, through
+    ``Window.forward(trajectory=...)``).  Binary64 only: refused on Metal
+    when ``to_device`` is the default.
     """
 
     def __init__(self, window, steps_per_slot: int, *, moisture: str | None = None, to_device=None, to_host=None,
@@ -148,6 +163,8 @@ class WindowModel:
             raise ValueError("moisture='persist' on a moist window: its qv tangent moves with the flow, "
                              "so the slots' g_qv are the window's ('advect')")
         self.moisture = moisture
+        if to_device is None:
+            _refuse_metal()
         if steps_per_slot < 1:
             raise ValueError(f"steps_per_slot must be >= 1, not {steps_per_slot}")
         self.window = window
@@ -167,8 +184,26 @@ class WindowModel:
         if getattr(window, "_checkpoints", None) is None:
             window.forward()
         self.base_diff = None
+        self._end = base_end
         if base is not None:
             self.base_diff = self.check_base(base, rtol=base_rtol, end=base_end)
+
+    def relinearise(self, trajectory) -> dict:
+        """An outer loop's new nonlinear run (:class:`~woof.da.var.outer4d.Trajectory`):
+        the window linearises about its per-step ``states``
+        (``Window.forward(trajectory=...)``, as WRFPLUS reads the rerun's
+        states).  Returns the run's end state, which :meth:`check_base`
+        then uses by default.  A trajectory without ``states`` is refused:
+        the window would stay on the previous loop's base."""
+        states = getattr(trajectory, "states", None)
+        if states is None:
+            raise ValueError("the window model needs the rerun's per-step states (Trajectory.states) to "
+                             "relinearise; without them the TL and AD stay on the previous loop's trajectory")
+        self._end = self.window.forward(trajectory=states)
+        if self.halo is not None and self.halo_start == "wrfplus":
+            self._halo_to_edge()   # an external trajectory: checked, not changed
+        self.base_diff = None
+        return self._end
 
     def check_base(self, slots: Sequence, *, rtol: float = 1e-5, end: dict | None = None) -> dict:
         """The window's base at each slot against that slot's ``grid``:
@@ -185,6 +220,7 @@ class WindowModel:
         states = self._slots(len(slots))
         nsteps = self.window.nsteps
         if getattr(self.window, "_external", False):
+            end = end if end is not None else self._end
             if end is None:
                 raise ValueError("the window runs on an external trajectory: pass end= (the state "
                                  "forward(trajectory=...) returned) for the last slot")

@@ -445,6 +445,9 @@ def xatowrf(grid: dict, xb: dict, xa: dict, *, check_rh: int = 0, var4d: bool = 
 
 # --------------------------------------------------------------------------- the whole step
 
+#: The background fields ``U`` reads.
+_XBU = ("grid_box_area", "coefx", "coefy", "qs", "q", "psac", "dnw", "rho", "p", "t", "c1h", "c2h")
+
 
 @dataclass
 class VarResult:
@@ -528,7 +531,13 @@ def analyse(be, obs, first_guess, *, tier: str = "reference", ntmax=50, eps=0.01
     (``da_transfer_xatowrf``'s ``var4d`` branch).  The lateral boundary
     perturbation is not ported.  FGAT's refusals apply.  4D-Var's own
     refusals and where each is enforced are listed in :func:`_var4d_refusals`;
-    the ``reference`` tier only.
+    the ``reference`` tier only.  Outer loops (``max_ext_its > 1``) need
+    ``var4d.nl_model``: each loop after the first reruns it from the
+    previous loop's analysis, relinearises ``var4d.model`` about the run
+    and recomputes every slot's innovations, as WRFDA's ``da_solve`` does
+    (:mod:`woof.da.var.outer4d`); ``Jb`` stays measured from the first
+    guess, :attr:`VarResult.cg` holds each loop's log and ``J``, and
+    :attr:`VarResult.xa` is the last loop's increment (WRFDA's ``xa``).
 
     ``time_window`` is WRFDA's ``(time_window_min, time_window_max)``; by
     default the first guess's time plus and minus ``window_minutes``.
@@ -559,17 +568,17 @@ def analyse(be, obs, first_guess, *, tier: str = "reference", ntmax=50, eps=0.01
     window = obs_window(fg, window_minutes)
     if time_window is not None:
         window.update(time_window_min=time_window[0], time_window_max=time_window[1])
+    if var4d is not None:
+        return _analyse_var4d(b, fg, xb, grid, obs, fgat, proj, window, var4d, max_ext_its=max_ext_its,
+                              ntmax=ntmax, eps=eps, check_rh=check_rh, landuse_table=landuse_table, write=write,
+                              timings=timings, t0=t0, orthonorm_gradient=orthonorm_gradient,
+                              precondition_cg=precondition_cg)
     if fgat is None:
         wobs = obs if not isinstance(obs, (str, Path)) else ow.read_obs_ascii(obs, proj, **window)
         iv = iw.innovations(wobs, xb)
     else:
-        iv, slot_states = _fgat_innovations(obs, fgat, xb, proj, window, landuse_table=landuse_table)
-    if var4d is not None:
-        from .fourd import FourDObsTerm
-
-        term = FourDObsTerm(iv, slot_states, (xb, grid), model=var4d.model, press=var4d.press, ph=var4d.ph)
-    else:
-        term = FlatObsTerm(iv, xb)
+        iv, _ = _fgat_innovations(obs, fgat, xb, proj, window, landuse_table=landuse_table)
+    term = FlatObsTerm(iv, xb)
     terms = [term]
     rterm = rreport = None
     if radiances:
@@ -577,8 +586,7 @@ def analyse(be, obs, first_guess, *, tier: str = "reference", ntmax=50, eps=0.01
 
         rterm, rreport = _radiance_term(rad, radiances, xb, fg, proj, crtm, radiance_qc, varbc)
         terms.append(rterm)
-    xbu = {k: xb[k] for k in ("grid_box_area", "coefx", "coefy", "qs", "q", "psac", "dnw", "rho", "p", "t",
-                              "c1h", "c2h")}
+    xbu = {k: xb[k] for k in _XBU}
     hu = None
     if ensemble is not None:
         from . import hybrid as hy
@@ -614,11 +622,114 @@ def analyse(be, obs, first_guess, *, tier: str = "reference", ntmax=50, eps=0.01
         cvt = cvt[:cost.cv_u]
     t2 = time.perf_counter()
     xa = xa_from_cv(b, xbu, cvt) if hu is None else hu.apply(cvt)["xa"]
-    wrf = xatowrf(grid, xb, xa, check_rh=check_rh, var4d=var4d is not None)
+    wrf = xatowrf(grid, xb, xa, check_rh=check_rh)
     timings["transfer_s"] = time.perf_counter() - t2
     log = "".join(r.log for r in results)
     return VarResult(log=log, cg=results, cvt=cvt, xa=xa, wrf=wrf, xb=xb, grid=grid, nobs=int(term.mask.sum()),
                      timings=timings, radiance=rreport, fit=fit)
+
+
+def _analysis_state(start: FirstGuess, wrf: dict) -> FirstGuess:
+    """``start`` with :data:`WRF_FIELDS` replaced by the analysis's (WRFDA's
+    ``grid`` after ``da_transfer_xatowrf``): what an outer loop's nonlinear
+    rerun starts from.  ``path`` stays ``start``'s, whose file does not hold
+    this state; :func:`write_analysis_file` writes it
+    (``write_analysis_file(state, state.fields, out)``)."""
+    fields = dict(start.fields)
+    for k in WRF_FIELDS:
+        fields[k] = np.array(wrf[k], dtype=np.float64)
+    return FirstGuess(path=start.path, fields=fields, attrs=dict(start.attrs), times=start.times)
+
+
+def _analyse_var4d(b, fg, xb, grid, obs, fgat, proj, window, var4d, *, max_ext_its, ntmax, eps, check_rh,
+                   landuse_table, write, timings, t0, **cg_kw) -> VarResult:
+    """:func:`analyse`'s 4D-Var: :func:`woof.da.var.outer4d.outer_loops` with
+    WRFDA's pieces (after :func:`_fgat_refusals`).
+
+    Loop 1 is the one-loop 4D-Var: the increment transferred about
+    ``first_guess`` (``fg``/``xb``/``grid``), the slots ``fgat``'s.  Loop
+    ``it > 1`` reruns ``var4d.nl_model`` from the previous loop's analysis
+    (:func:`_analysis_state`), and everything (``U``'s background, the
+    transfer about the window's start, each slot's innovations, QC and
+    ``H'``, the analysis) is about that run: its slot 1 is the start, as
+    WRFDA's var4d ``da_get_innov_vector`` leaves slot 1's state in ``grid``.
+    The observations are read once; each loop recomputes the innovations
+    and QC from them (WRFDA carries the previous loop's QC flags, see
+    docs/var.md).
+    """
+    from . import fgat as fm
+    from .cost import VarCost
+    from .fourd import FourDObsTerm
+    from .outer4d import Trajectory, outer_loops
+
+    paths = [obs] if isinstance(obs, (str, Path)) else list(obs)
+    wobs = fm.read_obs_ascii_fgat(paths, proj, **window)
+    nslots = len(fgat)
+    clock = {"setup1_s": 0.0, "setup_s": 0.0, "transfer_s": 0.0, "nl_model_s": 0.0}
+    last: dict = {}
+
+    def setup(it, trajectory):
+        t = time.perf_counter()
+        if it == 1:
+            start, (xb0, grid0) = fg, (xb, grid)
+            slots = list(trajectory.slots)
+        else:
+            slots = [f if isinstance(f, FirstGuess) else read_first_guess(f) for f in trajectory.slots]
+            if len(slots) != nslots:
+                raise ValueError(f"outer loop {it}: the rerun has {len(slots)} slot states, the window {nslots}")
+            try:
+                fm.check_fgat(nslots, [fm.first_guess_time(f) for f in slots],
+                              time_window_min=window["time_window_min"], time_window_max=window["time_window_max"])
+            except ValueError as exc:
+                raise ValueError(f"outer loop {it}: the rerun's slots: {exc}") from None
+            start = slots[0]
+            xb0, grid0 = wrftoxb(start, landuse_table=landuse_table)
+            if xb0["t"].shape != xb["t"].shape:
+                raise ValueError(f"outer loop {it}: the rerun is on {xb0['t'].shape}, the first guess on "
+                                 f"{xb['t'].shape}")
+        states = _slot_states(slots, xb0, proj, landuse_table=landuse_table,
+                              what="FGAT slot" if it == 1 else f"outer loop {it}: slot")
+        iv = fm.innovations_fgat(wobs, [x for x, _ in states])
+        if it > 1 and var4d.base_rtol is not None and callable(getattr(var4d.model, "check_base", None)):
+            var4d.model.check_base(states, rtol=var4d.base_rtol)
+        term = FourDObsTerm(iv, states, (xb0, grid0), model=var4d.model, press=var4d.press, ph=var4d.ph)
+        xbu = {k: xb0[k] for k in _XBU}
+        cost = VarCost.reference(b, xbu, [term])
+        clock["setup_s" if it > 1 else "setup1_s"] += time.perf_counter() - t
+        return cost, (start, xb0, grid0, xbu, term)
+
+    def update(it, context, xhat):
+        t = time.perf_counter()
+        start, xb0, grid0, xbu, term = context
+        xa = xa_from_cv(b, xbu, np.asarray(xhat, dtype=np.float64))
+        wrf = xatowrf(grid0, xb0, xa, check_rh=check_rh, var4d=True)
+        last.update(xa=xa, wrf=wrf)
+        state = _analysis_state(start, wrf) if it < max_ext_its else None
+        clock["transfer_s"] += time.perf_counter() - t
+        return state
+
+    def nl_model(it, state):
+        t = time.perf_counter()
+        run = var4d.nl_model(it, state)
+        clock["nl_model_s"] += time.perf_counter() - t
+        return run
+
+    t1 = time.perf_counter()
+    results, cvt, _, context = outer_loops(
+        setup, update, Trajectory(slots=list(fgat)), max_ext_its=max_ext_its,
+        nl_model=nl_model if var4d.nl_model is not None else None, model=var4d.model, ntmax=ntmax, eps=eps,
+        write=write, **cg_kw)
+    total = time.perf_counter() - t1
+    timings["setup_s"] = (t1 - t0) + clock["setup1_s"]
+    timings["minimise_s"] = total - sum(clock.values())
+    timings["transfer_s"] = clock["transfer_s"]
+    if max_ext_its > 1:
+        timings["outer_setup_s"] = clock["setup_s"]
+        timings["nl_model_s"] = clock["nl_model_s"]
+    _, xb0, grid0, _, term = context
+    log = "".join(r.log for r in results)
+    return VarResult(log=log, cg=results, cvt=np.asarray(cvt, dtype=np.float64), xa=last["xa"], wrf=last["wrf"],
+                     xb=xb0, grid=grid0, nobs=int(term.mask.sum()), timings=timings)
 
 
 def _fgat_refusals(obs, fgat, first_guess, *, window_minutes, time_window, max_ext_its, radiances, xb_override,
@@ -631,7 +742,7 @@ def _fgat_refusals(obs, fgat, first_guess, *, window_minutes, time_window, max_e
     from . import fgat as fm
 
     if var4d is not None:
-        _var4d_refusals(var4d, tier, [first_guess, *fgat])
+        _var4d_refusals(var4d, tier, [first_guess, *fgat], max_ext_its=max_ext_its)
 
     if radiances:
         raise NotImplementedError("FGAT with radiances is not ported (WRFDA bins radiances by time slot)")
@@ -645,17 +756,24 @@ def _fgat_refusals(obs, fgat, first_guess, *, window_minutes, time_window, max_e
         window.update(time_window_min=time_window[0], time_window_max=time_window[1])
     paths = [obs] if isinstance(obs, (str, Path)) else list(obs)
     fm.check_fgat(len(paths), [fm.first_guess_time(f) for f in fgat], time_window_min=window["time_window_min"],
-                  time_window_max=window["time_window_max"], max_ext_its=max_ext_its,
+                  time_window_max=window["time_window_max"], max_ext_its=1 if var4d is not None else max_ext_its,
                   analysis_date=window["analysis_date"])
     if var4d is not None:
+        from .fourd import check_var4d_bins
         from .obs_wrfda import _date_minutes
 
         if abs(_date_minutes(window["analysis_date"]) - _date_minutes(window["time_window_min"])) >= 0.1:
             raise ValueError(f"4D-Var: the first guess is at {window['analysis_date'][:19]}, not at the window's "
                              f"start {window['time_window_min'][:19]} (the TL model starts from the analysis)")
+        bins = check_var4d_bins(window["time_window_min"], window["time_window_max"], len(fgat),
+                                var4d_bin=var4d.var4d_bin, time_step=var4d.time_step)
+        sps = getattr(var4d.model, "sps", None)
+        if sps is not None and bins["steps_per_bin"] is not None and sps != bins["steps_per_bin"]:
+            raise ValueError(f"4D-Var: the window model reads a slot every {sps} steps, but var4d_bin / time_step "
+                             f"= {bins['var4d_bin']} / {var4d.time_step} = {bins['steps_per_bin']}")
 
 
-def _var4d_refusals(var4d, tier, first_guesses) -> None:
+def _var4d_refusals(var4d, tier, first_guesses, *, max_ext_its: int = 1) -> None:
     """4D-Var's refusals from the options and the first guesses' headers.
 
     Where each of the 4D-Var plan's refusals is enforced:
@@ -663,9 +781,14 @@ def _var4d_refusals(var4d, tier, first_guesses) -> None:
     - here, before anything is read: a device ``tier`` (the 4D-Var term is
       host binary64 and has no device-tier comparison yet), ``press`` and
       ``ph`` values, ``HYBRID_OPT > 0`` and a first guess without ``DN``;
+    - here too: more than one outer loop without ``var4d.nl_model`` (or with
+      a TL model that cannot be relinearised);
     - :func:`_fgat_refusals` (also before reading): radiances, the hybrid
-      (ensemble) B, more than one outer loop, ``xb_override``, a first guess
-      not at the window's start;
+      (ensemble) B, ``xb_override``, a first guess not at the window's
+      start, and :func:`~woof.da.var.fourd.check_var4d_bins` (WRFDA's
+      ``var4d_bin`` and ``time_step`` rules, the slot count);
+    - :func:`_analyse_var4d`, in each outer loop after the first: a rerun
+      whose slots are not at the slot times, off the projection or shape;
     - :class:`~woof.da.var.fourd.FourDObsTerm` (after the files are read):
       :func:`~woof.da.var.transfer4d.check_supported` again on the read
       states (the ``c1``..``c4`` coefficients themselves, ``DN``, binary64,
@@ -684,6 +807,14 @@ def _var4d_refusals(var4d, tier, first_guesses) -> None:
         raise ValueError(f"var4d.press must be one of {t4._PRESS}, not {var4d.press!r}")
     if var4d.ph not in t4._PH:
         raise ValueError(f"var4d.ph must be one of {t4._PH}, not {var4d.ph!r}")
+    if max_ext_its > 1:
+        if var4d.nl_model is None:
+            raise NotImplementedError(f"4D-Var with max_ext_its = {max_ext_its} needs var4d.nl_model: WRFDA reruns "
+                                      "the nonlinear model from the updated analysis in every outer loop "
+                                      "(da_nl_model), and there is no nonlinear model to rerun without one")
+        if not callable(getattr(var4d.model, "relinearise", None)):
+            raise TypeError(f"4D-Var with max_ext_its = {max_ext_its}: {type(var4d.model).__name__} has no "
+                            "relinearise(trajectory), so its TL and AD would stay on loop 1's trajectory")
     for f in first_guesses:
         attrs, names = _header(f)
         if int(attrs.get("HYBRID_OPT", 0)) > 0:
@@ -712,21 +843,28 @@ def _fgat_innovations(obs, fgat, xb, proj, window, *, landuse_table):
     """FGAT's innovation vector, each slot's observations against its own first guess
     (after :func:`_fgat_refusals`), and the slots' ``(xb, grid)``."""
     from . import fgat as fm
+
+    paths = [obs] if isinstance(obs, (str, Path)) else list(obs)
+    states = _slot_states(fgat, xb, proj, landuse_table=landuse_table)
+    wobs = fm.read_obs_ascii_fgat(paths, proj, **window)
+    return fm.innovations_fgat(wobs, [x for x, _ in states]), states
+
+
+def _slot_states(fgat, xb, proj, *, landuse_table, what: str = "FGAT slot") -> list:
+    """Each slot's ``(xb, grid)`` (:func:`wrftoxb`), refusing a slot off the
+    first guess's projection or shape."""
     from . import obs_wrfda as ow
 
     fgs = [f if isinstance(f, FirstGuess) else read_first_guess(f) for f in fgat]
-    paths = [obs] if isinstance(obs, (str, Path)) else list(obs)
-    xbs, states = [], []
+    states = []
     for n, f in enumerate(fgs, start=1):
         if ow.LambertWRFDA.from_attributes(f.attrs) != proj:
-            raise ValueError(f"FGAT slot {n}: {f.path.name} is not on the first guess's projection")
+            raise ValueError(f"{what} {n}: {f.path.name} is not on the first guess's projection")
         x, g = wrftoxb(f, landuse_table=landuse_table)
         if x["t"].shape != xb["t"].shape:
-            raise ValueError(f"FGAT slot {n}: {f.path.name} is {x['t'].shape}, the first guess {xb['t'].shape}")
-        xbs.append(x)
+            raise ValueError(f"{what} {n}: {f.path.name} is {x['t'].shape}, the first guess {xb['t'].shape}")
         states.append((x, g))
-    wobs = fm.read_obs_ascii_fgat(paths, proj, **window)
-    return fm.innovations_fgat(wobs, xbs), states
+    return states
 
 
 def _fit(cost, d0, cvt, terms) -> dict:
