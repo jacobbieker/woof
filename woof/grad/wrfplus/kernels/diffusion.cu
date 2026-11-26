@@ -124,6 +124,7 @@ struct DfSrc {
     const wreal* dnw;
     wreal rdx, rdy, cf1, cf2, cf3;
     int nz, ny, nx, bx, by;
+    int seam_x, seam_y;  // WRF's cold seam slope at the top w level
     int tl;       // 1: tangents from ud/vd/phpd; 0: the seed's
     int which;    // the seeded input (DF_U, DF_V, DF_PH)
     size_t at;    // and its word
@@ -180,6 +181,9 @@ static __device__ Dl df_zx(const DfSrc& s, int kw, int j, int iface)
 {
     if (s.bx && iface <= 0) return dl((wreal)0, (wreal)0);
     if (s.bx && iface >= s.nx) iface = s.nx - 1;
+    // smag2d.cu wrf_zx: a periodic seam's top w level keeps WRF's cold zero
+    // (RunConfig.diff_metrics_seam_slope off).
+    if (s.seam_x && kw >= s.nz && df_per(iface, s.nx) == 0) return dl((wreal)0, (wreal)0);
     int jc = df_iy(s, j), ip = df_ix(s, iface), im = df_ix(s, iface - 1);
     kw = kw < 0 ? 0 : (kw > s.nz ? s.nz : kw);
     size_t a = R3(kw, jc, ip, s.ny, s.nx), b = R3(kw, jc, im, s.ny, s.nx);
@@ -192,6 +196,7 @@ static __device__ Dl df_zy(const DfSrc& s, int kw, int jface, int i)
 {
     if (s.by && jface <= 0) return dl((wreal)0, (wreal)0);
     if (s.by && jface >= s.ny) jface = s.ny - 1;
+    if (s.seam_y && kw >= s.nz && df_per(jface, s.ny) == 0) return dl((wreal)0, (wreal)0);
     int ic = df_ix(s, i), jp = df_iy(s, jface), jm = df_iy(s, jface - 1);
     kw = kw < 0 ? 0 : (kw > s.nz ? s.nz : kw);
     size_t a = R3(kw, jp, ic, s.ny, s.nx), b = R3(kw, jm, ic, s.ny, s.nx);
@@ -305,7 +310,10 @@ static __device__ DfSrc df_src(const wreal* u, const wreal* ud, const wreal* v, 
     s.msft = msft; s.msfu = msfu; s.msfv = msfv; s.fnm = fnm; s.fnp = fnp; s.dn = dn;
     s.dnw = dnw;
     s.rdx = rdx; s.rdy = rdy; s.cf1 = cf1; s.cf2 = cf2; s.cf3 = cf3;
-    s.nz = nz; s.ny = ny; s.nx = nx; s.bx = bx; s.by = by;
+    // the primal's boundary flags (smag2d.cu wrf_grid): 2 is a periodic
+    // axis with WRF's cold seam slope at the top w level
+    s.nz = nz; s.ny = ny; s.nx = nx; s.bx = bx & 1; s.by = by & 1;
+    s.seam_x = bx == 2; s.seam_y = by == 2;
     s.tl = tl; s.which = 0; s.at = 0;
     return s;
 }
@@ -366,6 +374,8 @@ extern "C" __global__ void df_ad(const wreal* __restrict__ a11, const wreal* __r
     if (t >= nu + nv + nw) return;
     DfSrc s = df_src(u, u, v, v, php, php, phb, msft, msfu, msfv, fnm, fnp, dn, dnw, rdx, rdy,
                      cf1, cf2, cf3, bx, by, nz, ny, nx, 0);
+    bx &= 1;
+    by &= 1;
     int k, j, i, w, h;
     wreal* out;
     if (t < nu) {

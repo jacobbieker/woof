@@ -3567,6 +3567,11 @@ def _drop_default_off_run_keys(values: dict) -> None:
     # The Noah land-ice rain runoff (FQ8): absent while off.
     if values.get("noah_land_ice_rain_runoff", False) is False:
         values.pop("noah_land_ice_rain_runoff", None)
+    # The diffusion-metrics periodic seam correction (FQ12): absent while
+    # off, as every correction key (the loop above); a checkpoint from
+    # another commit is refused by the runtime identity whatever it echoes.
+    if values.get("diff_metrics_seam_slope", False) is False:
+        values.pop("diff_metrics_seam_slope", None)
     # The opt-in resolved obstacles (woof.core.obstacles): every key at its
     # default is what every earlier header ran, so each is echoed only when
     # it differs; obstacle_opt = 1 always echoes with its file.
@@ -5862,6 +5867,7 @@ _RESTART_ABSENT_RUN_DEFAULTS = {
     'rrtmg_lw_model_top': False,
     'thompson_lamc_updated_rc': False,
     'noah_land_ice_rain_runoff': False,
+    'diff_metrics_seam_slope': False,
     'obstacle_opt': 0,
     'obstacle_file': '',
     'obstacle_solid_fraction': 0.5,
@@ -6519,6 +6525,7 @@ ECHO_ABSENT_RUN_VALUES = {"nest_accumulation_archive": False,
                           "rrtmg_lw_model_top": False,
                           "thompson_lamc_updated_rc": False,
                           "noah_land_ice_rain_runoff": False,
+                          "diff_metrics_seam_slope": False,
                           "obstacle_opt": 0, "obstacle_file": "",
                           "obstacle_solid_fraction": 0.5,
                           "obstacle_relax_factor": 10.0,

@@ -180,6 +180,7 @@ _WRF_SCHEMES = {
     "rrtmg_lw_model_top": dict(ra_physics=4, ra_rrtmg_variant="rrtmg_legacy"),
     "thompson_lamc_updated_rc": dict(mp_physics=28, moist=True),
     "noah_land_ice_rain_runoff": dict(sf_surface_physics=2, bl_pbl_physics=1, sf_sfclay_physics=1),
+    "diff_metrics_seam_slope": dict(diff_opt=2, km_opt=2),
 }
 
 
@@ -311,6 +312,67 @@ def test_all_and_none_set_the_run_corrections():
     assert run.ysu_surface_heat_exner is False
 
 
+def test_a_key_named_next_to_none_wins_in_python_as_in_toml():
+    """RunConfig built in Python (or dataclasses.replace) agrees with the
+    TOML route: 'none' turns off every correction not named."""
+    from dataclasses import replace
+    schemes = dict(cu_physics=3, cudt_minutes=0.0, moist=True, bl_pbl_physics=1, sf_sfclay_physics=1)
+    named = {"gf_deep_rain_evaporation_booking": True}
+    toml = validate_run_config(_base(**qc.apply_run_corrections({qc.UMBRELLA: "none", **schemes, **named})))
+    python = validate_run_config(_base(woof_quirk_corrections="none", **schemes, **named))
+    for key in qc.keys("wrf"):
+        assert getattr(python, key) is getattr(toml, key), key
+    assert python.gf_deep_rain_evaporation_booking is True and python.ysu_surface_heat_exner is False
+    assert qc.run_reads(python, "gf_deep_rain_evaporation_booking")
+    # nothing named: every one off
+    bare = _base(woof_quirk_corrections="none", **schemes)
+    assert not any(getattr(bare, key) for key in qc.keys("wrf"))
+    # replace() of a resolved 'none' RunConfig takes the changed key and keeps the rest
+    turned = replace(bare, ysu_surface_heat_exner=True)
+    assert turned.ysu_surface_heat_exner is True and turned.gf_deep_rain_evaporation_booking is False
+    assert replace(turned, nx=10).ysu_surface_heat_exner is True
+    # the umbrella is held resolved, so asdict / replace round trips keep it
+    assert bare.woof_quirk_corrections is None and python.woof_quirk_corrections is None
+    # applying 'none' to a resolved configuration (every field restated) turns every one off
+    from dataclasses import asdict
+    on = _base(**schemes)
+    assert all(getattr(on, key) for key in qc.keys("wrf"))
+    for off in (replace(on, woof_quirk_corrections="none"),
+                RunConfig(**{**asdict(on), "woof_quirk_corrections": "none"})):
+        assert not any(getattr(off, key) for key in qc.keys("wrf"))
+    # 'all': every one on, and one named false where its scheme runs is refused, as in TOML
+    assert all(getattr(_base(woof_quirk_corrections="all", **schemes), key) for key in qc.keys("wrf"))
+    with pytest.raises(ConfigurationRefused, match="ysu_surface_heat_exner"):
+        _base(woof_quirk_corrections="all", ysu_surface_heat_exner=False, **schemes)
+    # held resolved under 'all' too: a replace() of one key keeps it, as under 'none'
+    full = _base(woof_quirk_corrections="all", **schemes)
+    assert full.woof_quirk_corrections is None
+    assert replace(full, ysu_surface_heat_exner=False).ysu_surface_heat_exner is False
+
+
+def test_a_wrf_hydro_coupling_does_not_read_the_noah_floor_booking(monkeypatch):
+    """FQ4 is off under a WRF-Hydro coupling (woof.core.physics), so
+    run_reads says so and the receipt lists it uncorrected; the echo and
+    the identity read the configuration alone, whatever the launch."""
+    from woof import correct_mode
+    from woof.io.restart import configuration_echo
+    from woof.wrf_hydro_route import ENV_NAMELIST
+    run = validate_run_config(_base(**_WRF_SCHEMES["noah_smc_floor_booking"]))
+    monkeypatch.delenv(ENV_NAMELIST, raising=False)
+    assert qc.run_reads(run, "noah_smc_floor_booking")
+    assert "FQ4" not in correct_mode.uncorrected(run)
+    assert configuration_echo(run).get("noah_smc_floor_booking") is True
+    monkeypatch.setenv(ENV_NAMELIST, "hydro.namelist")
+    assert run.noah_smc_floor_booking is True
+    assert not qc.run_reads(run, "noah_smc_floor_booking")
+    assert "FQ4" in correct_mode.uncorrected(run)
+    assert configuration_echo(run).get("noah_smc_floor_booking") is True
+    values = {"sf_surface_physics": 2}
+    assert correct_mode.key_in_scope("noah_smc_floor_booking", values)
+    assert not correct_mode.key_in_scope(
+        "noah_smc_floor_booking", {**values, correct_mode.WRF_HYDRO_SELECTOR: True})
+
+
 def test_an_explicit_umbrella_refuses_a_conflicting_key_by_name():
     with pytest.raises(ConfigurationRefused, match="ysu_surface_heat_exner"):
         qc.apply_run_corrections({qc.UMBRELLA: "all", "bl_pbl_physics": 1, "ysu_surface_heat_exner": False})
@@ -341,9 +403,8 @@ def test_an_explicit_umbrella_refuses_a_conflicting_key_by_name():
 
 def test_a_runconfig_built_in_python_resolves_the_umbrella():
     # every construction path (load_config, build_experiment, the domain and
-    # downscale readers, Python) gets the same corrections: __post_init__
-    run = validate_run_config(_base(bl_pbl_physics=1, sf_sfclay_physics=1, woof_quirk_corrections="all",
-                                    ysu_surface_heat_exner=False))
+    # downscale readers, Python) gets the same corrections: apply_run_corrections
+    run = validate_run_config(_base(bl_pbl_physics=1, sf_sfclay_physics=1, woof_quirk_corrections="all"))
     assert run.ysu_surface_heat_exner is True and qc.run_corrections_due(run) == ("ysu_surface_heat_exner",)
     run = _base(bl_pbl_physics=1, sf_sfclay_physics=1, cu_physics=3, woof_quirk_corrections="none")
     assert run.ysu_surface_heat_exner is False and run.gf_deep_rain_evaporation_booking is False

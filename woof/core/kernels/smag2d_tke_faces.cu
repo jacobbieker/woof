@@ -102,8 +102,8 @@ void wrf_tke_rhs_faces(WRF_SMAG_GRID_ARGS,
     if (i >= nx || j >= ny || k >= nz) return;
     // WRF tke_rhs excludes the outer mass rows for open lateral boundaries.
     // A nonzero source there advances TKE in cells WRF leaves untouched.
-    if ((boundary_x && (i == 0 || i == nx - 1))
-        || (boundary_y && (j == 0 || j == ny - 1))) return;
+    if (((boundary_x & 1) && (i == 0 || i == nx - 1))
+        || ((boundary_y & 1) && (j == 0 || j == ny - 1))) return;
     WRF_SMAG_MAKE_GRID;
     SmagIndex idx = IDX3(k, j, i);
     real chm = c1[k] * mut[(SmagIndex)j * nx + i] + c2[k];

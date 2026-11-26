@@ -62,7 +62,8 @@ def forcing_writes_scalar_sources(coupling) -> bool:
 
     Compact resident assembly lends Registry publication its scalar allocation, so such a forcing must work on a
     copy or it would rewrite the published pre-forcing words."""
-    return (any(getattr(coupling, name, None) is not None for name in ('stochastic', 'iau', 'nudging'))
+    return (any(getattr(coupling, name, None) is not None
+                for name in ('stochastic', 'iau', 'nudging', 'obs_nudging'))
             or bool(getattr(getattr(coupling, 'nn_seat', None), 'applies', False)))
 
 
@@ -144,6 +145,8 @@ class ResidentNativeCoupling:
         # IAU (SuiteIau): None without config_IAU_option; itimestep is the run's step (MPAS itimestep).
         self.iau = None
         self.nudging = None
+        # WRF observation nudging (woof.hex.obs_nudging): None without --obs-nudging.
+        self.obs_nudging = None
         self.itimestep = 0
         # A same-host rank (samehost_v842) widens the owned-column sources to
         # its local cells and edges before stochastic forcing and IAU (which
@@ -356,6 +359,12 @@ class ResidentNativeCoupling:
                                  normal_velocity=saved.normal_velocity, state=state, theta_m=saved.theta_m)
                 if nn_seat is not None:
                     nn_seat.after_nudging(self.sources, applied=self.nudging.forced_steps != forced)
+            if self.obs_nudging is not None:
+                # WRF observation nudging (woof.hex.obs_nudging) at the same seat, after analysis nudging, as on
+                # the WOOF column route.
+                self.obs_nudging.add(0, self.sources, float(self.dycore.atmosphere.state.time_seconds),
+                                     self.obs_nudging.dt, driver=self.dycore, rho_edge=diagnostics.h_edge,
+                                     normal_velocity=saved.normal_velocity, state=state, theta_m=saved.theta_m)
             if self.exchange_sources is not None:
                 self.sources=self.exchange_sources(self.sources)
             # The driver's held copy of physics_get_tend's result is dead from here (the RRFS driver's
@@ -2285,6 +2294,16 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
                 pbl_height=lambda: session.field('diag_physics', 'hpbl'))
             receipt['nudging'] = coupling.nudging.receipt()
             print(json.dumps({'nudging': receipt['nudging']}, default=str), flush=True)
+        if getattr(arguments, 'obs_nudging', None) is not None:
+            from ..obs_nudging import attach_v842 as attach_obs_nudging
+            coupling.obs_nudging = attach_obs_nudging(
+                arguments, session=session, config=config, mesh=mesh, prep_geometry=geometry,
+                geometry_mesh=geometry_mesh, zgrid=grid.vertical_grid.zgrid, names=names, dt=dt, cache=dycore.cache,
+                start_time=layout.configs['config_start_time'], partitioned=nudging_partitioned(execution, moving),
+                resumed=bool(resumed) or bool(layout.configs.get('config_do_restart', False)),
+                physics_geometry=getattr(coupling.nudging, 'physics_geometry', None))
+            receipt['obs_nudging'] = coupling.obs_nudging.receipt()
+            print(json.dumps({'obs_nudging': receipt['obs_nudging']}, default=str), flush=True)
         # --w-damping and --inflow-perturbation (the door resolved them: forecast_door._resolve_w_damping /
         # _resolve_inflow_perturbation): the same terms the WOOF-physics route runs, on this route's resident dycore
         # and regional runtime.  Off (the default) builds nothing and leaves every word as it was.
@@ -2640,6 +2659,8 @@ def _run_native_dynamics(arguments, config, layout, payload, streams, library,
                         receipt['iau']=coupling.iau.receipt()
                     if getattr(coupling, 'nudging', None) is not None:
                         receipt['nudging']=coupling.nudging.receipt()
+                    if getattr(coupling, 'obs_nudging', None) is not None:
+                        receipt['obs_nudging']=coupling.obs_nudging.receipt()
                     lake_receipt = clm_lake_service_receipt(session)
                     if lake_receipt is not None:
                         receipt['clm_lake_service'] = lake_receipt
