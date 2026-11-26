@@ -2686,6 +2686,18 @@ class RunConfig:
     # Correct-mode finding FQ6: on by default, off in physics.mode = 'exact'.
     rrtmg_lw_model_top: bool = _config_field(
         default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
+    # Correction of a WRF 4.7.1 quirk (quirk pass 2026-11-26), appended.  The
+    # MYNN surface layer (sf_sfclay_physics = 5) caps the 2 m mixing ratio
+    # at 1.05 * QV1D at every point (module_sf_mynn.F:1149), water included;
+    # the surface driver's cap of the same limit
+    # (module_surface_driver.F:4452-4456) runs over land (XLAND < 1.5) only.
+    # True keeps the cap over land and leaves the surface-flux Q2 over water
+    # (kernels/mynn_surface.cu MYNN_SL_Q2_LAND_CAP), which moves only Q2 and
+    # what is derived from it; False is WRF's arithmetic word for word.
+    # wrf_461 variant only.  Correct-mode finding FQ10: on by default, off in
+    # physics.mode = 'exact'.
+    mynn_sfclay_q2_land_cap: bool = _config_field(
+        default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
 
 
 def _validate_solar_tsi(cfg) -> None:
@@ -2950,7 +2962,8 @@ CORRECT_MODE_RESTART_BREAK_NOTICE = (
     "mynn_boulac_down_sign, pbl_boulac_down_sign, "
     "gf_deep_rain_evaporation_booking, ysu_surface_heat_exner, "
     "mynn_sfclay_psih_zolzt, noah_smc_floor_booking, "
-    "thompson_rain_snow_closure, rrtmg_lw_model_top); otherwise "
+    "thompson_rain_snow_closure, rrtmg_lw_model_top, "
+    "mynn_sfclay_q2_land_cap); otherwise "
     "restart from t = 0.")
 
 #: The same accuracy for the 2.8.9 WRF-folder default (D8): a fixed-step
@@ -10170,6 +10183,8 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
         raise ConfigurationRefused("thompson_rain_snow_closure must be true or false")
     if type(cfg.rrtmg_lw_model_top) is not bool:
         raise ConfigurationRefused("rrtmg_lw_model_top must be true or false")
+    if type(cfg.mynn_sfclay_q2_land_cap) is not bool:
+        raise ConfigurationRefused("mynn_sfclay_q2_land_cap must be true or false")
     from woof.quirk_corrections import check_run_config
     check_run_config(cfg)
     # The quirk-ledger keys (correct-mode findings FQ1-FQ6) are on by

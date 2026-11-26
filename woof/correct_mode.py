@@ -127,6 +127,10 @@ FQ6  WRF's RRTMG longwave (ra_lw_physics = 4 with ra_rrtmg_variant =
      and the top layer's; the key keeps both and anchors the profile at the
      top interface (``rrtmg_lw_model_top``).  The RTE+RRTMGP adapter does not
      carry it.
+FQ10 The wrf_461 MYNN surface layer (sf_sfclay_physics = 5) caps its 2 m
+     mixing ratio at 1.05*qv(1) at every point, water included, where the
+     surface driver's own cap of that limit runs over land only; the key
+     caps over land only (``mynn_sfclay_q2_land_cap``).
 
 WHICH SCHEMES CARRY EACH FINDING is data too (:attr:`Correction.carriers`),
 separate from which schemes a key corrects (:data:`KEY_SCOPE`).  A domain
@@ -329,6 +333,15 @@ CORRECTIONS: tuple[Correction, ...] = (
             "the model top"),
         carriers=(("ra_lw_physics", (4,)),),
     ),
+    Correction(
+        finding="FQ10",
+        keys=("mynn_sfclay_q2_land_cap",),
+        summary=(
+            "the MYNN surface layer caps its 2 m mixing ratio at 1.05 times "
+            "the lowest level over land only, as the surface driver does, "
+            "not over water"),
+        carriers=(("sf_sfclay_physics", (5,)),),
+    ),
 )
 
 #: Finding -> ``(selector, absent value, values)``: a carrier that is a
@@ -343,6 +356,8 @@ CARRIER_GENERATIONS: Mapping[str, tuple[str, str, tuple[str, ...]]] = {
     "MY1": ("bl_mynn_version", "wrf_461", ("wrf_461", "wrf_471", "wrf_480")),
     # FQ3: the gsl_wrf39 surface layer integrates from z0/L throughout.
     "FQ3": ("mynn_sfclay_variant", "wrf_461", ("wrf_461",)),
+    # FQ10: the gsl_wrf39 surface layer is another source.
+    "FQ10": ("mynn_sfclay_variant", "wrf_461", ("wrf_461",)),
     # FQ6: only the legacy RRTMG longwave (rrtmg_legacy_prep) holds the
     # profile match; RTE+RRTMGP is another implementation.
     "FQ6": ("ra_rrtmg_variant", "rte-rrtmgp", ("rrtmg_legacy",)),
@@ -356,6 +371,7 @@ KEY_GENERATIONS: Mapping[str, tuple[str, str, tuple[str, ...]]] = {
     "mynn_fixes_v61": ("bl_mynn_version", "wrf_461", ("wrf_461",)),
     "mynn_sfclay_psih_zolzt": ("mynn_sfclay_variant", "wrf_461", ("wrf_461",)),
     "rrtmg_lw_model_top": ("ra_rrtmg_variant", "rte-rrtmgp", ("rrtmg_legacy",)),
+    "mynn_sfclay_q2_land_cap": ("mynn_sfclay_variant", "wrf_461", ("wrf_461",)),
 }
 
 #: Key -> ``(selector, values)``: the scheme selection under which the key is
@@ -393,6 +409,8 @@ KEY_SCOPE: Mapping[str, tuple[str, tuple[int, ...]]] = {
     # FQ6: the longwave scheme (the aggregate ra_physics resolves to it,
     # _selector_int), at the legacy variant (KEY_GENERATIONS).
     "rrtmg_lw_model_top": ("ra_lw_physics", (4,)),
+    # FQ10: the MYNN surface layer, at wrf_461 (KEY_GENERATIONS), as FQ3.
+    "mynn_sfclay_q2_land_cap": ("sf_sfclay_physics", (5,)),
 }
 
 #: Key -> ``(selector, values)``: selections inside :data:`KEY_SCOPE` under

@@ -117,6 +117,11 @@ CORRECTIONS: tuple[QuirkCorrection, ...] = (
         active=lambda get: (int(get("ra_physics") if int(get("ra_lw_physics")) == -1
                                 else get("ra_lw_physics")) == 4
                             and get("ra_rrtmg_variant") == "rrtmg_legacy")),
+    QuirkCorrection(
+        "mynn_sfclay_q2_land_cap", "wrf", False, True, "sf_sfclay_physics = 5, mynn_sfclay_variant = wrf_461",
+        "the MYNN surface layer caps its 2 m mixing ratio at 1.05 times the lowest level over land only, as the surface driver does, not over water",
+        # the gsl_wrf39 fork is another source: nothing to correct
+        active=lambda get: int(get("sf_sfclay_physics")) == 5 and get("mynn_sfclay_variant") == "wrf_461"),
     # hex (MPAS) regional route
     QuirkCorrection(
         "undriven_species_boundary", "hex", "free", "wrf-flow-dependent", "regional mesh (--lbc-dir)",

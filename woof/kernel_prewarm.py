@@ -342,6 +342,11 @@ def _psih_zolzt(run) -> bool:
     return _reads(run, "mynn_sfclay_psih_zolzt")
 
 
+def _q2_land_cap(run) -> bool:
+    """RunConfig.mynn_sfclay_q2_land_cap where it is read."""
+    return _reads(run, "mynn_sfclay_q2_land_cap")
+
+
 #: Units launched with RunConfig.thompson_rain_snow_closure's define through
 #: load_module_int_defines (woof.core.thompson._closure_kernel,
 #: thompson_classic, thompson_aerosol_launch.CLOSURE_MODULES).
@@ -379,7 +384,8 @@ def _variant_jobs(experiment, modules):
                 # compiled at its first call; mynn_surface keeps its default.
                 variant = getattr(run, "mynn_sfclay_variant", "wrf_461")
                 defines = (mynn_surface_defines(variant,
-                                                _psih_zolzt(run))
+                                                _psih_zolzt(run),
+                                                _q2_land_cap(run))
                            if variant in MYNN_SFCLAY_DEFINES else ())
             tiers = [defines] if defines else []
             if name == "advection":
