@@ -4221,7 +4221,7 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
 
     # ---- [shared] ------------------------------------------------------
     shared = dict(raw.get("shared", {}))
-    # wrf_reference = "4.8.0" | "4.7.1" pins the scheme generations that
+    # wrf_reference = "4.8.1" | "4.8.0" | "4.7.1" pins the scheme generations that
     # WRF release runs, resolved here into the per-scheme keys (an explicit
     # per-scheme key wins); absent, nothing changes (woof.wrf_reference).
     from woof.wrf_reference import resolve_wrf_reference
