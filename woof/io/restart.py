@@ -4267,7 +4267,6 @@ def physics_setup_identity(state, cfg) -> dict:
         }
     if int(cfg.mp_physics) == 40:
         from woof.core.morrison_aero import constant_words
-        import hashlib
         microphysics["morrison_aero"]={"morr_rimed_ice":int(cfg.morr_rimed_ice),"aercu_opt":int(cfg.aercu_opt),"activation_temperature":"wrf","constant_words_sha256":hashlib.sha256(constant_words(cfg.morr_rimed_ice).tobytes()).hexdigest()}
     if int(cfg.mp_physics) == 8:
         microphysics["thompson"] = _thompson_setup_identity(cfg)

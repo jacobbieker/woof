@@ -26,7 +26,6 @@ from woof.hex.cli import main
 REFUSED = [
     ({"ifire": 1}, "ifire", "fire grid", "biomass_burn_opt"),
     ({"ifire": 2, "sr_x": 2, "sr_y": 2}, "ifire", "fire grid", "biomass_burn_opt"),
-    ({"slope_rad": 1}, "slope_rad", "neighbour terrain", "slope_rad=0"),
     ({"topo_shading": 1}, "topo_shading", "shadow", "topo_shading=0"),
     ({"shadlen": 25000.0}, "shadlen", "topo_shading", "topo_shading=0"),
     ({"wind_farm_scheme": "mav", "wind_farms": "farm.csv"}, "wind_farm_scheme",
@@ -126,13 +125,13 @@ def test_admitted_options_resolve_unchanged(args, digest):
 
 
 def test_the_cli_refuses_a_named_setting(capsys):
-    code = main(["physics", "resolve", "--physics", "slope_rad=1"])
+    code = main(["physics", "resolve", "--physics", "slope_rad=1", "--physics", "topo_shading=1"])
     captured = capsys.readouterr()
     assert code != 0
     report = json.loads(captured.out)
     assert report["resolved"] is False
     assert [(item["option"], item["follow_up"]) for item in report["refusals"]] == [
-        ("slope_rad", "slope_rad=0")]
+        ("topo_shading", "topo_shading=0")]
 
 
 def test_an_explicit_off_windfarm_opt_resolves():

@@ -188,6 +188,9 @@ CORRECTIONS: tuple[QuirkCorrection, ...] = (
     QuirkCorrection(
         "subcycle_snow_ice_tracers", "mpas_seaice", False, True, "vertical tracers with dynamics subcycles",
         "the vertical tracers are separated after each subcycle, so the next combine keeps the ridging"),
+    QuirkCorrection(
+        "zap_snow_area", "mpas_seaice", False, True, "vertical tracers with the ITD cleanup (zap_small_areas)",
+        "zap_small_areas hands zap_snow the category's area, so the snow surface layer's tracer reaches oceanBioFluxes"),
     # MPAS-Seaice v8.4.2 velocity solver set-up (woof.hex.mpas_seaice.timestep_v842)
     QuirkCorrection(
         "planar_metric_terms", "mpas_seaice_velocity", False, True, "variational basis on a planar mesh",
