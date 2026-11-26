@@ -24,7 +24,7 @@ def test_native_fatal_half_pair_is_refused(pair):
         validate_run_config(config(*pair))
 
 
-@pytest.mark.parametrize('nz',[3,101])
+@pytest.mark.parametrize('nz',[3,257])
 def test_native_cloud_group_and_vertical_scratch_bounds(nz):
     with pytest.raises(ConfigurationRefused,match='FLG|nz must'):
         validate_run_config(config(nz=nz))

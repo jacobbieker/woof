@@ -310,8 +310,9 @@ def inventory(root: Path) -> dict:
 #: Kernel files the runtime compiles on their own routes, with their own
 #: headers, defines and options. The generic loader's composition of these
 #: files does not compile; composed_units audits what each route compiles.
-DEDICATED_ROUTES = frozenset({"acm2pbl", "eeps", "etanew", "gbmpbl", "nextgen_cfe",
-                              "nextgen_reservoirs", "snow_papers", "vortex_init"})
+DEDICATED_ROUTES = frozenset({"acm2pbl", "eeps", "etanew", "gbmpbl", "mynnsfc_b66187f",
+                              "nextgen_cfe", "nextgen_reservoirs", "snow_lap", "snow_papers",
+                              "vortex_init"})
 #: EEPS's column depth is a compile-time define (woof/core/eeps_pbl.py). The
 #: audit compiles WRF's default 45 staggered levels, i.e. 44 mass levels.
 EEPS_AUDIT_NZ = 44
@@ -328,7 +329,8 @@ def source_units(root: Path, *, captures: Path | None = None) -> tuple[list[Unit
     # These files are components, not the sources their runtime compiles.
     # Their real factories are included by composed_units. Compiling a
     # fragment without its defines/libm creates false coverage and errors.
-    fragments = {"p3", "p3_zdiag", "fast_sbm", "rrtmg_lw", "rrtmg_sw", "terrain_drag", "urban_bep_bem",
+    fragments = {"p3", "p3_zdiag", "fast_sbm", "rrtmg_lw", "rrtmg_sw", "terrain_drag",
+                 "terrain_drag_gwdo480", "urban_bep_bem",
                  "windfarm_fitch", "fire_spread", "nest_vertical", "windfarm_fitch_cells",
                  "rrtmg_lw_chain", "rrtmg_lw_chain_coalesced", "rrtmg_lw_zbatched",
                  "rrtmg_lw_taugb02_10_11_12", "rrtmg_lw_taugb03_05",
@@ -420,6 +422,8 @@ def composed_units(root: Path) -> list[Unit]:
         Unit("composed:rrtmg_sw", sw_defines + (kdir / "rrtmg_sw.cu").read_text(encoding="utf-8")
              + sw.spectral_source(), ("-std=c++17", "--ftz=false")),
         Unit("composed:terrain_drag", terrain.module_source(), tuple(terrain.MODULE_OPTIONS)),
+        Unit("composed:terrain_drag_gwdo480", terrain.gwdo480_module_source(),
+             tuple(terrain.MODULE_OPTIONS)),
         Unit("composed:windfarm_fitch", fitch.module_source(), tuple(fitch.MODULE_OPTIONS)),
         Unit("composed:nest_vertical", vnest.module_source(), tuple(vnest.MODULE_OPTIONS)),
         Unit("composed:windfarm_fitch_cells", fitch.cells_module_source(), tuple(fitch.MODULE_OPTIONS)),
@@ -428,6 +432,13 @@ def composed_units(root: Path) -> list[Unit]:
         Unit("composed:noah_mosaic", module_source("noah_mosaic", kernel_dir=kdir),
              tuple(mosaic.MOSAIC_NVRTC_OPTIONS)),
         Unit("composed:noah_mosaic_ucm", mosaic.mosaic_ucm_source(),
+             tuple(mosaic.MOSAIC_NVRTC_OPTIONS)),
+        # the opt-in noah_smc_floor_booking units (woof.core.noah_mosaic)
+        Unit("composed:noah_mosaic[NOAH_SMC_FLOOR_BOOKING=1]",
+             mosaic.SMC_FLOOR_BOOKING_PREFIX + module_source("noah_mosaic", kernel_dir=kdir),
+             tuple(mosaic.MOSAIC_NVRTC_OPTIONS)),
+        Unit("composed:noah_mosaic_ucm[NOAH_SMC_FLOOR_BOOKING=1]",
+             mosaic.SMC_FLOOR_BOOKING_PREFIX + mosaic.mosaic_ucm_source(),
              tuple(mosaic.MOSAIC_NVRTC_OPTIONS)),
         Unit("composed:ntiedtke_fused", nt.source_plan()[0], ("-std=c++17",)),
         Unit("composed:nest", module_source("nest", kernel_dir=kdir),
@@ -480,6 +491,7 @@ def dedicated_route_units(root: Path) -> list[Unit]:
     acm2 = module("core.acm2pbl")
     etanew = module("core.etanew")
     gbm = module("core.gbmpbl")
+    mynnsfc = module("core.mynnsfc_b66187f")
     cfe = module("hydro.cfe")
     reservoirs = module("hydro.reservoirs")
     eeps_options = K.module_options("eeps")
@@ -496,6 +508,9 @@ def dedicated_route_units(root: Path) -> list[Unit]:
         Unit(f"composed:eeps[EEPS_NZ={EEPS_AUDIT_NZ}]",
              K.module_source_int_defines("eeps", (("EEPS_NZ", EEPS_AUDIT_NZ),), kernel_dir=kdir),
              effective_options(eeps_options)),
+        # mynnsfc_b66187f.module(): SL_* defines + mynn_libm.cuh + the unit.
+        Unit("composed:mynnsfc_b66187f", mynnsfc.module_source(),
+             effective_options(mynnsfc.OPTIONS)),
         # cfe._compile_cfe(strict).
         Unit("composed:nextgen_cfe", cfe._cfe_source()[1],
              effective_options(("-std=c++17", "--ftz=false") + ieee)),
@@ -504,6 +519,10 @@ def dedicated_route_units(root: Path) -> list[Unit]:
              land(("--std=c++17", "--ftz=false") + ieee)),
         # snow_papers._module, through noahmp_kernel_sources._compile_loaded_module.
         Unit("composed:snow_papers", (kdir / "snow_papers.cu").read_text(),
+             land(("-std=c++17", "--ftz=false"))),
+        # snow_papers._lap_module: snow_papers.cu, a newline, then snow_lap.cu.
+        Unit("composed:snow_lap", (kdir / "snow_papers.cu").read_text() + "\n"
+             + (kdir / "snow_lap.cu").read_text(),
              land(("-std=c++17", "--ftz=false"))),
         # woof/tc/vortex.py _module: a RawModule, which appends -ftz=true.
         Unit("composed:vortex_init", (kdir / "vortex_init.cu").read_text(),

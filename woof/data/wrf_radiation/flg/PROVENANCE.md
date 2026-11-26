@@ -24,3 +24,41 @@ not affect the real-column replay. No competitor code was used.
 
 Strict elementary-function headers retain their existing permissive
 notices, including Arm MIT and CORE-MATH MIT in `licenses/`.
+
+## Patched-nvx oracle for 101 to 256 layers
+
+Stock WRF sizes FLG's level scratch by `PARA_FILE`'s `nvx = 100`
+(`nv1x = nvx + 1`), so stock WRF cannot run a column deeper than 100
+layers. Columns of 101 to 256 layers are verified against the same pinned
+source with only that parameter raised to 256. This is the whole patch,
+`tools/flg_wrf461_oracle/nvx256.patch`, SHA256
+`b1e28863f9d089db2574252f268a2b8c507c8a8f8df3550b0d00117d2ca0d788`:
+
+```diff
+--- a/phys/module_ra_flg.F
++++ b/phys/module_ra_flg.F
+@@ -8,7 +8,7 @@
+ !   &                      ndfs2  = ndfs * 2, &
+ !   &                      mdfs   = nv + 1,   &
+ !   &                      ndfs4  = 4 * ndfs, &
+-   &                      nvx    = 100,      &
++   &                      nvx    = 256,      &
+    &                      nv1x   = nvx + 1 
+      
+ !spectral band parameters  
+```
+
+The patched source's SHA256 is
+`a6b183cbc1ba103ff585ea9a5f80291c1cdfafb0879b6644b3613f00263e5a48`.
+
+Why this patch and no other: in the pinned source every level-dimensioned
+automatic array is sized by the call's own `nv`/`nv1`; `nvx` sizes only the
+aerosol arrays (`aprofs`, `tae`, `wae`, `wwae`, `a_tau1` and relatives),
+which stock `RAD_FLG` (`naero = 0`) passes but never reads. Raising `nvx` is
+therefore the minimal edit that lets the stock column code accept 256
+layers, and it changes no arithmetic: `build_nvx256.sh` builds the pristine
+and patched libraries side by side, and `make_nvx256_fixture.py` refuses to
+write a fixture unless both return the same words for every output of a
+24-layer and a 100-layer deck (1,632 and 6,648 words). The CUDA port mirrors
+the parameter as `FLG_NVX` (default 100, the unchanged stock bound; 256 for
+deeper columns), see `woof/core/flg_levels.py`. No coefficient table changes.

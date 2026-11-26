@@ -156,9 +156,11 @@ def apply_classic(state, cfg, dt: float, table_owner, *,
         state, th_save, pii, t1d, dz, ng1d, column_micro, column_kmelt,
         size=size, columns=columns, thb_full=thb_full, phb_full=phb_full,
         member_columns=stride)
+    from woof.core.thompson import rain_snow_closure_due
     launch_classic_sources(
         state, t1d, ng1d, column_micro, column_kmelt, table_owner, ten,
-        work, flags, dt, size=size, columns=columns)
+        work, flags, dt, size=size, columns=columns,
+        rain_snow_closure=rain_snow_closure_due(cfg))
     launch_classic_column(
         state, t1d, pii, th, ng1d, w_lower, dz, ten, work, flags,
         colbuf, (rainnc, rainncv, snownc, snowncv, graupelnc, graupelncv,
@@ -201,12 +203,21 @@ def launch_classic_entry(state, th_save, pii, t1d, dz, ng1d, column_micro,
 
 def launch_classic_sources(state, t1d, ng1d, column_micro, column_kmelt,
                            table_owner, ten, work, flags, dt, *,
-                           size, columns):
+                           size, columns, rain_snow_closure=False):
     """``tc_sources``: :1798-3574 per cell.  On return the state holds the
     entry rewrite (:1844-1942) and ``ten`` WRF's tendencies as the rain
     evaporation leaves them (its cp2): every working value is
-    ``X1d + Xten*DT``."""
-    get_kernel("thompson_classic", "tc_sources")(
+    ``X1d + Xten*DT``.  ``rain_snow_closure``: RunConfig.
+    thompson_rain_snow_closure (FQ5), the unit compiled with the
+    rain-snow closure define."""
+    if rain_snow_closure:
+        from woof.core.kernels import get_kernel_int_defines
+        from woof.core.thompson import RAIN_SNOW_CLOSURE_DEFINES
+        sources = get_kernel_int_defines("thompson_classic", "tc_sources",
+                                         RAIN_SNOW_CLOSURE_DEFINES)
+    else:
+        sources = get_kernel("thompson_classic", "tc_sources")
+    sources(
         _grid(size), (_TPB,),
         (state.p, t1d, state.qv, state.qc, state.qi, state.qr, state.qs,
          state.qg, state.ni, state.nr, ng1d, column_micro, column_kmelt,

@@ -532,8 +532,8 @@ fn a_declared_species_row_creates_its_slots_and_an_undeclared_name_still_refuses
 
     let out = scratch("declared.init.nc");
     let declared = vec!["qv".to_string(), "ns".to_string(), "qh".to_string()];
-    let ledger = write_init_declaring(&out, &capsule, with_species(), "mintedfile", &[], "abi pin test",
-                                      &rw_mpas::init::Lineage::default(), &declared)
+    let ledger = write_init_declaring(&out, &capsule, with_species(), &declared, "mintedfile", &[], "abi pin test",
+                                      &rw_mpas::init::Lineage::default())
         .unwrap_or_else(|e| panic!("a declared species row must be admitted: {e}"));
     for name in ["ns", "qh"] {
         assert!(ledger.computed.contains(&name.to_string()), "{name} landed computed: {:?}", ledger.computed);
@@ -551,8 +551,8 @@ fn a_declared_scalar_that_is_not_an_identifier_refuses() {
     let capsule = scratch("badname.capsule.nc");
     write_capsule(&capsule, &BASE_CAPSULE);
     let out = scratch("badname.init.nc");
-    let err = write_init_declaring(&out, &capsule, computed_with_theta(), "mintedfile", &[], "abi pin test",
-                                   &rw_mpas::init::Lineage::default(), &["n s".to_string()])
+    let err = write_init_declaring(&out, &capsule, computed_with_theta(), &["n s".to_string()], "mintedfile", &[],
+                                   "abi pin test", &rw_mpas::init::Lineage::default())
         .err()
         .expect("a declared name with a space must refuse");
     assert!(err.to_string().contains("plain identifier"), "{err}");

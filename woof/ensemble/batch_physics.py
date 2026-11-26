@@ -21,6 +21,7 @@ import textwrap
 
 import numpy as np
 
+from woof.quirk_corrections import run_reads
 from woof.ensemble.batch_storage import BatchArraySpec, BatchMemoryPlan, BatchStorage
 from woof.certify.kernel_manifest import record_module
 
@@ -244,7 +245,7 @@ YSU_SURFACE_OUTPUTS = ("hpbl", "kpbl", "wstar", "delta", "topdown_radsum", "wsta
 def ysu_output_plan(*, nz, ny, nx, members, reserved_bytes=0, surface_heat_exner=False):
     """All-member one-launch YSU outputs plus its full launch workspace.
 
-    ``surface_heat_exner`` (RunConfig.ysu_surface_heat_exner, default off)
+    ``surface_heat_exner`` (RunConfig.ysu_surface_heat_exner, FQ2)
     adds the member theta-flux buffer the corrected launch reads.
     """
     from woof.core.physics_inventory import ysu_workspace_floats
@@ -315,7 +316,7 @@ def prepare_ysu_column_batch(inputs, *, members, ny, nx, dt, available_bytes,
         shared_pointers=shared_fields if members > 1 else (), member_columns=ny * nx)
     bound = dict(inputs)
     if surface_heat_exner:
-        # RunConfig.ysu_surface_heat_exner (default off), as launch_ysu: the
+        # RunConfig.ysu_surface_heat_exner (FQ2), as launch_ysu: the
         # unchanged kernel reads the theta flux HFX/pi(1) from a planned
         # buffer refreshed before every launch.
         bound["hfx"] = storage.arrays["ysu:hfx_theta"].reshape(inputs["hfx"].shape)
@@ -403,8 +404,12 @@ NOAH_SHARED_FIELDS = frozenset({"ivgtyp", "isltyp", "shdmin", "shdmax", "tmn", "
 def prepare_noah_column_batch(fields, params, *, members, ny, nx, dt, dzs,
                               shared_fields=(), isurban=None, isice=None,
                               xice_threshold=0.5, frpcpn=False, usemonalb=False,
-                              rdlai2d=False, opt_thcnd=1, array_module=None):
+                              rdlai2d=False, opt_thcnd=1, array_module=None,
+                              smc_floor_booking=False):
     """One nonurban Noah launch, shared lookup tables and explicit static loads.
+
+    ``smc_floor_booking`` (RunConfig.noah_smc_floor_booking, FQ4)
+    compiles the unit with SSTEP's floor water booked, as launch_noah does.
 
     The caller owns every mutable land-state/output backing and includes it
     in admission. The step number is supplied at launch so the initial-call
@@ -438,8 +443,10 @@ def prepare_noah_column_batch(fields, params, *, members, ny, nx, dt, dzs,
             raise ValueError(f"Noah {name} needs resident contiguous {dtype} shape {shape}")
     tables = _device_tables(params, dzs)
     shared_pointers = tuple(name if name in ("ivgtyp", "isltyp") else f"{name}_a" for name in shared_fields)
+    from woof.core.noah import NOAH_SMC_FLOOR_BOOKING_DEFINES
     kernel, source_receipt = _native_column_kernel("noah", "noah_column",
-        shared_pointers=shared_pointers if members > 1 else (), member_columns=ny * nx)
+        shared_pointers=shared_pointers if members > 1 else (), member_columns=ny * nx,
+        defines=NOAH_SMC_FLOOR_BOOKING_DEFINES if smc_floor_booking else ())
     args = (fields["ivgtyp"], fields["isltyp"]) + tuple(fields[name] for name in _F2D + _F3D) + (fields["ebal"],)
     args += tables + (np.float32(dt), np.int32(params.lucats), np.int32(params.slcats), np.int32(isurban),
                       np.int32(isice), np.float32(xice_threshold))
@@ -1391,8 +1398,10 @@ def bind_owned_default_column_driver(driver, cfg, atmosphere, *, members, ny, nx
     if (cfg.mp_physics not in (8, 55) or (cfg.sf_surface_physics, cfg.bl_pbl_physics) != (2, 1)
             or cfg.sf_sfclay_physics not in (1, 91)):
         raise ValueError("this native binding implements Thompson or ISHMAEL with Noah/YSU/MM5; the configured suite needs its own qualified binding")
-    if cfg.cu_physics not in (0, 99) or cfg.sf_urban_physics or getattr(cfg, "sf_surface_mosaic", 0) or driver.terrain_drag is not None:
-        raise ValueError("this default column binding supports CU0/99 and has no urban, mosaic or terrain-drag producer binding")
+    if (cfg.cu_physics not in (0, 99) or cfg.sf_urban_physics or getattr(cfg, "sf_surface_mosaic", 0)
+            or driver.terrain_drag is not None or getattr(driver, "sfclay_varf", None) is not None):
+        raise ValueError("this default column binding supports CU0/99 and has no urban, mosaic, terrain-drag "
+                         "or kim_tofd form-drag producer binding")
     if cfg.cu_physics == 99 and cfg.mp_physics != 8:
         raise ValueError("the qualified packed CU99 binding requires mp_physics=8")
     if bool(cfg.cu_physics) != (cumulus_coupling is not None):
@@ -1419,7 +1428,7 @@ def bind_owned_default_column_driver(driver, cfg, atmosphere, *, members, ny, nx
     active = atmosphere()
     extras_plan = default_column_extra_plan(nz=nz, ny=ny, nx=nx)
     ysu_plan = ysu_output_plan(nz=nz, ny=ny, nx=nx, members=members,
-                               surface_heat_exner=getattr(cfg, "ysu_surface_heat_exner", False) is True)
+                               surface_heat_exner=run_reads(cfg, "ysu_surface_heat_exner"))
     required = extras_plan.required_bytes(members) + ysu_plan.required_bytes(members)
     if required > available_bytes:
         raise MemoryError(f"default native physics binding needs {required} bytes for YSU and held carriers")
@@ -1433,7 +1442,7 @@ def bind_owned_default_column_driver(driver, cfg, atmosphere, *, members, ny, nx
               "xland": f["xland"], "u10": f["u10"], "v10": f["v10"]}
     ysu = prepare_ysu_column_batch(inputs, members=members, ny=ny, nx=nx, dt=driver.bldt_seconds,
         topdown=cfg.ysu_topdown_pblmix, ysu_version=cfg.ysu_version,
-        surface_heat_exner=getattr(cfg, "ysu_surface_heat_exner", False) is True,
+        surface_heat_exner=run_reads(cfg, "ysu_surface_heat_exner"),
         available_bytes=available_bytes - extras_plan.required_bytes(members),
         array_module=array_module, shared_fields=tuple(sorted(shared_surfaces & {"xland"})))
     sf_inputs = {"u": active["u"][0], "v": active["v"][0], "t": active["temperature"][0], "qv": active["qv"][0],
@@ -1448,7 +1457,8 @@ def bind_owned_default_column_driver(driver, cfg, atmosphere, *, members, ny, nx
     noah = prepare_noah_column_batch(noah_fields, driver.noah_params, members=members, ny=ny, nx=nx,
         dt=driver.bldt_seconds, dzs=NOAH_LAYER_THICKNESS_M, frpcpn=True, usemonalb=driver.noah_usemonalb,
         rdlai2d=driver.noah_rdlai2d, opt_thcnd=driver.noah_opt_thcnd, array_module=array_module,
-        shared_fields=tuple(sorted(shared_surfaces & NOAH_SHARED_FIELDS)))
+        shared_fields=tuple(sorted(shared_surfaces & NOAH_SHARED_FIELDS)),
+        smc_floor_booking=run_reads(cfg, "noah_smc_floor_booking"))
 
     if "xland" in shared_surfaces:
         # A single 2-D immutable mask cannot be flattened into member stripes
@@ -1490,7 +1500,7 @@ def bind_owned_default_column_driver(driver, cfg, atmosphere, *, members, ny, nx
     def native_ysu(*args, **kwargs):
         actual = list(args[:10]) + [kwargs["rthraten"]] + [kwargs[name] for name in YSU_SURFACES]
         verify_pointers(actual, [inputs[name] for name in YSU_COLUMNS + YSU_SURFACES])
-        if bool(kwargs.get("surface_heat_exner", False)) != (getattr(cfg, "ysu_surface_heat_exner", False) is True):
+        if bool(kwargs.get("surface_heat_exner", False)) != (run_reads(cfg, "ysu_surface_heat_exner")):
             raise ValueError("YSU's surface heat flux correction changed after admission")
         if kwargs.get("ysu_version", "wrf_480") != cfg.ysu_version:
             raise ValueError("YSU generation changed after admission; entrainment tendencies would use a different cap")
@@ -1508,6 +1518,8 @@ def bind_owned_default_column_driver(driver, cfg, atmosphere, *, members, ny, nx
         verify_pointers([fields[name] for name in noah_fields], list(noah_fields.values()))
         if params is not driver.noah_params or kwargs.get("urban") is not None or np.float32(dt) != np.float32(driver.bldt_seconds):
             raise ValueError("Noah's table owner, timestep or urban producer changed after admission")
+        if bool(kwargs.get("smc_floor_booking", False)) != (run_reads(cfg, "noah_smc_floor_booking")):
+            raise ValueError("Noah's soil-moisture floor booking changed after admission")
         noah(kwargs["itimestep"])
 
     def sum_radiation(owned):

@@ -37,6 +37,39 @@ def load_geometry(static, capsule):
     return result
 
 
+#: Column extents ``physics.cu`` compiles at.  Its ``#ifndef`` defaults
+#: (``MAX_FG`` and ``MAX_Z``, 128) are the shipped tier: a member whose
+#: first-guess, soil and model level counts are all at most 128 compiles the
+#: unchanged source text.  A deeper extent prepends ``#define`` lines for the
+#: deep tier, which only sizes the per-thread column arrays.
+SHIPPED_LEVELS = 128
+DEEP_LEVELS = 256
+
+
+def tier_defines(nf, nz, ns):
+    """``#define`` lines ``physics.cu`` needs for these extents (empty at the shipped tier)."""
+    if not (2<=nf<=DEEP_LEVELS and 2<=nz<=DEEP_LEVELS and 1<=ns<=DEEP_LEVELS):
+        raise ValueError(f'unsupported column extent (first-guess {nf}, model {nz}, soil {ns} levels; '
+                         f'each at most {DEEP_LEVELS})')
+    lines=[]
+    if max(nf,ns)>SHIPPED_LEVELS:lines.append(f'#define MAX_FG {DEEP_LEVELS}')
+    if nz>SHIPPED_LEVELS:lines.append(f'#define MAX_Z {DEEP_LEVELS}')
+    return lines
+
+
+def physics_source(nf, nz, ns, engine_root=None):
+    """The exact string compiled for these extents, and the math header hashes."""
+    headers=[];hashes={}
+    engine_root=engine_kernel_root() if engine_root is None else engine_root
+    for name in ('glibc_flt32.cuh','glibc_trig_flt32.cuh'):
+        p=Path(engine_root)/'woof/core/kernels'/name
+        content=p.read_bytes();headers.append(content.decode());hashes[name]=hashlib.sha256(content).hexdigest()
+    source=Path(__file__).with_name('physics.cu').read_text()
+    defines=tier_defines(nf,nz,ns)
+    if defines:source='\n'.join(defines)+'\n'+source
+    return '\n'.join(headers)+'\n'+source,hashes
+
+
 def monthly_weights(date):
     year,month,day=map(int,date[:10].split('-'))
     days=[calendar.monthrange(year,m)[1] for m in range(1,13)]
@@ -62,14 +95,8 @@ def physics_batch(kernels, fg, mesh, *, start_time, engine_root=None,
     if theta_adv_order not in (2,3):raise ValueError('theta_adv_order must be 2 or 3')
     cp=kernels.cp;started=time.monotonic()
     nb,nc,stride=fg['t'].shape;ne=fg['u'].shape[1];nz=mesh['nz'];nf=len(fg['vert_level']);ns=fg['st'].shape[-1]
-    if not (2<=nf<=128 and 2<=nz<=128 and 1<=ns<=128):raise ValueError('unsupported column extent')
-    headers=[];hashes={}
-    engine_root=engine_kernel_root() if engine_root is None else engine_root
-    for name in ('glibc_flt32.cuh','glibc_trig_flt32.cuh'):
-        p=Path(engine_root)/'woof/core/kernels'/name
-        content=p.read_bytes();headers.append(content.decode());hashes[name]=hashlib.sha256(content).hexdigest()
-    source=Path(__file__).with_name('physics.cu').read_text()
-    module=kernels.compile('\n'.join(headers)+'\n'+source)
+    source,hashes=physics_source(nf,nz,ns,engine_root)
+    module=kernels.compile(source)
     device={name:cp.asarray(value) for name,value in mesh.items() if name!='nz'}
     I=np.int32;F=np.float32
     err=cp.zeros(1,dtype='i4')

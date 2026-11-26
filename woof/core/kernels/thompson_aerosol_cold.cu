@@ -415,6 +415,20 @@ __device__ __forceinline__ void thompson_aa_cold_level_wrf461(
     snow_velocity_boost[idx] = L.vts_boost;
     // HOST READBACK ANCHOR: the frozen block is complete, pre-limiter.
     thompson_aa_wrf_conserve(&L, odts);
+#ifdef THOMPSON_RAIN_SNOW_CLOSURE
+    // RunConfig.thompson_rain_snow_closure (FQ5): WRF re-pairs the
+    // rain-snow transfer only where twet > T_0 (:2946-2950).  Below it the
+    // graupel gain keeps its pre-limiter value while the rain and snow
+    // limiters shrink the losses; the gain becomes what they lose, floored
+    // at zero (snow then takes only what rain lost).
+    if (L.twet < AAF_T0) {
+        L.prg_rcs = -(L.prr_rcs + L.prs_rcs);
+        if (L.prg_rcs < 0.0) {
+            L.prs_rcs = -L.prr_rcs;
+            L.prg_rcs = 0.0;
+        }
+    }
+#endif
     // HOST READBACK ANCHOR: every rate final.
 
     const float orho = L.orho;
@@ -2331,6 +2345,20 @@ extern "C" __global__ void thompson_aa_cold_network(
         vapor_sum += graupel_rate - unbounded_graupel_vapor_rate;
     }
 
+#ifdef THOMPSON_RAIN_SNOW_CLOSURE
+    // RunConfig.thompson_rain_snow_closure (FQ5): below 0 C the
+    // rain-snow transfer is never re-paired, so the graupel gain keeps its
+    // pre-limiter value while the rain and snow limiters above shrink the
+    // losses.  The gain (and, hail-aware, its volume pbg_rcs below) becomes
+    // what they lose, floored at zero (snow then takes only what rain lost).
+    rain_snow_graupel_rate =
+        -(rain_snow_rain_rate + rain_snow_category_rate);
+    if (rain_snow_graupel_rate < 0.0) {
+        rain_snow_category_rate = -rain_snow_rain_rate;
+        rain_snow_graupel_rate = 0.0;
+    }
+
+#endif
     // Blossey re-enforcement of the paired rain/graupel transfer,
     // :2945-2947: the REAL ratio rounds the paired magnitude to float32 and
     // the rain rate's own sign is kept (thompson_aerosol_common.cuh).  The

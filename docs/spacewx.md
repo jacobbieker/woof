@@ -14,8 +14,8 @@ WRF 4.7.1 / MPAS v8.4.2 parity: the default runs execute no new code.
 | layer | what it does | status |
 |---|---|---|
 | L1 total solar irradiance | `solar_tsi_opt`: a measured, time-varying TSI drives every shortwave scheme | available (WRF route, hex generic column seam) |
-| L3a ionosphere diagnostic | IRI-type F2/E peaks (CCIR/URSI maps driven by F10.7), Epstein profile, vertical TEC, foF2, hmF2, on the GPU; a storm-time foF2 correction from filtered ap (woof's own fit on CODE GNSS maps) | available as `woof spacewx ionosphere` (global grid, `--storm` for the correction) and in WRF-route forecast history (`spacewx_ionosphere_opt = 1`, and `= 2` with the correction) |
-| L3b high latitudes | auroral oval boundaries (Starkov 1994) from Kp, AL or the solar wind (OMNI2, SWPC real time), on the GPU; precipitating energy and number flux (OVATION Prime 2010) and Joule power (Knipp et al. 2004) | oval available as `woof spacewx aurora` (global grid) and in WRF-route forecast history (`spacewx_aurora_opt = 1`); energy flux and Joule power available as `woof spacewx aurora --energy`, the energy flux in history (`spacewx_aurora_opt = 2`), and the Joule power in history (`spacewx_aurora_opt = 3`) |
+| L3a ionosphere diagnostic | IRI-type F2/E peaks (CCIR/URSI maps driven by F10.7), Epstein profile, vertical TEC, foF2, hmF2, on the GPU; a storm-time foF2 correction from filtered ap (woof's own fit on CODE GNSS maps) | available as `woof spacewx ionosphere` (global grid, `--storm` for the correction) and in WRF-route and hex generic-seam forecast history (`spacewx_ionosphere_opt = 1`, and `= 2` with the correction) |
+| L3b high latitudes | auroral oval boundaries (Starkov 1994) from Kp, AL or the solar wind (OMNI2, SWPC real time), on the GPU; precipitating energy and number flux (OVATION Prime 2010) and Joule power (Knipp et al. 2004) | oval available as `woof spacewx aurora` (global grid) and in WRF-route and hex generic-seam forecast history (`spacewx_aurora_opt = 1`); energy flux and Joule power available as `woof spacewx aurora --energy`, the energy flux in history (`spacewx_aurora_opt = 2`), and the Joule power in history (`spacewx_aurora_opt = 3`) |
 | L3c thermosphere | exospheric temperature and density (a clean-room Jacchia-type model) | planned |
 | L2 particle precipitation | solar-proton ion-pair rates from the GOES integral flux (OMNI2 or SWPC), and the NOx/HOx they make; auroral-electron ion-pair rates (Fang et al. 2010) from OVATION's energy flux and mean energy | ion-pair rates available as `woof spacewx particles` (electrons with `--electron-energy-flux`, a diagnostic above every model top); the NO/OH/HO2 source in RADM2 chemistry as `spacewx_epp_opt = 1` (WRF route; on hex in the chemistry config's `wrf_chem` block) |
 | L1b spectral irradiance | `solar_ssi_opt`: the day's solar spectrum (NOAA CDR SSI) moves the source between RRTMG SW's 14 bands | available for RRTMG (`ra_sw_physics = 4`, `ra_rrtmg_variant = "rrtmg_legacy"`) and RRTMG-K (14) on the WRF route and hex's generic column seam, and on Fast-TUV photolysis (`phot_opt = 3`, RADM2; WRF route and hex) |
@@ -413,7 +413,15 @@ the forecast is identical with the option on or off.
 - Preflight prices the held arrays (14 column vectors and the five rows, six
   with the correction plus its factor) and the kernel's 96 B local frame.
 - A streamed domain refuses the option, because the rows are not a tile
-  carrier, and hex refuses it until a hex history stream carries them.
+  carrier.
+- On hex's generic column seam (`--physics spacewx_ionosphere_opt=1`, with the
+  same keys), the seam's own physics driver holds the rows. Each history frame
+  writes one value per cell, `(Time, nCells)`, under the same names and units,
+  at the frame's valid time. Per cell they are word for word the WRF route's rows
+  on the same cell centres, on variable-resolution cells too
+  (`tests/test_hex_spacewx_history_gpu.py`). The seam holds no forecast
+  length, so the monthly maps after the start month load when a frame first
+  needs them. Hex's MPAS v8.4.2 suite route writes the rows per cell too (below).
 
 ## L3b: the auroral oval and the solar wind (`woof spacewx aurora`)
 
@@ -625,7 +633,38 @@ The forecast is identical with the option on or off.
   Kp the first read found, even after SWPC's 24-hour feed has moved on. The
   `[spacewx aurora]` start-up line records the value, the interval and the
   source. Preflight prices the held arrays and the kernel's
-  32 B frame. Streamed domains and hex refuse it.
+  32 B frame. Streamed domains refuse it. Hex's generic column seam writes the
+  rows (and option 2's energy flux) per cell, as for the ionosphere, and hex's
+  MPAS v8.4.2 suite route writes them per cell too (below).
+
+### On hex's MPAS v8.4.2 suite route
+
+The suite route takes the WRF keys from `--physics`, as the WRF route takes them
+from its namelist: `spacewx_ionosphere_opt`, `spacewx_f107_source`,
+`spacewx_f107_mode`, `spacewx_ionosphere_maps`, `spacewx_aurora_opt` and
+`spacewx_kp_source`. Only these keys are taken out of the overrides; every other
+WRF key is still refused by name, since the MPAS Registry has none of them.
+The keys are judged by the WRF route's own checks, except that no radiation
+scheme is needed, because the rows sit on the cell centres. They are printed as
+the run starts (the `[spacewx suite]` line, then each history object's receipt)
+and recorded in the driver receipt (`spacewx_diagnostics`).
+
+Each row is a `diag` field on `nCells` in the `diagnostics` stream. It has the
+lower-case wrfout name (`iono_tec`, `aurora_zone`, `joule_power`, ...), with
+`wrf_name` holding the wrfout name, and the WRF route's units and long name.
+Each family has its own package: `spacewx_ionosphere`, `spacewx_storm`
+(`iono_storm`, ionosphere option 2), `spacewx_aurora`, `spacewx_aurora_energy`
+(aurora options 2 and 3) and `spacewx_joule` (aurora option 3).
+
+The rows are the WRF route's IonosphereHistory and AuroraHistory. They are built
+when the diagnostics bind, on the solve cells' centres (latCell/lonCell, in
+degrees), the case start and the run's final time, and evaluated at each due
+frame's valid time. On a variable-resolution mesh each cell is one column,
+whatever its size. A checkpoint continuation builds them on the straight run's
+start (the segment start less the step offset), and the checkpoint carries that
+start (`spacewx:start`), so a continuation writes the words the straight run
+would. A multi-rank mesh evaluates each rank's own cells. Without the keys, the
+Registry, the default streams and the receipt are unchanged.
 
 ## L2: solar proton events (`woof spacewx particles`)
 

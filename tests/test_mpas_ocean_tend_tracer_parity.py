@@ -88,6 +88,7 @@ def test_options_not_ported_are_refused_by_name():
     base = dict(oo.BASE_CONFIG)
     tt.check_config(base)
     tt.check_config(dict(base, config_use_frazil_ice_formation=True))  # ported (frazil_v842)
+    tt.check_config(dict(base, config_use_standardGM=True))  # Redi, ported (tracer_hmix_v842)
     for mode in ("standalone", "coupled"):  # ported (land_ice_v842)
         tt.check_config(dict(base, config_land_ice_flux_mode=mode))
     for knob, value in (("config_use_cvmix_kpp", True), ("config_use_activeTracers_surface_restoring", True),
@@ -96,7 +97,7 @@ def test_options_not_ported_are_refused_by_name():
                         ("config_use_activeTracers_idealAge_forcing", True),
                         ("config_use_activeTracers_ttd_forcing", True),
                         ("config_sw_absorption_type", "ohlmann00"),
-                        ("config_use_standardGM", True), ("config_monotonic", False)):
+                        ("config_monotonic", False)):
         with pytest.raises(ConfigurationRefusal) as exc:
             tt.check_config(dict(base, **{knob: value}))
         assert knob in str(exc.value)

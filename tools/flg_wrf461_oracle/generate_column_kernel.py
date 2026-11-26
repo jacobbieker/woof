@@ -10,9 +10,11 @@ import json
 import re
 import sys
 from extract_tables import statements, split_items
-from generate_gas_kernel import Expression, FLOAT_GLOBALS, INT_GLOBALS, ROUTINES as GAS
+from generate_gas_kernel import Expression, FLOAT_GLOBALS, INT_GLOBALS, NVX_PREAMBLE, ROUTINES as GAS
 from generate_stream_kernel import declarations, STREAM_FLAGS, ROUTINES as STREAMS
 
+# Integer parameters folded into array extents: literals and the nvx tier.
+CAPACITY = r'\d+|FLG_NV1?X'
 PIN = 'c4977cdf2ddf3f2279c9be7e1fc659ef23bbb37376e5cf11f9a98a73d33b0266'
 ROUTINES = ('thicks','rayle2','rayle','planck','ice','ice_new_zf','ice_new_comb',
             'ice_new_trop','ice_new_midlat','ice_98','ice_singleice','ice_new_single',
@@ -53,9 +55,11 @@ def inventory(source):
 
 
 def translate(name, routine, routines, manifest):
-    variables = {k:(str(v),'int') for k,v in dict(mbs=6,mbir=12,mb=18,nvx=100,nv1x=101,mxat=7,mxac=18,mbx=18,ngroup=3,nc=8).items()}
+    variables = {k:(str(v),'int') for k,v in dict(mbs=6,mbir=12,mb=18,nvx='FLG_NVX',nv1x='FLG_NV1X',mxat=7,mxac=18,mbx=18,ngroup=3,nc=8).items()}
     variables.update(naero=('0','int'), nice=('gas_switches[27]','int'), ngas=('gas_switches[28]','int'),
                      nsubcld=('((nv-1)/3)','int'))
+    # Extents carry the tier macro; bounds re-read through the (lower-case) parser.
+    variables.update(flg_nvx=('FLG_NVX','int'), flg_nv1x=('FLG_NV1X','int'))
     arrays = {}; local = []
     table_ids = {key:i for i,key in enumerate(manifest['tables'])}
     for i,key in enumerate(FLOAT_GLOBALS): variables[key] = (f'gas_values[{i}]','float')
@@ -86,7 +90,7 @@ def translate(name, routine, routines, manifest):
                     lo,hi=d.split(':'); lower.append(lo); dims.append('('+hi+'-'+lo+'+1)')
                 else: lower.append('1'); dims.append(d)
             for k,(v,t) in variables.items():
-                if t=='int' and re.fullmatch(r'\d+',v): dims=[re.sub(r'\b'+k+r'\b',v,d) for d in dims]
+                if t=='int' and re.fullmatch(CAPACITY,v): dims=[re.sub(r'\b'+k+r'\b',v,d) for d in dims]
             if key in table_ids:
                 base=f'(tables+table_offsets[{table_ids[key]}])'
                 # The packed asset stores integer DATA values as float32.
@@ -94,9 +98,9 @@ def translate(name, routine, routines, manifest):
             else: base=var; kind=decl['kind']
             arrays[var]=(base,dims,kind,lower)
             if var not in routine['args'] and key not in table_ids:
-                cap='*'.join('('+re.sub(r'\b(nv1|nv)\b','101',d)+')' for d in dims)
+                cap='*'.join('('+re.sub(r'\b(nv1|nv)\b','FLG_NV1X',d)+')' for d in dims)
                 for k,(v,t) in variables.items():
-                    if t=='int' and re.fullmatch(r'\d+',v): cap=re.sub(r'\b'+k+r'\b',v,cap)
+                    if t=='int' and re.fullmatch(CAPACITY,v): cap=re.sub(r'\b'+k+r'\b',v,cap)
                 local.append(decl['kind']+' '+var+'['+cap+'];')
         else:
             variables[var]=(var,decl['kind'])
@@ -181,7 +185,7 @@ def generate(source,manifest):
     for name in ROUTINES:
         signature,body=translate(name,routines[name],routines,manifest)
         signatures.append(signature+';'); bodies.append(body)
-    return '// Generated from WRF module_ra_flg.F SHA256 '+PIN+'\n'+'\n'.join(signatures)+'\n'+'\n'.join(bodies)
+    return '// Generated from WRF module_ra_flg.F SHA256 '+PIN+'\n'+NVX_PREAMBLE+'\n'.join(signatures)+'\n'+'\n'.join(bodies)
 
 if __name__=='__main__':
     Path(sys.argv[3]).write_text(generate(Path(sys.argv[1]).read_text(),json.loads(Path(sys.argv[2]).read_text())))

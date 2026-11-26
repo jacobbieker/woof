@@ -2,6 +2,10 @@
 // Coefficient arrays are loaded from the hashed FLG table asset.
 // All arithmetic uses explicit round-to-nearest operations and WOOF math.
 // This unit does not implement the radiation driver or its solvers.
+// WRF's nvx level bound; woof.core.flg_levels adds -D FLG_NVX=256 past 100 layers.
+#ifndef FLG_NVX
+#define FLG_NVX 100
+#endif
 #define FAD(a,b) __fadd_rn((a),(b))
 #define FSU(a,b) __fsub_rn((a),(b))
 #define FMU(a,b) __fmul_rn((a),(b))
@@ -238,7 +242,7 @@ extern "C" __global__ void flg_continuum(int ncol,int nv1,const float* vv,
         return;
     }
     float s=FDV(FAD(4.18f,FMU(5577.8f,gfk_exp(FMU(-0.00787f,vv[band])))),1013.25f);
-    float ff[101];
+    float ff[FLG_NVX+1];
     for(int i=0;i<nv1;++i){
         int idx=col*nv1+i;
         float pe=FDV(FMU(pressure[idx],humidity[idx]),FAD(0.622f,FMU(0.378f,humidity[idx])));

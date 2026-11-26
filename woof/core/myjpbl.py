@@ -37,11 +37,13 @@ import cupy as cp
 import numpy as np
 
 from woof.core.kernels import get_kernel
+from woof.core.pbl_level_tiers import tiered_kernel
 from woof.core.physics_inventory import (MYJ_BLOCK, MYJ_TILE_BLOCKS_PER_SM,
                                           MYJWS_SLOTS, myj_workspace_floats)
 from woof.core.state import DTYPE
 from woof.physics_vertical_contract import (
-    outside_vertical_bounds, refuse_vertical_levels)
+    QNSE_VERTICAL_LEVEL_BOUNDS, outside_vertical_bounds,
+    refuse_vertical_levels)
 
 #: The launch block IS the workspace's lane width (``MYJWS_LANES``).
 _TPB = MYJ_BLOCK
@@ -268,6 +270,13 @@ def _require_planes(arrays, nz, shape, who):
                 f"{shape[1]}) columns")
 
 
+def _qnse_kernel(func: str, nz: int):
+    """``qnsepbl.cu``'s ``func`` at the ``QNSE_KMAX`` tier of an ``nz``
+    column: the unchanged source up to 128 levels, its 256 tier above
+    (woof.core.pbl_level_tiers)."""
+    return tiered_kernel("qnsepbl", func, "QNSE_KMAX", nz, get_kernel)
+
+
 def launch_qnse_pbl(columns, surface, state, tke, outputs, *,
                     dtturbl: float, mfshconv: bool = False,
                     mf_state=None, mf_outputs=None,
@@ -283,15 +292,16 @@ def launch_qnse_pbl(columns, surface, state, tke, outputs, *,
     """
     shape = surface["psfc"].shape
     nz = int(columns["dz"].shape[0])
-    bounds = (MYJ_MIN_COLUMN_LEVELS, MYJ_MAX_COLUMN_LEVELS)
+    bounds = QNSE_VERTICAL_LEVEL_BOUNDS
     if outside_vertical_bounds(nz, bounds):
         raise refuse_vertical_levels(
             "QNSE PBL", bounds, nz,
             breakage=(
                 "the kernel holds at most "
-                f"{MYJ_MAX_COLUMN_LEVELS} levels per column (QNSE_KMAX in "
-                "kernels/qnsepbl.cu) -- raise the define and re-measure "
-                "rather than truncating -- and below the floor its TKE "
+                f"{bounds[1]} levels per column (QNSE_KMAX in "
+                "kernels/qnsepbl.cu, compiled at the tiers of "
+                "woof.core.pbl_level_tiers) -- extend the ladder and "
+                "re-measure rather than truncating -- and below the floor its TKE "
                 "tridiagonal solve has no interior rows."))
     _require_planes([columns[name] for name in QNSE_COLUMN_INPUTS]
                     + [tke] + [outputs[name] for name in QNSE_PBL_COLUMN_OUTPUTS],
@@ -324,7 +334,7 @@ def launch_qnse_pbl(columns, surface, state, tke, outputs, *,
         else:
             # Never written when diag == 0; CuPy cannot marshal a null.
             planes = (outputs["el_myj"], outputs["el_myj"])
-        kernel = get_kernel("qnsepbl", "mfshconv_column")
+        kernel = _qnse_kernel("mfshconv_column", nz)
         args = (tuple(columns[name] for name in MFSHCONV_COLUMN_INPUTS) + (tke,)
             + tuple(surface[name] for name in MFSHCONV_SURFACE_INPUTS)
             + (mf_state["rc_mf"],)
@@ -345,7 +355,7 @@ def launch_qnse_pbl(columns, surface, state, tke, outputs, *,
     else:
         for name in _QNSE_TENDENCIES:
             outputs[name].fill(0)
-    get_kernel("qnsepbl", "qnsepbl_column")(
+    _qnse_kernel("qnsepbl_column", nz)(
         (blocks,), (_TPB,),
         tuple(columns[name] for name in QNSE_COLUMN_INPUTS) + (tke,)
         + tuple(surface[name] for name in QNSE_SURFACE_INPUTS)

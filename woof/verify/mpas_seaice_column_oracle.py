@@ -116,6 +116,8 @@ BGC_ZSAL_CARRY_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_zsal_carry"
 BGC_ZSAL_SOLVE_CARRY_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_zsal_solve_carry"
 #: the vertical tracers' nonreactive tracer in the init and column_biogeochemistry
 BGC_NONREACTIVE_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_nonreactive"
+BGC_NONREACTIVE_CARRY_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_nonreactive_carry"
+BGC_NONREACTIVE_STEP_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_nonreactive_step"
 PRECISIONS = {"r8": np.float64}
 REAL, INT, DIM = _stream.REAL, _stream.INT, _stream.DIM
 #: the Registry structs the column routines read and write, as oracle_stream pools
@@ -598,6 +600,43 @@ BGC_NONREACTIVE_CASES = (
         **_BGC_NR, **_BL99, "config_mobility_type_nitrate": 0.2, "config_dt": 7200.0}),
     ("bgc_nonreactive_abort_init", 20262617, _BGC_STAGE, _BGC_NR),
     ("bgc_nonreactive_abort_negative", 20262618, _BGC_STAGE, _BGC_NR),
+)
+#: the nonreactive tracer through the ITD thermodynamics and the ridging: name, seed, stage,
+#: overrides
+BGC_NONREACTIVE_CARRY_CASES = (
+    ("itd_nonreactive_mushy_level_ponds", 20262801, _ITD, _BGC_NR),
+    ("itd_nonreactive_bl99_update_ocean", 20262802, _ITD, {**_BGC_NR, **_BL99, "config_update_ocean_fluxes": True}),
+    ("itd_nonreactive_bl99_delta_function_four_layers", 20262803, _ITD, {
+        **_BGC_NR, **_BL99, **_DELTA_NEW, "config_nIceLayers": 4, "config_nCategories": 4,
+        "config_use_level_meltponds": False, "config_use_level_ice": False}),
+    ("itd_nonreactive_single_category", 20262804, _ITD, {
+        **_BGC_NR, "config_nCategories": 1, "config_category_bounds_type": "single category",
+        "config_itd_conversion_type": "delta function"}),
+    ("itd_nonreactive_mobile_three_layers", 20262805, _ITD, {
+        **_BGC_NR, "config_nIceLayers": 3, "config_mobility_type_nitrate": 0.7,
+        "config_fraction_biotracer_in_frazil": 0.6}),
+    ("itd_nonreactive_abort_regrid", 20262806, _ITD, _BGC_NR),
+    ("ridge_nonreactive_mushy_level_ponds", 20262811, _RDG, _BGC_NR),
+    ("ridge_nonreactive_bl99_thorndike_hibler_subcycles", 20262812, _RDG, {
+        **_BGC_NR, **_BL99, **_THORNDIKE, **_HIBLER, "config_dynamics_subcycle_number": 2}),
+)
+_NR_STEP = {**_BGC_NR, "woof_v842_corrections": _BGC_INACTIVE}
+#: the nonreactive tracer through the column package's part of the time step (the snow
+#: and ice tracers separated after the pre-dynamics and combined before each ridging) and
+#: through the coupled step: name, seed, stage, overrides (and the coupled torus)
+BGC_NONREACTIVE_STEP_CASES = (
+    ("step_nonreactive_bl99_dedd", 20262901, _STEP, {**_STEP_BASE, **_NR_STEP, "oracle_n_steps": 3,
+                                                     "config_start_time": "2001-06-01_10:00:00"}),
+    ("step_nonreactive_bl99_dedd_subcycles_gregorian", 20262902, _STEP, {
+        **_STEP_BASE, **_NR_STEP, "oracle_n_steps": 3, "config_dynamics_subcycle_number": 2,
+        "config_nIceLayers": 4, "config_nCategories": 3, "config_calendar_type": "gregorian",
+        "config_start_time": "2000-07-10_06:00:00"}),
+    ("step_nonreactive_mushy_level_ponds_no_vertical_thermodynamics", 20262903, _STEP, {
+        **_NR_STEP, "config_use_ocean_mixed_layer": False, "config_use_column_vertical_thermodynamics": False,
+        "config_mobility_type_nitrate": 0.7, "oracle_n_steps": 3, "config_start_time": "2001-07-20_12:00:00"}),
+    ("seaice_nonreactive_bl99_dedd_rothrock", 20262911, _SEAICE_STEP, {
+        **_COUPLED_BASE, **_NR_STEP, "oracle_n_steps": 3, "config_start_time": "2001-06-01_10:00:00"},
+     (12, 6, 3)),
 )
 
 
@@ -1405,6 +1444,31 @@ def _nonreactive_state(rs, case: dict) -> None:
         bgc["oceanBioConcentrations"][3] = -50.0
 
 
+def _nonreactive_carry_state(rs, case: dict) -> None:
+    """What the ITD thermodynamics and the ridging read of the nonreactive
+    tracer: its ice and snow layers (positive), mobile fractions, the ocean
+    concentration and flux, and ``colpkg_init_hbrine``'s grids.
+    ``abort_regrid`` in the name: a slightly negative brine fraction in cell
+    2's first category, under :func:`_itd_state`'s spread frazil, so the
+    tracer's ``regrid_stationary`` stops on a negative old brine height.
+    Separate numpy ufuncs only."""
+    pools, dims, name = case["pools"], case["dims"], case["name"]
+    n1, ncat, nil, nbl, nz = (dims["nCells"] + 1, dims["nCategories"], dims["nIceLayers"], dims["nBioLayers"],
+                              dims["nZBGCTracers"])
+    u = _uniform(rs)
+    t, bgc = pools["tracers"], pools["biogeochemistry"]
+    conc = u(0.5, 20.0, (n1, ncat, nbl + 3))
+    conc[:, :, nbl + 1:] = u(0.0, 5.0, (n1, ncat, 2))
+    t["verticalNonreactiveConc"] = conc
+    t["mobileFraction"] = u(0.0, 1.0, (n1, ncat, nz))
+    bgc["oceanBioConcentrations"] = u(0.5, 15.0, (n1, nz))
+    bgc["oceanBioFluxes"] = u(-1.0e-4, 1.0e-4, (n1, nz))
+    for key, value in cv.hbrine_grids(nbl, nil).items():
+        bgc[key] = value
+    if "abort_regrid" in name:
+        t["brineFraction"][2, 0, 0] = -1.0e-3
+
+
 def _zsal_dtemp_band(case: dict) -> None:
     """Cell 5's ice 0.05 degC below each layer's melting point, in daylight:
     inside BL99's absorbed-shortwave band, which ``temperature_changes``'
@@ -1617,6 +1681,8 @@ def make_case(name, seed, stage, overrides, torus=None) -> dict:
             _nonreactive_state(rs, case)
     if stage in (_ITD, _RDG, _STEP, _SEAICE_STEP) and cv.solves_zsal(config):
         _zsal_solve_carry_state(rs, case)
+    if stage in (_ITD, _RDG, _STEP, _SEAICE_STEP) and cv.vertical_tracers(config):
+        _nonreactive_carry_state(rs, case)
     for key, on in active.items():
         config[f"package:{key}"] = on
     case["fields"] = [r[:4] for r in rows]
@@ -1716,6 +1782,36 @@ def run_oracle(build_dir: Path, case: dict) -> tuple[dict[str, np.ndarray] | Non
 word_mismatches = _stream.word_mismatches
 
 
+#: the only fields whose NaN may differ from the oracle's in its sign bit: v8.4.2's
+#: update_snow_bgc divides 0/0 there without the vertical thermodynamics (a category the
+#: last step's ITD opened keeps iceAreaCategoryInitial 0; quirk bgc_snow_new_category),
+#: and Metal's soft float gives that NaN the opposite sign to x86's (CUDA keeps x86's)
+NAN_SIGN_FIELDS = frozenset({"biogeochemistry/oceanBioFluxes"})
+
+
+def nan_word_mismatches(got, want, key: str, metal: bool | None = None) -> int:
+    """:func:`word_mismatches`, except that on Metal (``metal``, by default
+    the active backend's being mlx) a NaN in both in :data:`NAN_SIGN_FIELDS`
+    may differ in its sign bit (its payload must still match). CUDA, every
+    other field, and every word that is not a NaN in both stay bitwise."""
+    if metal is None:
+        from woof import backend
+        metal = backend.active() == "mlx"
+    got, want = np.asarray(got), np.asarray(want)
+    if (not metal or key not in NAN_SIGN_FIELDS or got.shape != want.shape or got.dtype != want.dtype
+            or got.dtype.kind != "f"):
+        return word_mismatches(got, want)
+    both = np.isnan(got) & np.isnan(want)
+    if not both.any():
+        return word_mismatches(got, want)
+    view = np.dtype(f"u{got.dtype.itemsize}")
+    sign = view.type(1) << view.type(8 * got.dtype.itemsize - 1)
+    g, w = got.view(view).copy(), want.view(view).copy()
+    g[both] &= ~sign
+    w[both] &= ~sign
+    return int(np.count_nonzero(g != w))
+
+
 def changed_fields(case: dict, outputs: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
     changed = {}
     for key, value in outputs.items():
@@ -1770,7 +1866,7 @@ def run_gpu(case: dict) -> tuple[dict[str, np.ndarray], "cv.ColumnState"]:
     stage = case["stage"]
     # the stages that carry the brine height (each refuses the rest itself)
     state = cv.init_parameters(dev, config, biogeochemistry=stage not in ("aggregate", "update_state", _OML),
-                               z_tracers=stage in ("init", _BGC_STAGE))
+                               z_tracers=stage in ("init", _BGC_STAGE, _ITD, _RDG, _STEP, _SEAICE_STEP))
     if stage == "init":
         cv.initialize_coupler_fields(dev, config, state)
         cv.init_variables(dev, config, state)
@@ -1820,7 +1916,7 @@ def _run_seaice_step(dev: dict, config: dict) -> tuple[tuple, int]:
     from woof.hex.mpas_seaice import timestep_v842 as ts
     dev["diagnostics"]["xtime"] = config["diagnostics:xtime"]
     dev["diagnostics"]["simulationStartTime"] = config["diagnostics:simulationStartTime"]
-    clock = ts.initialize(pools=dev, configs=config)
+    clock = ts.initialize(pools=dev, configs=config, basis="input")
     n_steps = int(config["oracle_n_steps"])
     try:
         ts.advance(pools=dev, configs=config, clock=clock, n_steps=n_steps,
@@ -1845,7 +1941,7 @@ def measure_coupled(reference: dict | None = None, logs: dict | None = None, *, 
         row = {"abort": int(tuple(state.abort) != oracle_step_abort(log)),
                "step": int(got[SEAICE_STEP_KEY][0] != log["tracer_object"]["STEP"][0])}
         want = expected_outputs(case, reference.get(case["name"], {}))
-        row.update({key: word_mismatches(got[key], want[key]) for key in want})
+        row.update({key: nan_word_mismatches(got[key], want[key], key) for key in want})
         mine = state.tracers.log_rows()
         row["tracer_object"] = sum(int(mine[k] != log["tracer_object"].get(k)) for k in mine)
         report[case["name"]] = row
@@ -2112,7 +2208,7 @@ def measure_step(reference: dict | None = None, logs: dict | None = None, *, row
         row = {"abort": int(tuple(state.abort) != oracle_step_abort(log)),
                "warnings": int(state.warnings != oracle_ridge_warnings(log))}
         want = expected_outputs(case, reference.get(case["name"], {}))
-        row.update({key: word_mismatches(got[key], want[key]) for key in want})
+        row.update({key: nan_word_mismatches(got[key], want[key], key) for key in want})
         mine = state.tracers.log_rows()
         row["tracer_object"] = sum(int(mine[k] != log["tracer_object"].get(k)) for k in mine)
         report[case["name"]] = row
