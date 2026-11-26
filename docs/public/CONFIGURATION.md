@@ -676,8 +676,11 @@ likewise. In correct mode, or under `"all"`, these are on:
   (`mp_physics = 28` or `38`).
 - Hex regional route: `--undriven-species-boundary wrf-flow-dependent`
   (a regional run, `--lbc-dir`, on the WOOF-physics one-card drivers; it
-  stays off on the MPAS suite route, local time stepping, partial nest and
-  the partitioned same-host executor, which do not carry it). The door's
+  stays off on local time stepping, partial nest and the partitioned
+  same-host executor, which do not carry it). The MPAS v8.4.2 suite route
+  carries it on one card only when the flag is given, and then drives only
+  the species the boundary files hold, as WRF does; the umbrella leaves
+  that route native. The door's
   `--quirk-corrections all` sets only this flag: the RunConfig keys above
   are not hex flags.
 - MPAS-Ocean: `woof_land_ice_isomip_freezing_salinity =
@@ -691,7 +694,7 @@ likewise. In correct mode, or under `"all"`, these are on:
   `set_sfcflux_order`, `ice_velocity_at_cell`,
   `ccsm3_absorbed_solar_layers`, `dedd_zero_volume_ice`,
   `zbgc_c2n_proteins`, `bgc_inactive_diagnostics`, `zsal_solve`,
-  `bgc_snow_new_category` and `subcycle_snow_ice_tracers`.
+  `bgc_snow_new_category`, `subcycle_snow_ice_tracers` and `zap_snow_area`.
 - MPAS-Seaice velocity solver set-up (the time step's
   `basis_corrections` / `weak_corrections` names): `planar_metric_terms`
   and `periodic_local_coords` (variational basis; each acts only on a

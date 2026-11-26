@@ -54,11 +54,12 @@ BACKENDS = [pytest.param("host", marks=pytest.mark.skipif(not HAVE_CXX, reason="
 
 # periodic; map factors; specified with and without the held tendency
 # (one-point and two-point rings); every h order; one level and the
-# 7-point minimum of a bounded axis.
+# 7-point minimum of a bounded axis; a periodic held source (a mixing row).
 CONFIGS = {
     "su": [dict(), dict(has_msf=1), dict(spec=1), dict(spec=1, held=1, has_msf=1),
            dict(spec=1, held=1, spec_zone=2, horder=3, vorder=2), dict(horder=4, vorder=4),
-           dict(horder=6, vorder=6, has_msf=1), dict(nz=1, ny=7, nx=7, spec=1, held=1)],
+           dict(horder=6, vorder=6, has_msf=1), dict(nz=1, ny=7, nx=7, spec=1, held=1),
+           dict(held=1, has_msf=1)],
     "sf": [dict(), dict(nsub=1), dict(nz=1, ny=1, nx=1, nsub=3)],
 }
 
@@ -291,12 +292,11 @@ for i, over in enumerate({CONFIGS["sf"]!r}):
 
 
 def test_geometry_rejects_unported_options():
-    """A held tendency without a specified domain, a ring that does not
-    fit, a specified domain with a periodic axis, flags outside 0/1, a
+    """A ring that does not fit, a specified domain with a periodic axis, flags outside 0/1, a
     non-positive or non-finite dt, an unported advection order and empty
     axes are refused, not run."""
     from woof.grad.wrfplus import cases as C
-    for over in (dict(held=1), dict(spec=1, spec_zone=0), dict(spec=1, spec_zone=5),
+    for over in (dict(spec=1, spec_zone=0), dict(spec=1, spec_zone=5),
                  dict(spec_zone=1), dict(has_msf=2), dict(horder=2), dict(nx=0),
                  dict(open_x=2), dict(spec=1, open_y=0), dict(dt=0.0), dict(dt=float("nan"))):
         with pytest.raises(ValueError):

@@ -403,6 +403,47 @@ def _setting_is_refused(row: Mapping[str, Any], value: Any) -> bool:
                    for item in off)
 
 
+def _as_flag(value: Any) -> bool | None:
+    text = str(value).strip().strip(".").casefold()
+    return True if text in ("1", "true", "t") else False if text in ("0", "false", "f") else None
+
+
+def wrf_dynamics_problems(overrides: Mapping[str, Any] | None, *, horiz_mixing: str,
+                          les_model: str = "off",
+                          dynamics: Mapping[str, Any] | None = None) -> list[str]:
+    """The WRF dynamics values refused_settings passes as MPAS's own operator,
+    held to the dycore options the run actually sets.
+
+    ``diff_opt=0`` is no explicit diffusion, which is only ``--horiz-mixing
+    off``; ``mix_full_fields=true`` is MPAS's ``config_mix_full=true``;
+    ``khdif=0``/``kvdif=0`` ask for no constant K.  Each is refused here when
+    the run's own mixing contradicts it: the receipt would record a WRF
+    setting that is not the operator that ran.
+    """
+
+    given = dict(overrides or {})
+    dycore = dict(dynamics or {})
+    problems: list[str] = []
+    if "diff_opt" in given and (horiz_mixing != "off" or les_model != "off"):
+        problems.append(
+            f"diff_opt={given['diff_opt']} asks for no explicit diffusion, and this run mixes "
+            f"(--horiz-mixing {horiz_mixing}, --les-model {les_model}); pass --horiz-mixing off, "
+            "or drop diff_opt")
+    if "mix_full_fields" in given and _as_flag(dycore.get("config_mix_full", True)) is False:
+        problems.append(
+            "mix_full_fields=true mixes the full fields, and this run sets config_mix_full=false "
+            "(MPAS's departure from the initial state); drop one")
+    for key, knobs in (("khdif", ("config_h_mom_eddy_visc2", "config_h_theta_eddy_visc2")),
+                       ("kvdif", ("config_v_mom_eddy_visc2", "config_v_theta_eddy_visc2"))):
+        if key not in given:
+            continue
+        nonzero = sorted(knob for knob in knobs if float(dycore.get(knob, 0.0) or 0.0) != 0.0)
+        if nonzero:
+            problems.append(
+                f"{key}=0 asks for no constant K, and this run sets {nonzero} nonzero; drop {key}")
+    return problems
+
+
 def engine_selector_aliases() -> Mapping[str, str]:
     """WOOF's own selector names -> the MPAS key each one selects.
 
