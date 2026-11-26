@@ -381,6 +381,19 @@ def production_units(root) -> list[Unit]:
     assert zolzt.source == K.module_source_int_defines(
         "mynn_surface", (("MYNN_SL_PSIH_ZOLZT", 1),), kernel_dir=kdir)
     units.append(zolzt)
+    # The MYNN surface-layer Q2 land cap (FQ10), alone and with the zt/L
+    # profile: the two units a correct-mode run launches.
+    for defs in ((("MYNN_SL_Q2_LAND_CAP", 1),),
+                 (("MYNN_SL_PSIH_ZOLZT", 1), ("MYNN_SL_Q2_LAND_CAP", 1))):
+        label = ",".join(f"{k}={v}" for k, v in defs)
+        capped = _segmented(f"kernels:mynn_surface[{label}]",
+                            pre + headers("mynn_surface")
+                            + [("<" + ",".join(k for k, _ in defs) + ">",
+                                "".join(f"#define {k} {v}\n" for k, v in defs)),
+                               kfile("mynn_surface.cu")], K.module_options("mynn_surface"))
+        assert capped.source == K.module_source_int_defines(
+            "mynn_surface", defs, kernel_dir=kdir)
+        units.append(capped)
     from woof.core.spp_kernel_sources import specialized_source
     for name, capacity in (("gf", 40), ("gf", 60), ("mynn_pbl", 40), ("mynn_surface", 40)):
         units.append(Unit(f"spp:{name}[capacity={capacity}]",
@@ -394,6 +407,13 @@ def production_units(root) -> list[Unit]:
                       specialized_source("mynn_surface", capacity=40, kernel_dir=kdir,
                                          defines=(("MYNN_SL_PSIH_ZOLZT", 1),)),
                       ("-std=c++17",), []))
+    for defs in ((("MYNN_SL_Q2_LAND_CAP", 1),),
+                 (("MYNN_SL_PSIH_ZOLZT", 1), ("MYNN_SL_Q2_LAND_CAP", 1))):
+        label = ",".join(f"{k}={v}" for k, v in defs)
+        units.append(Unit(f"spp:mynn_surface[capacity=40,{label}]",
+                          specialized_source("mynn_surface", capacity=40, kernel_dir=kdir,
+                                             defines=defs),
+                          ("-std=c++17",), []))
     # The opt-in Noah soil-moisture floor booking (woof.core.noah.launch_noah):
     # the plain unit's integer tier, and the UA units with the define first.
     from woof.core.noah import NOAH_SMC_FLOOR_BOOKING_DEFINES, SMC_FLOOR_BOOKING_PREFIX
