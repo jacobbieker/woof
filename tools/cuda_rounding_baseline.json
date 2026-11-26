@@ -3845,7 +3845,7 @@
    },
    {
     "file": "woof/core/kernels/mynn_surface.cu",
-    "sha256": "2e8b7cb344da2eb74e68893f8921d7140c534d3ed311f471abca8c6580b7a7c0"
+    "sha256": "c0ae59ecfca4e54c49d7e141168bcc274ac60eddb6d2f4067d9867891cbd7490"
    },
    {
     "file": "woof/core/kernels/mynn_surface_libm.cuh",
@@ -5879,7 +5879,7 @@
    },
    {
     "file": "woof/core/physics.py",
-    "sha256": "0fc0fab5b441e73ea8af841032be55c4076c43f3dda2a7d063f394451faeb17e"
+    "sha256": "aef95367bb55fc859421654afa32de803cfa4d082681b868651906dd101b6796"
    },
    {
     "file": "woof/core/preflight.py",
@@ -5979,7 +5979,7 @@
    },
    {
     "file": "woof/core/spp_kernel_sources.py",
-    "sha256": "949c752131a7fbb6e69ccf48ee72c31e5cb213c85b6182f7258fec00846de646"
+    "sha256": "0f057bfe9f825a6b2237cfa4e63960b311d8d90fa6ac930f0da5ec2dc50e17c8"
    },
    {
     "file": "woof/core/storm_tracking.py",

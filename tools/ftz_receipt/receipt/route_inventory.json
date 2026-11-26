@@ -2968,7 +2968,7 @@
     },
     {
       "file": "tests/test_mp8_frozen.py",
-      "line": 3371,
+      "line": 3376,
       "column": 8,
       "surface": "tests",
       "constructor": "cp.RawModule",
