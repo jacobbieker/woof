@@ -12032,7 +12032,7 @@
     },
     {
       "file": "woof/hex/obs_nudging.py",
-      "line": 394,
+      "line": 434,
       "column": 17,
       "surface": "package",
       "constructor": "cp.RawModule",
@@ -12048,7 +12048,7 @@
     },
     {
       "file": "woof/hex/obs_nudging.py",
-      "line": 631,
+      "line": 671,
       "column": 28,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
