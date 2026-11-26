@@ -37,7 +37,7 @@ FIXTURE = Path(__file__).resolve().parent / "fixtures/kfcup/kfcup-capped-downdra
 #: arithmetic reproduces, and each backend's default-arithmetic negative word.
 EXACT_WRF_RAINCV = 0x00000000
 EXACT_DEFAULT_RAINCV = {"cuda": 0xAF7E486D,     # -2.3126896e-10 mm
-                        "metal": 0xAF7E2EFC}    # -2.3117858e-10 mm
+                        "mlx": 0xAF7E2EFC}      # Metal, -2.3117858e-10 mm
 
 pytestmark = pytest.mark.skipif(os.environ.get("GPUWM_NO_LOCAL_GPU") == "1",
                                 reason="runs the KF-CuP kernel")

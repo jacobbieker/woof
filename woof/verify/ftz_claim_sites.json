@@ -28641,7 +28641,7 @@
     },
     {
       "file": "tools/build_mskf_pack.py",
-      "line": 22,
+      "line": 23,
       "kind": "prose",
       "anchor": "from woof.core.kernels.no_ftz import module_recipe_no_ftz",
       "anchor_sha256": "23162f2a3200b6846b825e4f418526df64918a3fd54a1e06d451f30b22e50a37",
@@ -28652,7 +28652,7 @@
     },
     {
       "file": "tools/build_mskf_pack.py",
-      "line": 27,
+      "line": 32,
       "kind": "prose",
       "anchor": "source, options = module_recipe_no_ftz(\"mskf\", defines)",
       "anchor_sha256": "943ac76959018d2ead944fa0d68fa4ab2e877bad798babadf454e59e20b5d202",
@@ -74038,7 +74038,7 @@
     },
     {
       "file": "woof/kernel_prewarm.py",
-      "line": 291,
+      "line": 296,
       "kind": "prose",
       "anchor": "from woof.core.kernels.no_ftz import load_module_no_ftz",
       "anchor_sha256": "fa7c642f6f4fe5c6397fe27a514d033cdde967f743f5481ae9e752e8b4a590e5",
@@ -74049,7 +74049,7 @@
     },
     {
       "file": "woof/kernel_prewarm.py",
-      "line": 309,
+      "line": 314,
       "kind": "prose",
       "anchor": "jobs.append((label, load_module_no_ftz.__wrapped__, (name, defines)))",
       "anchor_sha256": "e60507f955952ab7a5078a680e07da42567a0847453ed1dd56e12b47540b93b5",
