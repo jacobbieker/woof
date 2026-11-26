@@ -82,10 +82,15 @@ def test_schemes_not_ported_are_refused_by_name():
     from woof.hex.mpas_ocean import vmix_v842 as vm
     vm.check_config(dict(oo.BASE_CONFIG))
     vm.check_config(dict(oo.BASE_CONFIG, config_use_standardGM=True))
-    for knob in ("config_use_tanh_visc", "config_use_tanh_diff", "config_use_cvmix"):
+    for knob in ("config_use_tanh_visc", "config_use_tanh_diff"):
         with pytest.raises(ConfigurationRefusal) as exc:
             vm.check_config(dict(oo.BASE_CONFIG, **{knob: True}))
         assert knob in str(exc.value)
+    # CVMix is ported (tests/test_mpas_ocean_cvmix_parity.py) at RKIND 8 only
+    from woof.hex.mpas_ocean import cvmix_v842
+    vm.check_config(dict(oo.BASE_CONFIG, config_use_cvmix=True))
+    with pytest.raises(ConfigurationRefusal, match="config_use_cvmix"):
+        cvmix_v842.check_config(dict(oo.BASE_CONFIG, config_use_cvmix=True), "r4")
     with pytest.raises(ConfigurationRefusal, match="woof_redi_k33"):
         vm.check_config(dict(oo.BASE_CONFIG, config_use_standardGM=True, woof_redi_k33="E3SM"))
 

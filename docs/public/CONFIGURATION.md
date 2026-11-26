@@ -377,7 +377,7 @@ consumed `RunConfig` field -- the knob-parity battery
 consuming kernel/module rather than being decorative -- and every one
 is importable from a WRF namelist.
 
-**Which keys a `[[domain]]` table may override.** Exactly these 471,
+**Which keys a `[[domain]]` table may override.** Exactly these 472,
 and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
 
     madwrf_opt  madwrf_cldinit  madwrf_dt_relax  madwrf_dt_nudge  ra_call_offset
@@ -408,37 +408,38 @@ and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
     cu_physics  shcu_physics  icloud_bl  cudt_minutes  bmj_rad_feedback  clos_choice
     ishallow  cugd_avedx  gf_deep_rain_evaporation_booking  ysu_surface_heat_exner
     noah_smc_floor_booking  thompson_rain_snow_closure  rrtmg_lw_model_top
-    woof_quirk_corrections  mynn_sfclay_psih_zolzt  urban_param_file  obstacle_opt
-    obstacle_file  obstacle_solid_fraction  obstacle_relax_factor
-    obstacle_drag_coefficient  obstacle_wall_z0  kf_edrates  maxiens  maxens
-    maxens2  maxens3  ensdim  cu_diag  convtrans_avglen_m  sas_pgcon  nsas_dx_factor
-    shalconv  radt  radt_minutes  bldt  grav_settling  ra_physics  ra_lw_physics
-    ra_sw_physics  ra_rrtmg_variant  wrf_rrtmg_compatibility  o3input  use_mp_re
-    swrad_scat  diff_6th_factor  epssm  spec_exp  mp_physics  moist  moist_cq
-    nest_microphysics_transition  spp_conv  spp_pbl  km_opt  bl_pbl_physics
-    sf_sfclay_physics  c_s  c_k  tke_adv_opt  sfs_opt  m_opt  tke_mix2_off
-    tke_mix6_off  moist_mix6_off  diff_6th_factor2  diff_6th_opt  mix_isotropic
-    mix_upper_bound  isfflx  tke_heat_flux  tke_drag_coefficient  tke_upper_bound
-    diff_6th_slopeopt  diff_6th_thresh  dampcoef  zdamp  emdiv  smdiv  khdif  kvdif
-    diff_opt  mix_full_fields  h_sca_adv_order  moist_adv_opt  tracer_opt
-    tracer_adv_opt  tracer_mix2_off  tracer_mix6_off  tracer_pblmix  dm_has_traj
-    trajectory_input  v_sca_adv_order  v_mom_adv_order  h_mom_adv_order  rk_ord
-    momentum_adv_opt  tke_budget  sase_flux_diag  hmix_k_diag  surface_energy_diag
-    rrtmg_spectral_output  radtran_wavelengths  radtran_interval_s  radtran_umu
-    radtran_phi  radtran_mol_abs_param  radtran_solver  radtran_streams
-    radtran_pseudospherical  cu_rad_feedback  radtran_aerosol  multi_perturb
-    pert_farms  pert_farms_albedo  pert_farms_aod  pert_farms_angexp
-    pert_farms_aerasy  pert_farms_qv  pert_farms_qc  pert_farms_qs  pert_deng
-    pert_deng_qv  pert_deng_qc  pert_deng_t  pert_deng_w  pert_thom  pert_thom_qv
-    pert_thom_qc  pert_thom_qi  pert_thom_qs  pert_thom_ni  pert_cld3  pert_cld3_qv
-    pert_cld3_t  spdt  inflow_perturbation  inflow_perturbation_seed
-    inflow_perturbation_amplitude_scale  inflow_perturbation_faces  target_cfl
-    target_hcfl  max_step_increase_pct  starting_time_step  starting_time_step_den
-    max_time_step  max_time_step_den  min_time_step  min_time_step_den
-    min_time_step_sound  slope_rad  topo_shading  mosaic_urban_canopy
-    sf_lake_physics  use_lakedepth  lakedepth_default  lake_min_elev
-    lake_state_source  lake_state_path  lake_state_accept_licence  topo_wind
-    gwd_opt  gwdo_version  gwd_dx_factor  gwd_if_nonhyd  wind_farm_scheme
+    diff_metrics_seam_slope
+    thompson_lamc_updated_rc  woof_quirk_corrections  mynn_sfclay_psih_zolzt
+    urban_param_file  obstacle_opt  obstacle_file  obstacle_solid_fraction
+    obstacle_relax_factor  obstacle_drag_coefficient  obstacle_wall_z0  kf_edrates
+    maxiens  maxens  maxens2  maxens3  ensdim  cu_diag  convtrans_avglen_m
+    sas_pgcon  nsas_dx_factor  shalconv  radt  radt_minutes  bldt  grav_settling
+    ra_physics  ra_lw_physics  ra_sw_physics  ra_rrtmg_variant
+    wrf_rrtmg_compatibility  o3input  use_mp_re  swrad_scat  diff_6th_factor  epssm
+    spec_exp  mp_physics  moist  moist_cq  nest_microphysics_transition  spp_conv
+    spp_pbl  km_opt  bl_pbl_physics  sf_sfclay_physics  c_s  c_k  tke_adv_opt
+    sfs_opt  m_opt  tke_mix2_off  tke_mix6_off  moist_mix6_off  diff_6th_factor2
+    diff_6th_opt  mix_isotropic  mix_upper_bound  isfflx  tke_heat_flux
+    tke_drag_coefficient  tke_upper_bound  diff_6th_slopeopt  diff_6th_thresh
+    dampcoef  zdamp  emdiv  smdiv  khdif  kvdif  diff_opt  mix_full_fields
+    h_sca_adv_order  moist_adv_opt  tracer_opt  tracer_adv_opt  tracer_mix2_off
+    tracer_mix6_off  tracer_pblmix  dm_has_traj  trajectory_input  v_sca_adv_order
+    v_mom_adv_order  h_mom_adv_order  rk_ord  momentum_adv_opt  tke_budget
+    sase_flux_diag  hmix_k_diag  surface_energy_diag  rrtmg_spectral_output
+    radtran_wavelengths  radtran_interval_s  radtran_umu  radtran_phi
+    radtran_mol_abs_param  radtran_solver  radtran_streams  radtran_pseudospherical
+    cu_rad_feedback  radtran_aerosol  multi_perturb  pert_farms  pert_farms_albedo
+    pert_farms_aod  pert_farms_angexp  pert_farms_aerasy  pert_farms_qv
+    pert_farms_qc  pert_farms_qs  pert_deng  pert_deng_qv  pert_deng_qc  pert_deng_t
+    pert_deng_w  pert_thom  pert_thom_qv  pert_thom_qc  pert_thom_qi  pert_thom_qs
+    pert_thom_ni  pert_cld3  pert_cld3_qv  pert_cld3_t  spdt  inflow_perturbation
+    inflow_perturbation_seed  inflow_perturbation_amplitude_scale
+    inflow_perturbation_faces  target_cfl  target_hcfl  max_step_increase_pct
+    starting_time_step  starting_time_step_den  max_time_step  max_time_step_den
+    min_time_step  min_time_step_den  min_time_step_sound  slope_rad  topo_shading
+    mosaic_urban_canopy  sf_lake_physics  use_lakedepth  lakedepth_default
+    lake_min_elev  lake_state_source  lake_state_path  lake_state_accept_licence
+    topo_wind  gwd_opt  gwdo_version  gwd_dx_factor  gwd_if_nonhyd  wind_farm_scheme
     wind_farm_table  wind_farm_max_dx_m  wind_farms  windfarm_tke_factor
     windfarm_ij  windfarm_wake_model  windfarm_overlap_method  windfarm_deg
     windfarm_induction  windfarm_fitch_version  windturbines_spec  td_turbgridid
@@ -628,6 +629,31 @@ layer's (from `t3d`) and anchors the profile at the interface below the top.
 With `true` both are kept and the profile is anchored at the model-top
 interface. Not read by RTE+RRTMGP. Off, and in exact mode, the arithmetic
 is WRF's word for word. It is not a WRF namelist key; set it in the TOML.
+`diff_metrics_seam_slope` (default `true`; finding FQ12) is a correction to
+the diffusion metrics where WRF's mixing package runs on a periodic axis, per
+domain on the same terms. WRF's `compute_diff_metrics`
+(`module_diffusion_em.F`) fills the slopes `zx` / `zy` at a periodic seam
+for `k = 1..ktf` only, so the top w level at the seam keeps its initial
+zero while every other column carries its slope. With `true` the top level
+is filled too, which is what the engine ran before the option existed; off,
+and in exact mode, the seam is WRF's word for word. Bounded axes and other
+`diff_opt` values do not read it. It is not a WRF namelist key; set it in
+the TOML.
+
+`thompson_lamc_updated_rc` (default `true`; finding FQ7) is a correction to
+the aerosol-aware Thompson's cloud-water balance (`mp_physics = 28` or `38`,
+every `thompson_version`), per domain on the same terms. WRF's
+`module_mp_thompson.F` (:3003) forms the cloud slope `lamc` from the entry
+cloud mass `rc(k)` after the sources have updated it to `xrc`. The sources
+only remove cloud water, so `xrc <= rc(k)` and the mean size comes out too
+large: the clamp, and the cloud number it rediagnoses, answer a mass the
+cloud no longer holds (a spurious clamp at `2*D0r`, or a missed one at
+`D0c`). With `true`, `lamc` is formed from `xrc`; the WRF 3.9 fork's column
+(strict `GPUWM_WRF_EXACT=1` only) carries the same correction, in effect there
+only when the key is set `true` by hand. The classic Thompson
+(`mp_physics = 8`) holds a fixed droplet number that no output carries and
+does not read it. Off, and in exact mode, the arithmetic is WRF's word for
+word. It is not a WRF namelist key; set it in the TOML.
 
 `woof_quirk_corrections` (default unset) is the umbrella over the
 corrections of WRF 4.7.1 / MPAS v8.4.2 quirks (`woof/quirk_corrections.py`).
@@ -635,8 +661,8 @@ They follow the physics mode: unset, every correction is on in correct
 mode (the default) where its scheme runs, and off in exact mode, where the
 run is the WRF / MPAS oracle's arithmetic word for word (parity tests run
 there). On the WRF route exact mode is a strict `GPUWM_WRF_EXACT=1`
-process, or every correct-mode key set `false` (the six WRF-route keys
-below are correct-mode findings FQ1-FQ6, in the table under "Correct
+process, or every correct-mode key set `false` (the seven WRF-route keys
+below are correct-mode findings FQ1-FQ7 and FQ12, in the table under "Correct
 mode"); on the hex door it is `--physics-mode exact`; in an MPAS-Ocean,
 MALI or MPAS-Seaice config dict it is `config_physics_mode = 'exact'`.
 A correction's own key, when set, wins over the mode, which is how one is
@@ -655,13 +681,18 @@ likewise. In correct mode, or under `"all"`, these are on:
   (`bl_pbl_physics = 1`), `mynn_sfclay_psih_zolzt = true`
   (`sf_sfclay_physics = 5` with `mynn_sfclay_variant = "wrf_461"`),
   `noah_smc_floor_booking = true` (`sf_surface_physics = 2`),
-  `thompson_rain_snow_closure = true` (`mp_physics = 8`, `28` or `38`) and
+  `thompson_rain_snow_closure = true` (`mp_physics = 8`, `28` or `38`),
   `rrtmg_lw_model_top = true` (`ra_lw_physics = 4` with
-  `ra_rrtmg_variant = "rrtmg_legacy"`).
+  `ra_rrtmg_variant = "rrtmg_legacy"`), `thompson_lamc_updated_rc = true`
+  (`mp_physics = 28` or `38`) and `diff_metrics_seam_slope = true`
+  (where WRF's mixing package runs on a periodic axis).
 - Hex regional route: `--undriven-species-boundary wrf-flow-dependent`
   (a regional run, `--lbc-dir`, on the WOOF-physics one-card drivers; it
-  stays off on the MPAS suite route, local time stepping, partial nest and
-  the partitioned same-host executor, which do not carry it). The door's
+  stays off on local time stepping, partial nest and the partitioned
+  same-host executor, which do not carry it). The MPAS v8.4.2 suite route
+  carries it on one card only when the flag is given, and then drives only
+  the species the boundary files hold, as WRF does; the umbrella leaves
+  that route native. The door's
   `--quirk-corrections all` sets only this flag: the RunConfig keys above
   are not hex flags.
 - MPAS-Ocean: `woof_land_ice_isomip_freezing_salinity =
@@ -891,7 +922,7 @@ for the retained proof and the limits of the forecast evidence.
 ### Correct mode (`[shared]`)
 
 Correct mode is the default. It fixes defects that WRF itself carries
-(water budgets, and the fork's quirk ledger FQ1-FQ6, see
+(water budgets, and the fork's quirk ledger FQ1-FQ7 and FQ12, see
 `woof_quirk_corrections`), one key per scheme, each `true` by default and read only by the
 schemes named in its row. Setting a key to `false` in `[shared]` runs that
 scheme's WRF-matched arithmetic. Strict WRF mode (`GPUWM_WRF_EXACT=1`)
@@ -915,6 +946,8 @@ configuration has no `[physics]` table; `physics.mode` is not an engine key.
 | `noah_smc_floor_booking` | Noah (`sf_surface_physics = 2`), not with WRF-Hydro | FQ4 | the water Noah adds at its 0.02 soil-moisture floor comes from the layer below or the drainage |
 | `thompson_rain_snow_closure` | Thompson (`mp_physics = 8, 28, 38`) | FQ5 | below 0 C the rain-snow collection's graupel gain equals what rain and snow lose after their limiters |
 | `rrtmg_lw_model_top` | legacy RRTMG longwave (`ra_lw_physics = 4`, `ra_rrtmg_variant = "rrtmg_legacy"`) | FQ6 | the model-top interface and top layer temperatures are kept, and the standard profile above them is anchored at the model-top interface |
+| `thompson_lamc_updated_rc` | aerosol-aware Thompson (`mp_physics = 28, 38`) | FQ7 | the cloud-water balance forms the cloud slope from the updated cloud mass, not the entry mass |
+| `diff_metrics_seam_slope` | WRF's mixing package on a periodic axis | FQ12 | the top w level's coordinate slope at a periodic seam is filled like every other column's, not left at zero |
 
 A checkpoint resumes only under the arithmetic it was written with; a
 mismatch is refused, and the refusal names the key to set.

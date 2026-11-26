@@ -984,8 +984,11 @@ Each step is one small PR, taken to merged before the next widens.
      - WRFPLUS findings. `compute_diff_metrics` (WRF's too) fills a
        periodic axis's seam slope (zx at ids/ide, zy at jds/jde) for
        levels 1..ktf only, so the top w level's seam slope keeps its cold
-       zero, where woof's primal takes the true slope: the fixture leaves
-       those deformation words out (and zeroes their adjoint seeds).
+       zero, where woof's primal takes the true slope. The correction
+       `diff_metrics_seam_slope` (finding FQ12, on in correct mode) keeps
+       the true slope; off (exact mode) both the primal smag kernels and
+       the TL/AD (`DFGeometry.seam_cold`, boundary flag 2) take WRF's cold
+       top seam, so the fixture grades every deformation word.
        `a_cal_deform_and_div` sizes its y tapes (Tmpv400-403) from
        max(jds+1, jts) but fills them from j_start = jts on a periodic y
        axis, so it overruns them there: the fully periodic case is TL
@@ -1034,7 +1037,7 @@ Each step is one small PR, taken to merged before the next widens.
        `initialize_coordinate_reference`, as the primal's first step
        does).
      - Refused by name: any other mixing package (diff_opt 2, km_opt 1,
-       2, 3 or 5), a moist state with the mixing (9d),
+       2, 3 or 5),
        `tc_horizontal_length_m`, `m_opt` and a resumed state without
        `diff1_theta_initial` (`dycore.coordinate_reference_missing`, the
        primal's own refusal). Passive tracers are refused on every step:
@@ -1063,8 +1066,75 @@ Each step is one small PR, taken to merged before the next widens.
        252 -> 52 ms (26 ms without it). Each `hd_ad` row's mut thread
        still gathers its column's levels serially; that is left for a
        later perf pass.
-   - 9d. The moist scalar rows (`add_scalar_coordinate_wrf`).
-   `sixth_order_diffusion` and diff_opt 2 are not started.
+   - 9d. The moist scalar rows (`add_scalar_coordinate_wrf`), bound
+     into the step (`model.py`, `_MIX_Q`).
+     - WRF and woof's strict primal mix moisture once per step, after
+       rk_step 1's acoustic loop: the 's' row of `hd_tl/_ad` (9b) on
+       qv0, qc0 and qr0 with the time-t xkhh and the loop's carried
+       muts (`_capture_wrf_muts`), c1h/c2h. The rows add into
+       `smag_rqv/qc/qr`, zeroed at the step start, which
+       `fixed_scalar_tendencies` hands to every stage's species update
+       as `moist_tend` (`_wrf_scalar_source`).
+     - The chain holds each row as the species' held source (the
+       `ScalarGeometry.held` add, now allowed on periodic domains too).
+       With qv's tables attached, qv's rk_step-1 boundary capture starts
+       from its row instead of zero, as moist.py's strict capture
+       relaxes onto `moist_tend`.
+     - Active: the time-t species, xkhh (so the deformation and the
+       time-t winds and geopotential) and muts (so the first acoustic
+       loop's mu' and mu''). The rows write slots that nothing reads
+       before them, so they take no snapshot; the adjoint reads their
+       base from the tape's current state.
+     - Tests (`tests/test_grad_wrfplus_mix_step.py`): a warm mapped
+       hybrid periodic moist step, a cold periodic moist chain of two,
+       and a warm and a cold mapped specified moist step with qv's
+       tables. Each gives `dycore.step`'s words, and dropping the moist
+       rows moves every species. Also dot, base-only and FD.
+   `sixth_order_diffusion` is not started; diff_opt 2 is item 10.
+10. Diffusion, `diff_opt = 2` (P3a item 2b; stacked PRs 2b-1 to 2b-3).
+   - Oracle pin: WRF and WRFPLUS 4.7.1 (`v4.7.1.tar.gz`, `11186188...`),
+     as for items 1-9. The WRF 4.8.1 oracle re-pin (P0/P9 of that work)
+     re-pins this item's drivers after it lands; until then 4.7.1 is the
+     graded version.
+   - Oracle method: WRFPLUS 4.7.1's own `g_/a_horizontal_diffusion_2`
+     and `g_/a_vertical_diffusion_2` differentiate the older mu-coupled
+     formulation (a finding), so `tools/wrfplus_oracle/diffusion2.F90`
+     links WRF 4.7.1's nonlinear routines from the same `libwrflib.a`
+     (real*8, -O0, -ffp-contract=off) and the fixture takes the TL and
+     AD from fourth-order central differences of them over every active
+     woof word and its halo images (about 1e-9 of the scale).
+   - 10a. `horizontal_diffusion_2` (2b-1): `h2_tl/h2_ad` in
+     `woof/grad/wrfplus/diffusion.py` and `kernels/diffusion.cu`, on
+     woof's strict `wrf_smag_hd_u/_v/_w` and `wrf_smag_flux_s` +
+     `wrf_smag_hd_s`.
+     - Rows u, v, w (xkmh) and theta and scalars (xkhh, the scalar
+       operator; theta on the strict thp). Active: the deformation
+       (defor11/22/12 for u and v; u, v, w for w, whose defor13/23 are
+       recomputed), the coefficient, alt and php (the metrics zx, zy,
+       rdz and rdzw and the density rho = 1/alt, times 1 + qv when
+       moist, are recomputed in the TL/AD), the field and qv.
+     - The AD is a seeded forward: each thread seeds one input word and
+       gathers the output words that read it, one writer per word, so
+       the AD is the exact transpose of the TL with no atomics.
+     - Finding: `compute_diff_metrics` leaves zx and zy on the end faces
+       of the top w level unset (its face loops stop at kde-2). The
+       driver sets them by the interior formula (periodic) or to zero
+       (specified); woof computes them.
+     - Tests (`tests/test_grad_wrfplus_hdiff2.py`): dot product
+       (binary64 to 1e-13), accumulation into existing adjoints, TL
+       against FD, the strict primal's words (the TL base equals
+       `GPUWM_WRF_EXACT=1` `dycore` words on every row) and the WRF
+       oracle (17 cases: each row periodic, specified, channel and
+       moist, plus theta; `tests/data/wrfplus/diffusion2.npz`).
+     - Cost (A6000, 40 x 120 x 120, binary32, periodic, median of 20,
+       2026-11-26; primal = the strict row kernels): TL 1.2x (u), 1.3x
+       (v), 0.4x (w, whose primal recomputes the deformation) and 1.4x
+       (scalar); AD 35x, 25x, 21x and 31x. The AD is far over G3's ~5x:
+       each input word's thread recomputes every reading output word's
+       whole stencil (the deformation, rho and the metrics at every
+       stage), as `df_ad` did before PR #820. Narrowing the gathers to
+       the reading terms is left to a perf pass, as #820 did for
+       `df_ad`.
 
 Cost is measured from item 2 on. Kernel-level AD/forward ratios are
 reported at every merge, so a G3 cost miss shows up before item 8.

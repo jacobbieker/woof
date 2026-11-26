@@ -65,7 +65,7 @@ def compute(state, cfg, km, kh, specs, *, time_t, physics_tendencies=None):
     a["mu"][...] = state.mub2d + getattr(state, "mup" + suffix)
     common = d._wrf_smag_grid_args(state, cfg, time_t=time_t)
     dims = [integer(nz), integer(ny), integer(nx),
-            integer(state.phb.ndim == 3), integer(bx), integer(by)]
+            integer(state.phb.ndim == 3), *d.smag_boundary_flags(cfg)]
     grid = ((nx + 127) // 128, ny, nz)
     geometry = (get_kernel_int_defines(
         "km5_geometry", "km5_geometry", (("GPUWM_USE_THETA_M", 1),))

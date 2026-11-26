@@ -296,10 +296,11 @@ BASELINE_PINNED: dict[str, str] = {
     # tendency words (tests/test_smag2d_uv_faces.py, CUDA and Metal, fast and
     # strict numerics, GPUWM_WRF_EXACT=0 and 1).
     "smag2d_uv_faces": "dc9828ca72bc7c7b6acb02b382c7326f33fd3f9eb16ab365e7f3e19a400dabfd",
-    # wrf_tke_rhs on stored defor13/defor23 faces (composes smag2d.cu, which
-    # keeps its bytes): the same TKE source words (tests/test_smag2d_tke_faces.py,
-    # CUDA and Metal, GPUWM_WRF_EXACT=0 and 1).
-    "smag2d_tke_faces": "421c718311e7724d3fd5ba733bfd3c59eca0cf828a753d284bac6e3142128f59",
+    # wrf_tke_rhs on stored defor13/defor23 faces (composes smag2d.cu): the
+    # same TKE source words (tests/test_smag2d_tke_faces.py, CUDA and Metal,
+    # GPUWM_WRF_EXACT=0 and 1).  RE-PINNED by FQ12 (diff_metrics_seam_slope):
+    # smag2d.cu's boundary flag 2 and this unit's bounded-bit test.
+    "smag2d_tke_faces": "36b322176076c25c1d14bb2512af740c635fe21a820495be183c39642f067d8e",
     # The opt-in porous immersed obstacles (obstacle_opt = 1, woof's own,
     # beyond WRF): a new unit, launched only when a domain has buildings
     # (tests/test_obstacles.py; off and zero-obstacle runs never load it).
@@ -963,8 +964,9 @@ BASELINE_PINNED: dict[str, str] = {
     # Conditional number/volume, density bins, fallout and diagnostics;
     # 25 oracle CSVs and both-mode state/tendency hashes reproduced at 2f349b417.
     # RE-PINNED 2026-11-23 (FQ5 thompson_rain_snow_closure): #ifdef THOMPSON_RAIN_SNOW_CLOSURE blocks only; without the define the unit's program is unchanged (tests/test_thompson_rain_snow_closure.py).
+    # RE-PINNED 2026-11-23 (FQ7 thompson_lamc_updated_rc): #ifdef THOMPSON_LAMC_UPDATED_RC block only; without the define the unit's program is unchanged (tests/test_thompson_lamc_updated_rc.py).
     "thompson_aerosol_warm":
-        '900e26aa8314c8687173078353ef413052c2f888c2638234600bb9c10e70e765',
+        '6339fdd602cdf97b86ac2219e90c7d8ef7880872bf11d69c672633ff8767b467',
     # 02cfd5301 feat(les): km_opt=2 restart carrier, lateral-boundary arm, TKE budget
     "tke_budget":
         "c7f6dc37f15b25fccbea50deef0c6d595c08b2ee4762f14eef169b654d54fccb",
@@ -1505,7 +1507,8 @@ BASELINE_PINNED: dict[str, str] = {
     "rrtmgp_rte_default": "731bd84717398320a1710b2c151a466b9e5bf1a30b633d858fd31d7162dbd173",
     # RE-PINNED 2026-11-23 (FQ5 thompson_rain_snow_closure): #ifdef THOMPSON_RAIN_SNOW_CLOSURE blocks only; without the define the unit's program is unchanged (tests/test_thompson_rain_snow_closure.py).
     "thompson_classic": '060b73dd839faf37a330bc180dcc2acc429bbd22bd0018a18179512cf7107426',
-    "thompson_fork": "a916ede73fd7cf39ff585b6889e7e90f04338f6c2b097b638d63a09a11cd9ef4",
+    # RE-PINNED 2026-11-23 (FQ7 thompson_lamc_updated_rc): #ifdef THOMPSON_LAMC_UPDATED_RC block only; without the define the unit's program is unchanged (tests/test_thompson_lamc_updated_rc.py).
+    "thompson_fork": "3f3c7f12faa3f42d125b442c6ee72906c70baf642e55c66ca9a7c1f3f2fed4be",
     # RE-PINNED at the 1.1.0 upstream merge: YSU_KMAX 256 (the fork's ceiling, via the rename of ysu.cu).
     # Previously f56e3ec7.
     "ysu_default": "7192b5b10c683718a9395682bde12a7145c2ca20318047d5a7998b1e87b1fbf2",
@@ -1553,7 +1556,9 @@ BASELINE_PINNED: dict[str, str] = {
     'rcon': '3d4d3e1b6584c7ea558a75adac9ddf0839d3b6058027b6dae9a9b9d5d0a60e5b',
     'udm': 'bdb41754f151bcfa329e21b3e12c673a0bb9f23f5e3c719baabc088d22d9371a',
     # r290 exact-chain intake: source identity, numerical gates separate.
-    'sfs_output': 'f8df238d672aae46bfbe83e71fdd322feced36a8bda503544f9a9c2701236da9',
+    # RE-PINNED by RunConfig.diff_metrics_seam_slope (FQ12): its inner-axis
+    # test reads the boundary flag's bounded bit (flag 2 is periodic).
+    'sfs_output': 'ccd9df3122703ac600d46a1840120e18581e98b090959f14d1a82fa6518f61bc',
 }
 
 _FROZEN = _frozen_module()
@@ -1590,7 +1595,8 @@ PINNED_HEADERS = {
         "a43cc63a6ae846be573e4f550c9a9c40512ced02b8140def12fac08d27dbc9ef",
     # Existing fork radar transcription, reused unchanged by the initial helper.
     # RE-PINNED 2026-11-23 (FQ5 thompson_rain_snow_closure): #ifdef THOMPSON_RAIN_SNOW_CLOSURE blocks only; without the define the unit's program is unchanged (tests/test_thompson_rain_snow_closure.py).
-    "thompson_fork.cu": "a916ede73fd7cf39ff585b6889e7e90f04338f6c2b097b638d63a09a11cd9ef4",
+    # RE-PINNED 2026-11-23 (FQ7 thompson_lamc_updated_rc): #ifdef THOMPSON_LAMC_UPDATED_RC block only; without the define the unit's program is unchanged (tests/test_thompson_lamc_updated_rc.py).
+    "thompson_fork.cu": "3f3c7f12faa3f42d125b442c6ee72906c70baf642e55c66ca9a7c1f3f2fed4be",
 
     # New Goddard band and sounding tables (lane ra5-goddard), prepended to
     # the goddard unit only (kernels._EXTRA_HEADERS).
@@ -1813,7 +1819,8 @@ PINNED_HEADERS = {
     'nsas_constants.cuh': 'e50bd02c62e11ec3c4bf5619bab6e30805832401df930c1235a136db2fb4c907',
     'radar_backscatter_common.cuh': '7564e059e3e99be94134b97c625d85a9a74fdee872bba193197ade7196d9fd72',
     'refl.cu': '1e2c45699a721b4b042769f9f868d85d8a6eb4960fc547ce9affb59b69f43f66',
-    'smag2d.cu': '379c2013faaaa3df1ae7fbdbc68cc15cf9f6334d55bf2511083287d126b88b0f',
+    # RE-PINNED by FQ12 (diff_metrics_seam_slope): boundary flag 2.
+    'smag2d.cu': '854ee250c242baa7d9fd6aba459d6e5f460261f51070d61a420fc9442c6d9dc1',
     'swint.cu': '9a79b7e43cb92553ae454975a943acedc3d8510b5c7eae59ec2c5bb8c8b47c5b',
     'temf_log10_flt32.cuh': '61c2596ef9b7456c1328eb5b9064c84b72f15acad698b084b87a831c478bb69f',
     'wdm_common.cuh': '77590100c6d6066bda9bb347caa318839a107104fceaf1c7690ba184779b01f8',

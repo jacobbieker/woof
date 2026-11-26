@@ -240,8 +240,11 @@ def wrf_release_generations(wrf_version) -> dict[str, str]:
     release = wrf_release_of(wrf_version)
     if release is None or release[0] != 4:
         return {}
+    # A row's ``since`` may name a patch release (4.8.1); a release spelled
+    # without one ("4.8") is its .0.
+    release = (release + (0,))[:3]
     return {key: generation for key, since, generation
-            in WRF_RELEASE_GENERATIONS if release[:2] < since}
+            in WRF_RELEASE_GENERATIONS if release < since}
 
 def active_nudging_selectors(fdda: dict) -> list[tuple[str, list]]:
     """Every &fdda selector in ``fdda`` that asks for nudging.
@@ -1920,9 +1923,9 @@ def _expand_physics_suite(inp: dict, drop) -> list[NamelistDefault]:
     if suite == "none":
         return []
     from woof.wrf_namelist_registry import active_reference
-    from woof.wrf_reference import (PHYSICS_SUITE_CHANGES_480,
+    from woof.wrf_reference import (PHYSICS_SUITE_CHANGES_480, WRF48_SERIES,
                                      PHYSICS_SUITE_LINES_480)
-    wrf480 = active_reference() == "4.8.0"
+    wrf480 = active_reference() in WRF48_SERIES
     table = WRF_PHYSICS_SUITES.get(suite)
     if table is None:
         if wrf480:
@@ -1979,8 +1982,9 @@ def _consume_wrf480_vocabulary(inp: dict, drop, fix) -> None:
     from woof.wrf_reference import (CORDEX_GROUP, CORDEX_SWITCH,
                                      NOAHMP_RUNOFF_KEY, NOAHMP_RUNOFF_SPLIT,
                                      NOAHMP_RUNOFF_SPLIT_OWNER,
-                                     WRF480_ONLY_KEYS, WRF480_PORTED_KEYS)
-    if active_reference() != "4.8.0":
+                                     WRF480_ONLY_KEYS, WRF480_PORTED_KEYS,
+                                     WRF48_SERIES)
+    if active_reference() not in WRF48_SERIES:
         from woof.wrf_namelist_registry import placement_note
         for (section, key) in WRF480_PORTED_KEYS:
             values = inp.get(section, {}).get(key)
@@ -5184,8 +5188,9 @@ def _translate_namelists_read(wps: dict, inp: dict, *, wps_path: Path,
     # the 4.7.1 vocabulary they stay unmapped, as wrf.exe 4.7.1 fails on
     # them.  0 is the engine default and keeps the configuration's bytes.
     from woof.wrf_namelist_registry import active_reference
+    from woof.wrf_reference import WRF48_SERIES
     mynn_split = {}
-    if active_reference() == "4.8.0":
+    if active_reference() in WRF48_SERIES:
         for key in ("bl_mynn_mixaerosols", "bl_mynn_mixnumcon"):
             values = ph.take(key)
             if values is None:
@@ -5833,7 +5838,7 @@ def _translate_namelists_read(wps: dict, inp: dict, *, wps_path: Path,
     bl_pbl_physics, wrf_name, gp_name = bl_mapped[0]
     if bl_mynn_mixscalars is None and any(value == 5 for value in bl_pbl_col):
         notices.append(MYNN_MIXSCALARS_DEFAULT_NOTICE_480
-                       if active_reference() == "4.8.0"
+                       if active_reference() in WRF48_SERIES
                        else MYNN_MIXSCALARS_DEFAULT_NOTICE)
     # WRF does not run the scalar_pblmix this namelist states under the
     # aerosol-aware Thompson scheme: share/module_check_a_mundo.F:2477-2495
@@ -7622,7 +7627,8 @@ def _translate_namelists_read(wps: dict, inp: dict, *, wps_path: Path,
     # the 4.7.1 scheme until the static ELVMAX producer lands (RunConfig
     # gwdo_version), so the import names the generation it read.
     from woof.wrf_namelist_registry import active_reference as _gwd_reference
-    if gwd_one and _gwd_reference() == "4.8.0":
+    from woof.wrf_reference import WRF48_SERIES
+    if gwd_one and _gwd_reference() in WRF48_SERIES:
         gwdo_key_columns["gwdo_version"] = ["wrf_480"] * max_dom
     # tke_adv_opt (Registry.EM_COMMON:2880, max_domains, default 1).  The
     # old rationale here -- "inert: no prognostic-TKE mixing scheme is

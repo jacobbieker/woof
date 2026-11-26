@@ -398,7 +398,15 @@ Notes on the 1.1.7 sync:
     in the split-explicit step (GM before the implicit mixing and after the
     last diagnostics, the bolus velocity in the transport, Redi in the
     tracer tendency, `ocn_reconstruct_gm_vectors`) and over forward steps
-    (the cold start's bolus transport); off by default. Three v8.4.2 quirks keep
+    (the cold start's bolus transport); off by default; and CVMix's
+    vertical mixing coefficients (`ocn_vmix_coefs_cvmix_build` with CVMix
+    v0.84-beta: KPP's boundary layer, SimpleShapes and MatchBoth
+    diffusivities and non-local flux, Pacanowski-Philander or KPP shear,
+    convection, the background) in the implicit vertical mixing, at RKIND 8
+    only (v8.4.2 does not compile CVMix at RKIND 4), standalone; transcribed
+    under CVMix's Apache-2.0 grant, with the two v0.84-only options
+    (`config_cvmix_kpp_EkmanOBL`, `config_cvmix_kpp_use_enhanced_diff =
+    .false.`) refused by name. Three v8.4.2 quirks keep
     their words by default and have corrected opt-ins, each tested on its
     own: the ISOMIP freezing point taken at the boundary layer's salinity
     rather than its temperature
@@ -693,7 +701,8 @@ Notes on the 1.1.7 sync:
   remap computes its init geometry (frames, moments, MPAS's RBF
   coefficients) itself, and refuses halo exchanges and periodic planar
   meshes by name. The sea-ice column physics' time step (mushy vertical thermodynamics,
-  shortwave), ocean KPP and GM/Redi,
+  shortwave), CVMix in the ocean's split-explicit step and KPP's non-local
+  flux in its tracer tendency,
   and the coupler pieces other than the ocean merge and the ocean's import and export are not ported. A few RKIND 8 cases need the LGPL libm
   opt-in below. These are ported pieces and steps, not coupled forecasts.
   Plan: [docs/mpas-coupled-roadmap.md](docs/mpas-coupled-roadmap.md).
@@ -719,6 +728,17 @@ Notes on the 1.1.7 sync:
     bit with the WRF route's adapter on the same columns; a 1 h forecast on
     the `edi-vr` variable-resolution mesh takes 0.184 s/step on CUDA (A6000)
     and 0.282 s/step on Metal (M3 Max).
+- **WRF 4.8.1 as the reference (in progress).** `wrf_reference` accepts
+  `"4.8.1"` (the default), `"4.8.0"` and `"4.7.1"`. The 4.8.1 pin is the
+  `v4.8.1` tag commit plus its submodule commits, because the release
+  tarball ships the submodules empty. `tools/wrf481_source` records the
+  sha256 of every WRF file the repository cites, in 4.8.1 and in 4.8.0, and
+  names the change behind each file that differs. A WRF 4.8.1 namelist
+  imports under the 4.8.1 Registry, which has the same keys and defaults as
+  4.8.0's. The scheme fixes in 4.8.1 are being ported one family at a time.
+  Until a family lands, a run receipt that says `"4.8.1"` also lists the
+  changes the engine does not run yet (`wrf_reference_pending`). Noah-MP
+  5.2.2 stays excluded on licence grounds.
 - **Corrections of WRF/MPAS quirks, on by default (correct mode).**
   Each key changes only the arithmetic it names, where its scheme runs.
   Exact mode turns every one off, so the run is the WRF 4.7.1 / MPAS v8.4.2
@@ -733,11 +753,12 @@ Notes on the 1.1.7 sync:
     turns every one on / off whatever the mode (the hex door takes
     `--quirk-corrections all|none`); a key set false next to `"all"` is
     refused by name, and a key set next to `"none"` wins. On the WRF route
-    the keys are correct-mode findings FQ1-FQ6, so the run receipt's
+    the keys are correct-mode findings FQ1-FQ7 and FQ12, so the run receipt's
     `correct_mode` block names them.
     It covers `gf_deep_rain_evaporation_booking`, `ysu_surface_heat_exner`,
     `mynn_sfclay_psih_zolzt`, `noah_smc_floor_booking`,
-    `thompson_rain_snow_closure` and `rrtmg_lw_model_top` (WRF route);
+    `thompson_rain_snow_closure`, `rrtmg_lw_model_top`,
+    `thompson_lamc_updated_rc` and `diff_metrics_seam_slope` (WRF route);
     `--undriven-species-boundary wrf-flow-dependent` (hex, regional, where its drivers carry it; the only
     flag `--quirk-corrections` sets); `woof_land_ice_isomip_freezing_salinity`,
     `woof_bottom_drag_dry_edges`, `woof_rayleigh_bottom_friction` and
@@ -788,6 +809,22 @@ Notes on the 1.1.7 sync:
     and the top layer's with the profile and anchors at the interface below
     the top. The option keeps both and anchors at the top interface (finding
     FQ6). Not read by RTE+RRTMGP; not yet scored against observations.
+  - `thompson_lamc_updated_rc` (aerosol-aware Thompson, `mp_physics = 28,
+    38`, WRF route). After the cloud-water update WRF's number balance forms
+    the cloud slope from the entry cloud mass instead of the updated mass,
+    so its mean-size clamp, and the cloud number it rediagnoses, answer a
+    mass the cloud no longer holds (the sources only remove cloud water, so
+    the mean size is too large: a spurious clamp at 2*D0r or a missed one at
+    D0c). The option forms it from the updated
+    mass (finding FQ7). The classic Thompson (`mp_physics = 8`) holds a fixed
+    droplet number that never leaves the call, so it does not read it; not
+    yet scored against observations.
+  - `diff_metrics_seam_slope` (where WRF's mixing package runs on a periodic axis,
+    WRF route). WRF's `compute_diff_metrics` fills the coordinate slope at
+    a periodic seam for every level but the top w level, which keeps its
+    initial zero while every other column has its slope. The option fills
+    the top level too, as the engine always has; off (exact mode) the seam
+    is WRF's word for word (finding FQ12). Bounded axes are unchanged.
 - **Observation-driven corrections, each opt-in and off by default** (GF's
   is also a quirk correction, so it is on in correct mode):
   - `gf_deep_rain_evaporation_booking` (Grell-Freitas, `cu_physics = 3`).
@@ -867,7 +904,10 @@ Notes on the 1.1.7 sync:
     threat, gust);
   - `aer_opt = 1, 2`, `w_damping`, grid and spectral analysis nudging, and
     WRF observation nudging (`obs_nudge_opt = 1`, `--obs-nudging`), with
-    WRF's weights and great-circle radii found through a cell KD-tree;
+    WRF's weights and great-circle radii found through a cell KD-tree.
+    Observation nudging runs on both the WOOF column route and the MPAS
+    v8.4.2 suite route (R2, one card, cold start), which reads WRF's PBL
+    and surface-layer inputs from the suite's own fields;
   - stochastic physics: SPP (`spp_conv`, `spp_pbl`, `spp_lsm`) on the WOOF
     column route, WRF-Solar EPS (`multi_perturb`) on regional meshes, and
     WRF's inflow perturbation on the regional relax rings
@@ -876,12 +916,22 @@ Notes on the 1.1.7 sync:
     `--w-damping` and `--inflow-perturbation` run on both the WOOF column
     route and the MPAS v8.4.2 suite route (R2), where the depth is the
     suite's `hpbl`;
+  - WRF diffusion and advection settings (`diff_opt`, `khdif`, `kvdif`,
+    `c_s`, `mix_full_fields` and the `*_adv_order` options) pass on hex
+    only where MPAS-A runs the same operator (`diff_opt=0` with
+    `--horiz-mixing off`, `v_mom_adv_order=3`, `mix_full_fields=true`,
+    `khdif=0`, `kvdif=0`). Every other value is refused with the reason
+    the two operators differ and MPAS's own option for it;
   - WRF's flow-dependent specified zone for the microphysics species a
     regional boundary stream does not drive (`woof hex forecast
     --undriven-species-boundary wrf-flow-dependent`: outflow copies the
     first cell inside the zone, inflow sets 0, or `ccn_conc` for the CCN
-    number). The default, `free`, keeps MPAS's behaviour: those species
-    get no boundary step;
+    number). The default, `free`, keeps MPAS's behaviour: on the WOOF
+    column route those species get no boundary step, and on the MPAS
+    v8.4.2 suite route (R2) they are driven from the boundary pool's
+    allocated values. R2 carries the rule on one card when the flag is
+    given (correct mode and `--quirk-corrections all` leave R2 native): it
+    then drives only the species the boundary files hold;
   - extra-species microphysics on regional hex runs: CAM-MG, Morrison and
     Morrison-aerosol, NSSL-2, Milbrandt-Yau, P3 (mp 50-53), NTU, ISHMAEL,
     UDM, WDM6, Goddard 4-ice, Ferrier-Aligo with advected rime (mp 15)
@@ -1484,10 +1534,10 @@ Notes on the 1.1.7 sync:
   sumflux and the non-PD scalar update, and qv's boundary rows with
   flow_dep_bdy for qc and qr). The forecast path does not import any of
   it.
-  On a dry state the step also covers WRF's diff_opt 1 / km_opt 4
-  horizontal mixing (`woof.grad.wrfplus.diffusion`, bound into the step
-  on periodic and specified domains, word for word against
-  `dycore.step`; the moist rows are next): the deformation (WRF
+  The step also covers WRF's diff_opt 1 / km_opt 4 horizontal mixing
+  (`woof.grad.wrfplus.diffusion`, bound into the step on periodic and
+  specified domains, dry or moist, word for word against
+  `dycore.step`): the deformation (WRF
   `compute_diff_metrics` + `cal_deform_and_div`) and `smag2d_km`'s
   xkmh/xkhh with the 10 * mlen
   cap. Their binary32 base reproduces woof's strict `wrf_smag_deform` and
