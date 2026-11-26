@@ -280,13 +280,18 @@ def static_jobs(experiment, *, columns: bool = False, hydro: bool = False) -> li
         elif name in _KF_TRIGGERS:
             # FQ11 (on in correct mode): the unit with the capped-downdraft
             # rain floor define where a KF-eta domain reads it
-            # (woof.core.kf._kf_module).
+            # (woof.core.kf._kf_module).  Every KF-eta domain advances W0AVG
+            # in the trigger-1 unit; a trigger-2/3 unit only where a domain
+            # selects that trigger.
+            trigger = _KF_TRIGGERS[name]
             floors = {_reads(dc.run, _KF_RAIN_FLOOR_KEY)
                       for dc in getattr(experiment, "domains", ())
-                      if int(getattr(dc.run, "cu_physics", 0)) == 1} or {False}
+                      if int(getattr(dc.run, "cu_physics", 0)) == 1
+                      and (trigger == 1
+                           or int(getattr(dc.run, "kfeta_trigger", 1)) == trigger)} or {False}
             for floor in sorted(floors):
                 jobs.append((name + (_KF_RAIN_FLOOR_LABEL if floor else ""),
-                             _warm_kf, (_KF_TRIGGERS[name], floor)))
+                             _warm_kf, (trigger, floor)))
         elif name == "mskf":
             from woof.core.kernels.no_ftz import load_module_no_ftz
 

@@ -504,7 +504,8 @@ def launch_kf(u, v, temperature, qv, pressure, rho, exner, dz, w0avg, *,
     if type(trigger) is not int or trigger not in (1, 2, 3):
         raise ValueError("KF trigger must be integer 1, 2 or 3")
     if trigger == 2 and tpart is None:
-        tpart = trigger2_perturbations(temperature, rqvften, dz)
+        tpart = trigger2_perturbations(temperature, rqvften, dz,
+                                       rain_floor=rain_floor)
     kernel = _kf_function("kf_column", trigger, rain_floor)
     ncol = ny * nx
     # The column arrays live in a global workspace sized to the threads in
@@ -544,8 +545,11 @@ def launch_kf(u, v, temperature, qv, pressure, rho, exner, dz, w0avg, *,
     return out
 
 
-def trigger2_perturbations(temperature, rqvften, dz, *, separate=False):
-    """Native KF_eta_CPS moisture-advection stencil on a whole domain."""
+def trigger2_perturbations(temperature, rqvften, dz, *, separate=False,
+                           rain_floor=False):
+    """Native KF_eta_CPS moisture-advection stencil on a whole domain.
+    ``rain_floor`` picks the kf.cu build (FQ11) the run's kf_column uses, so
+    the unit is compiled once; the stencil does not read the floor."""
     import cupy as cp
     if rqvften is None:
         raise ValueError("kfeta_trigger=2 needs the dycore RQVFTEN export")
@@ -556,7 +560,7 @@ def trigger2_perturbations(temperature, rqvften, dz, *, separate=False):
     nz, ny, nx = shape
     h = cp.empty(shape, dtype=DTYPE)
     v = cp.empty(shape, dtype=DTYPE) if separate else np.uintp(0)
-    _kf_function("kf_trigger2_tpart", 2)(
+    _kf_function("kf_trigger2_tpart", 2, rain_floor)(
         (((ny * nx) + 255) // 256,), (256,),
         (temperature, rqvften, dz, h, v, np.int32(nz), np.int32(ny), np.int32(nx)))
     return (h, v) if separate else h
@@ -581,12 +585,14 @@ def w0avg_factors(*, cudt_minutes: float, dt: float, stepcu: int,
     return f32(tst - f32(1.0)), f32(1.0), tst
 
 
-def advance_w0avg(w0avg, w, *, factors) -> None:
+def advance_w0avg(w0avg, w, *, factors, rain_floor=False) -> None:
     """Advance ``w0avg`` in place from full-level ``w`` (nz+1, ny, nx).
 
     ``W0 = 0.5*(w(k)+w(k+1))`` and
     ``W0AVG = (W0AVG*W0AVGfctr + W0*W0fctr)/W0den``, in the no-FMA KF unit
-    so the update rounds as the Fortran does.
+    so the update rounds as the Fortran does.  ``rain_floor`` picks the
+    kf.cu build (FQ11) the run's kf_column uses, so the unit is compiled
+    once; the update does not read the floor.
     """
     nz = int(w0avg.shape[0])
     ncol = int(np.prod(w0avg.shape[1:]))
@@ -598,7 +604,7 @@ def advance_w0avg(w0avg, w, *, factors) -> None:
     fctr, w0fctr, den = factors
     total = nz * ncol
     threads = 256
-    _kf_function("kf_w0avg_update")(
+    _kf_function("kf_w0avg_update", 1, rain_floor)(
         ((total + threads - 1) // threads,), (threads,),
         (w, w0avg, DTYPE(fctr), DTYPE(w0fctr), DTYPE(den),
          np.int32(nz), np.int32(ncol)))
@@ -1035,7 +1041,8 @@ class KainFritsch:
             cudt_minutes=float(cfg.cudt_minutes), dt=clock_dt,
             stepcu=stepcu,
             adaptive=bool(getattr(cfg, "use_adaptive_time_step", False)))
-        advance_w0avg(self.w0avg, state.w, factors=factors)
+        advance_w0avg(self.w0avg, state.w, factors=factors,
+                      rain_floor=capped_downdraft_rain_floor_due(cfg))
         self._history_time = float(state.elapsed_seconds)
 
     def __call__(self, *, atmosphere, fields, state, cfg):

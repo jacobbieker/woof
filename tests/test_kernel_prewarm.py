@@ -695,6 +695,26 @@ def test_the_kf_rain_floor_variants_the_run_launches_are_warmed(monkeypatch, mod
                                           .replace("[KF_CAPPED_DOWNDRAFT_RAIN_FLOOR=1]", "")})
 
 
+def test_the_kf_rain_floor_tier_follows_each_trigger_units_domains(monkeypatch):
+    """Every KF-eta domain advances W0AVG in the trigger-1 unit, so kf is
+    warmed in each domain's tier; kf_trigger2 only in its own domains'."""
+    from woof import correct_mode
+    from woof.config import RunConfig, validate_run_config
+
+    def run(trigger, mode):
+        return validate_run_config(RunConfig(
+            nx=8, ny=8, nz=12, dx=3000.0, dy=3000.0, ztop=12000.0, dt=10.0, run_seconds=60.0,
+            moist=True, cu_physics=1, kfeta_trigger=trigger, **correct_mode.resolve(mode).settings))
+    monkeypatch.setattr(kernel_prewarm, "static_modules", lambda _experiment: ("kf", "kf_trigger2"))
+    monkeypatch.setattr(kernel_prewarm, "_inline_jobs", lambda _modules: [])
+    monkeypatch.setattr(kernel_prewarm, "_variant_jobs", lambda *_args: [])
+    experiment = SimpleNamespace(domains=(SimpleNamespace(run=run(1, "correct")),
+                                          SimpleNamespace(run=run(2, "exact"))))
+    jobs = {job[0]: job[2] for job in kernel_prewarm.static_jobs(experiment)}
+    assert jobs == {"kf": (1, False), "kf[KF_CAPPED_DOWNDRAFT_RAIN_FLOOR=1]": (1, True),
+                    "kf_trigger2": (2, False)}
+
+
 @pytest.mark.parametrize("mode", ["correct", "exact"])
 def test_the_kfcup_rain_floor_variant_the_run_launches_is_warmed(mode):
     """FQ11 compiles KF-CuP's column with the capped-downdraft rain floor

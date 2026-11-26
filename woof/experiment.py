@@ -4489,8 +4489,9 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
         _runs_rrtmg_lw_legacy(lambda name, default, dom=dom: physics_mode.settings.get(
             name, dom.get(name, shared.get(name, default))))
         for dom in domain_tables)
-    # The opt-in Kain-Fritsch capped-downdraft rain floor is read only by
-    # KF-eta, KF-CuP and MSKF (cu_physics = 1, 10, 11), on the same terms.
+    # The Kain-Fritsch capped-downdraft rain floor (on in correct mode) is
+    # read only by KF-eta, KF-CuP and MSKF (cu_physics = 1, 10, 11), on the
+    # same terms.
     tree_runs_kf_capped = any(
         physics_mode.settings.get(
             "cu_physics",

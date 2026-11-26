@@ -34,9 +34,10 @@ import pytest
 FIXTURE = Path(__file__).resolve().parent / "fixtures/kfcup/kfcup-capped-downdraft-149.npz"
 
 #: RAINCV of the exact (unfloored) column: WRF's own word, which the strict
-#: arithmetic reproduces, and the default arithmetic's negative word.
+#: arithmetic reproduces, and each backend's default-arithmetic negative word.
 EXACT_WRF_RAINCV = 0x00000000
-EXACT_DEFAULT_RAINCV = 0xAF7E486D          # -2.3126896e-10 mm
+EXACT_DEFAULT_RAINCV = {"cuda": 0xAF7E486D,     # -2.3126896e-10 mm
+                        "metal": 0xAF7E2EFC}    # -2.3117858e-10 mm
 
 pytestmark = pytest.mark.skipif(os.environ.get("GPUWM_NO_LOCAL_GPU") == "1",
                                 reason="runs the KF-CuP kernel")
@@ -71,9 +72,16 @@ def test_the_corrected_column_publishes_zero_not_negative_rain():
 def test_the_exact_column_is_wrfs_bare_subtraction():
     """Without the define the kernel is WRF's TRPPT-TDER: in a strict process
     WRF's own 0 word, in a default one the negative word the floor exists for."""
+    from woof import backend
     from woof.wrf_exact import ENABLED
     nz, held, status = _run(rain_floor=False)
     assert nz == 149 and status == 0
     assert float(held[0, 0]) == 750.0
     word = int(held[1, 0].view(np.uint32))
-    assert word == (EXACT_WRF_RAINCV if ENABLED else EXACT_DEFAULT_RAINCV), hex(word)
+    if ENABLED:
+        assert word == EXACT_WRF_RAINCV, hex(word)
+        return
+    name = backend.active()
+    if name not in EXACT_DEFAULT_RAINCV:
+        pytest.skip(f"no recorded default-arithmetic word for backend {name!r}")
+    assert word == EXACT_DEFAULT_RAINCV[name], hex(word)
