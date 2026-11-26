@@ -560,7 +560,8 @@ def test_era5_layers_are_remapped_to_noah_by_layer_means():
 
 def test_gfs_takes_over_past_era5s_last_hour():
     times = (datetime(2026, 10, 11, 12), datetime(2026, 10, 12, 0))
-    assert _REAL_LAND_STATE_SOURCE(times, era5_through=datetime(2026, 10, 12)) == "era5"
+    assert _REAL_LAND_STATE_SOURCE(times, era5_through=datetime(2026, 10, 12),
+                                   era5_holds=lambda valid: True) == "era5"
     assert _REAL_LAND_STATE_SOURCE(times, era5_through=datetime(2026, 10, 11, 23)) == "gfs"
     assert ukv.gfs_cycle_for(datetime(2026, 10, 24, 15)) == datetime(2026, 10, 24, 12)
     assert ukv.gfs_lead(datetime(2026, 10, 24, 12), datetime(2026, 10, 25, 3)) == 15
