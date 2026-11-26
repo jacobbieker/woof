@@ -839,7 +839,12 @@ Notes on the 1.1.7 sync:
     -30 m cut-off removes the surface drag in 32 % of land cells there,
     and against WIS2 stations it raised the 10 m wind bias by 0.5 m/s.
     The seam warns above 4 km
-    ([TERRAIN-DRAG.md](docs/public/TERRAIN-DRAG.md));
+    ([TERRAIN-DRAG.md](docs/public/TERRAIN-DRAG.md)).
+    `slope_rad = 1` on the WOOF column route builds SLOPE and SLP_AZI from
+    the least-squares terrain plane through each cell's mesh neighbours, in
+    place of WRF's grid-axis centred differences (`woof/hex/slope_statics.py`
+    documents the difference); spherical meshes only, and `topo_shading`
+    stays refused;
   - CCPP TKE-EDMF on the column seam;
   - diagnostics: `nwp_diagnostics` maxima, `p_lev`/`z_lev` levels, `tslist`
     station series, `prec_acc_dt` windows and `acc_phy_tend`, AFWA
