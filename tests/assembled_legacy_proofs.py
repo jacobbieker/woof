@@ -1,6 +1,8 @@
 """CPU validation of measured current-source numerical proof receipts."""
 import hashlib
 import json
+import re
+import warnings
 from pathlib import Path
 
 SOURCE_EXTENSION_SHA = '6e364433336d7d7a5f0dbb726ff451000b286a8ec3ddbe5f83b980c16bbc8af0'
@@ -16,6 +18,17 @@ PROOF_SHAS = {
     "coordinate-negative.json": "b78ff93bc71df6b855452d834d6e41b4fb16751739b91d35fb1dcc9431c486dc",
     "driver-source.json": "7c0251ad96cdcaa591751529e8f259b16f1cf5a6e458b7c1fac63c4d1405be23",
 }
+
+
+class CertifiedModuleNotRepinned(UserWarning):
+    """A kernel source moved past its sealed replay; recorded as not re-pinned."""
+
+
+def _certified_unrepinned():
+    path = Path(__file__).resolve().parents[1] / "tests/data/assembled_legacy_proofs/certified-unrepinned.json"
+    record = json.loads(path.read_text())
+    assert record["schema"] == "assembled-certified-unrepinned-v1"
+    return record["modules"]
 
 
 def _sha(path):
@@ -83,7 +96,18 @@ def _module_source_extension(module, before, after):
     measured = _sealed_extension(Path(__file__).resolve().parents[1])
     transition = measured.get("module_sources", {}).get(module)
     assert transition is not None, f"module {module} source moved without a measured replay"
-    assert (transition["before"], transition["after"]) == (before, after), module
+    if (transition["before"], transition["after"]) != (before, after):
+        # The kernel moved past the sealed after-pin and no Blackwell card has
+        # replayed it (user ruling 2026-11-14): admitted only by a committed
+        # not-re-pinned record naming the sealed pin and the current source.
+        record = _certified_unrepinned().get(module)
+        assert record is not None and record["pin"] == transition["after"] \
+            and record["current"] == after and before in (transition["before"], transition["after"]), module
+        assert re.fullmatch(r"[0-9a-f]{40}", record["staled_by"]) and record["reason"], module
+        warnings.warn(CertifiedModuleNotRepinned(
+            f"{module} is NOT re-pinned: {record['pin'][:8]} -> {after[:8]}, staled by "
+            f"{record['staled_by'][:9]} ({record['reason']}). A replay on a Blackwell card with "
+            "tools/battery/loader_source_receipt.py --moved-kernel re-pins it."))
     for family, arrays, words in (("coordinate", 272, 178128),
                                   ("drivers", 2618, 31686592),
                                   ("acoustic", 132, 305632)):
