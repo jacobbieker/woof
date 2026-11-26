@@ -537,7 +537,7 @@ def test_the_prepared_cache_identity_needs_no_scheme_entry():
              **MULTI_PERTURB_RUN_DEFAULTS,
              # Fork keys appended since, each default-off and absent from the
              # identity at its default (the same document rule).
-             "gf_deep_rain_evaporation_booking": False, "solar_tsi_opt": 0,
+             "solar_tsi_opt": 0,
              "solar_tsi_source": "", "solar_tsi_mode": "absolute",
              "obstacle_opt": 0, "obstacle_file": "",
              "obstacle_solid_fraction": 0.5, "obstacle_relax_factor": 10.0,
@@ -547,8 +547,7 @@ def test_the_prepared_cache_identity_needs_no_scheme_entry():
              "spacewx_aurora_opt": 0, "spacewx_kp_source": "",
              "solar_ssi_opt": 0, "solar_ssi_source": "",
              "spacewx_epp_opt": 0, "spacewx_epp_source": "",
-             "urban_param_file": "", "ysu_surface_heat_exner": False,
-             "woof_quirk_corrections": "none", "mynn_sfclay_psih_zolzt": False}
+             "urban_param_file": "", "woof_quirk_corrections": None}
     for name, default in later.items():
         assert expected_run.pop(name) == default, name
     # 2.9.7 tc/nest: the fixed-frame archive is read only on a nested domain;
@@ -584,8 +583,11 @@ def test_the_prepared_cache_identity_needs_no_scheme_entry():
                                     if k not in ("cu_gf_version",
                                                  "gf_deep_rain_evaporation_booking")},
                                  "cu_physics": 16, **wb4}
+    # and drops the Grell-Freitas booking key it no longer reads.
     assert compare(cached, new_scheme) == (
-        [], ["run.cu_physics"] + (["run.ntiedtke_dry_mass_coupling"] if wb4 else []))
+        [], ["run.cu_physics"]
+        + (["run.gf_deep_rain_evaporation_booking"] if fq else [])
+        + (["run.ntiedtke_dry_mass_coupling"] if wb4 else []))
     # A selected-field or per-scheme serializer cannot drop unrelated
     # trajectory controls or the newly serialized delayed-domain date.
     changed = identity(replace(domain, run=replace(run, dt=10.),

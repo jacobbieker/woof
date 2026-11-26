@@ -1863,6 +1863,14 @@ _PHYSICS_ALLOCATION_INVENTORY['woof/core/chem_modal_optics.py'] = {
 # and allocates nothing.
 _PHYSICS_ALLOCATION_INVENTORY['woof/core/pbl_level_tiers.py'] = {}
 
+# GSFC shortwave (ra_sw_physics = 2, 128/256-level tiers; b7aeea5f5, 4d71d3c83,
+# 089a92bac): the tier-keyed workspace is sized once at construction from the
+# domain's nz and reallocated only on a tier change (after the old arena is
+# freed); the rest are per-call packed columns and the kernel's output planes.
+_PHYSICS_ALLOCATION_INVENTORY['woof/core/gsfcsw.py'] = {
+    'packed_columns': 2, 'gsfcsw_columns': 1, 'pad': 1, '__post_init__': 1,
+    '__call__': 4}
+
 def test_no_physics_gpu_module_allocates_outside_its_workspace():
     """The property, not the instance: scan every physics GPU module.
 
