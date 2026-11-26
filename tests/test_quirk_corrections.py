@@ -341,6 +341,10 @@ def test_a_key_named_next_to_none_wins_in_python_as_in_toml():
     assert all(getattr(_base(woof_quirk_corrections="all", **schemes), key) for key in qc.keys("wrf"))
     with pytest.raises(ConfigurationRefused, match="ysu_surface_heat_exner"):
         _base(woof_quirk_corrections="all", ysu_surface_heat_exner=False, **schemes)
+    # held resolved under 'all' too: a replace() of one key keeps it, as under 'none'
+    full = _base(woof_quirk_corrections="all", **schemes)
+    assert full.woof_quirk_corrections is None
+    assert replace(full, ysu_surface_heat_exner=False).ysu_surface_heat_exner is False
 
 
 def test_a_wrf_hydro_coupling_does_not_read_the_noah_floor_booking(monkeypatch):

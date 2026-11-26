@@ -89,10 +89,10 @@ class RunConfig:
             for key, value in run_corrections_under(
                     self.woof_quirk_corrections).items():
                 object.__setattr__(self, key, value)
-            if self.woof_quirk_corrections == "none":
-                # resolved, as apply_run_corrections leaves it: every key
-                # explicit, so a later replace() of one key keeps it
-                object.__setattr__(self, "woof_quirk_corrections", None)
+            # resolved under either umbrella: every key explicit, so a
+            # later replace() of one key keeps it, under 'all' as under
+            # 'none' (the umbrella is a meta key, inert in the identity)
+            object.__setattr__(self, "woof_quirk_corrections", None)
         if self._legacy_h_sca is None:
             object.__setattr__(self, "_legacy_h_sca", self.h_sca_adv_order is None)
         if self.h_sca_adv_order is None:
@@ -2645,8 +2645,9 @@ class RunConfig:
     # whose default follows the physics mode (correct: on; exact or a
     # strict WRF process: off).  'all' turns every RunConfig correction on;
     # a key set false next to it is refused by name.  'none' turns off
-    # every correction not named, and a named key wins; the RunConfig then
-    # holds it resolved (None, every key explicit).  The same rule on every
+    # every correction not named, and a named key wins.  Under either, the
+    # RunConfig then holds it resolved (None, every key explicit), so a
+    # replace() of one key keeps that key.  The same rule on every
     # route: the TOML readers and RunConfig(...) both resolve through
     # woof.quirk_corrections.apply_run_corrections.
     woof_quirk_corrections: str | None = _config_field(default=None, kw_only=True)
