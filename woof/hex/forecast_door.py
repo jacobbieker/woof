@@ -2472,6 +2472,21 @@ def resolve_request(
         dynamics_override_sources = {
             key: dynamics_override_sources[key] for key in dynamics_overrides}
 
+    if physics is not None:
+        # A WRF dynamics value passed as MPAS's own operator (refused_settings:
+        # diff_opt=0, mix_full_fields=true, khdif=0, kvdif=0) must be the
+        # operator this run's dycore options select.
+        from .physics_suites import wrf_dynamics_problems
+
+        for problem in wrf_dynamics_problems(
+                getattr(physics, "overrides", None), horiz_mixing=horiz_mixing,
+                les_model=str(getattr(arguments, "les_model", None) or "off"),
+                dynamics={**(getattr(arguments, "_native_dynamics_overrides", None) or {}),
+                          **dynamics_overrides}):
+            if collected is None:
+                raise _refuse(problem)
+            collected.append(problem)
+
     if imported_namelist is not None and imported_namelist.dycore_options:
         dynamics_problems = namelist_dycore_problems(
             imported_namelist, arguments,
@@ -3236,6 +3251,18 @@ def resolve_surface_statics(arguments, physics, mesh, grid, collected):
         if collected is None:
             raise _refuse(problem)
         collected.append(problem)
+    if selection and int(selection.get("slope_rad", 0) or 0) == 1:
+        # slope_rad's statics are fitted on the mesh at host preparation
+        # (woof.hex.slope_statics); a planar mesh is refused here, before the
+        # card is reserved, not there.
+        from .slope_statics import planar_mesh_problem
+
+        named = getattr(arguments, "grid", None)
+        problem = planar_mesh_problem(named if named is not None else grid)
+        if problem is not None:
+            if collected is None:
+                raise _refuse(problem)
+            collected.append(problem)
     needed = surface_inputs.reads_surface_statics(selection)
     if (not needed and given is not None and physics is not None
             and physics.column_profile is not None
