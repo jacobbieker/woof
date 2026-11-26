@@ -130,18 +130,38 @@ def test_no_previous_release_releases_only_head(tmp_path):
     assert rows == [[head, "1.1.6.1", ""]]
 
 
-def test_runs_on_main_and_dispatches_publish_metal_for_every_planned_version():
+def test_runs_on_main_and_releases_every_planned_version_without_publishing():
     wf = _workflow()
     on = wf.get("on", wf.get(True))  # PyYAML reads the bare key `on` as True
     assert on["push"]["branches"] == ["main"]
     assert wf["concurrency"]["cancel-in-progress"] is False
     job = wf["jobs"]["release"]
-    assert job["permissions"] == {"contents": "write", "actions": "write"}
+    # PyPI is publish-metal.yml's daily schedule, so this job dispatches nothing.
+    assert job["permissions"] == {"contents": "write"}
     assert "refs/heads/main" in job["if"]
     checkout = next(s for s in _steps() if s.get("uses", "").startswith("actions/checkout"))
     assert checkout["with"]["persist-credentials"] is False
     loop = next(s["run"] for s in _steps() if "gh release create" in s.get("run", ""))
     assert "while read -r sha version previous" in loop
     assert '--target "$sha"' in loop and "--generate-notes" in loop
-    assert "publish-metal.yml" in loop and "publish=true" in loop
-    assert '--ref "metal-v${version}"' in loop
+    assert "gh workflow run" not in loop
+
+
+def _publish_workflow():
+    return yaml.safe_load((ROOT / ".github" / "workflows" / "publish-metal.yml").read_text(encoding="utf-8"))
+
+
+def test_publish_metal_runs_daily_on_the_newest_tag_wheel_only():
+    wf = _publish_workflow()
+    on = wf.get("on", wf.get(True))
+    assert on["schedule"] == [{"cron": "17 4 * * *"}]
+    assert on["push"]["tags"] == ["metal-v*"] and "workflow_dispatch" in on
+    jobs = wf["jobs"]
+    resolve = "\n".join(s.get("run", "") for s in jobs["resolve"]["steps"])
+    assert "sort -V | tail -n1" in resolve and "pypi.org/pypi/metal-woof/" in resolve
+    assert jobs["build"]["if"] == "needs.resolve.outputs.skip != 'true'"
+    build = "\n".join(s.get("run", "") for s in jobs["build"]["steps"])
+    assert "--wheel" in build and "--sdist" not in build
+    assert jobs["publish"]["if"] == "needs.resolve.outputs.publish == 'true'"
+    assert jobs["publish"]["concurrency"]["cancel-in-progress"] is False
+    assert jobs["publish"]["concurrency"]["queue"] == "max"

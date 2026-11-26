@@ -229,7 +229,7 @@ def initialize(*, pools: dict, configs: dict, remap_geometry: str | None = None,
     if configs.get("config_use_column_package", False):
         from . import column_v842 as cv
         _column_precision(pools)
-        cv.init_column_itd(pools, cv.init_parameters(pools, configs, biogeochemistry=True))
+        cv.init_column_itd(pools, cv.init_parameters(pools, configs, biogeochemistry=True, z_tracers=True))
     advection = configs.get("config_use_advection", False)
     if remap_geometry is None:
         remap_geometry = "compute" if advection else "input"
@@ -273,7 +273,7 @@ def _column_state(pools: dict, configs: dict):
     ``colpkg_init_itd`` run on a copy of the thickness limits (the pools'
     keep what the run has made of them, as a running model's do)."""
     from . import column_v842 as cv
-    state = cv.init_parameters(pools, configs, biogeochemistry=True)
+    state = cv.init_parameters(pools, configs, biogeochemistry=True, z_tracers=True)
     limits = pools["initial"]["categoryThicknessLimits"]
     cv.init_column_itd({"initial": {"categoryThicknessLimits": limits.copy()}}, state)
     return state
@@ -281,13 +281,16 @@ def _column_state(pools: dict, configs: dict):
 
 def velocity_corrections(configs: dict, named, table) -> tuple:
     """The velocity set-up corrections a call takes: those ``named``, plus
-    every one of ``table`` under ``woof_quirk_corrections = 'all'`` in
-    ``configs`` (woof.quirk_corrections; route ``mpas_seaice_velocity``).
-    Each acts only where its mesh has the quirk, so the umbrella carries
-    them everywhere."""
+    every one of ``table`` under an explicit ``woof_quirk_corrections =
+    'all'`` in ``configs``, or in correct mode (the umbrella unset) when the
+    call names none (woof.quirk_corrections; route ``mpas_seaice_velocity``).
+    Under the mode's default a named subset is the whole set, so naming
+    fewer turns the others off. Each acts only where its mesh has the
+    quirk, so the umbrella carries them everywhere."""
     from woof import quirk_corrections
     named = tuple(named)
-    if not quirk_corrections.all_on(configs):
+    umbrella, explicit = quirk_corrections._umbrella(configs)
+    if umbrella != "all" or (named and not explicit):
         return named
     return named + tuple(name for name in table if name not in named)
 

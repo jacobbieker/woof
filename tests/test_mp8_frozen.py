@@ -243,13 +243,31 @@ FROZEN_COMMIT_ORIGINAL = "789f61181fb0b198ace10775f3ea184eb5e786a3"
 #: rain-graupel footprint (74 prr_rcg, 80 pnr_rcg, 74 prg_rcg, 55 png_rcg,
 #: 7 prw_vcd cells, one final qg); on sm_89 only the six reading kernels'
 #: SASS moved.  Previously 1ab8d031/b3bbf88b (428981 chars).
+#: RE-FROZEN 2026-11-23 (quirk pass, correct-mode FQ5,
+#: thompson_rain_snow_closure): three #ifdef THOMPSON_RAIN_SNOW_CLOSURE
+#: blocks set the cold rain-snow graupel gain to what rain and snow lose
+#: after their limiters.  Without the define (exact mode) the file is
+#: byte-identical to the previous freeze: tests/test_thompson_rain_snow_
+#: closure.py strips the blocks and pins cad801b7 (and the same for every
+#: other Thompson unit); with it, a 260-263 K column holding snow and a
+#: trace of rain no longer makes 3.5 times its rain as graupel (that file's
+#: device test; docs/public/PHYSICS.md "Correction:
+#: thompson_rain_snow_closure").  Previously cad801b7/90c66834 (428431
+#: chars).
+#: RE-FROZEN 2026-11-23 (FQ5 zero floor, review finding): each of the three
+#: blocks now floors the graupel gain at zero, snow then taking only what
+#: rain lost (prs = -prr, prg = 0), so the exchange never makes graupel a
+#: sink that qg = 0 clips into water.  Still inside the #ifdef: without the
+#: define the file is byte-identical to cad801b7 (tests/
+#: test_thompson_rain_snow_closure.py strips the blocks).  Previously
+#: 499b6be6/d85d117f (429660 chars).
 THOMPSON_CU_SHA256 = (
-    'cad801b72ab59d54c28e7903b125cbced4d8ae7211e1ff28427ffaee0dcd9b43')
+    '0eab875d9757311f1bbed3b66b28e067535e1eec8fd30bdbb93d8e05ee746042')
 #: sha256 of ``_preamble() + thompson.cu`` -- the exact string nvrtc sees.
 #: THIS is the mp=8 numerics guarantee.
 THOMPSON_COMPILED_SOURCE_SHA256 = (
-    '90c66834a098ecddb0b4b6aa6bb8a9a92e6545c14a9e580bc1e70acafce10904')
-THOMPSON_COMPILED_SOURCE_LEN = 428431
+    '1bcf40d8a40da3e754abd72fc2a6f2579caffa61c24856ccb46359b9592e2ca4')
+THOMPSON_COMPILED_SOURCE_LEN = 430278
 
 COMMON_CUH_SHA256 = (
     "c78b17cb02ef67a2ad24d19e06e1129d7d5bcda74b972b38470fd33a6e58ff43")
@@ -295,8 +313,12 @@ CUDA_DEFINES_PIN = {
 #: RE-PINNED for WOOF 1.0.0: the rename rewrote the package name on 10
 #: import lines of woof/core/thompson.py and nothing else, so no launcher and no
 #: keyword moved.  As the engine froze it: 9d07c169.
+#: RE-FROZEN 2026-11-23 (FQ5, thompson_rain_snow_closure): the two source
+#: network launchers take rain_snow_closure and compile the define through
+#: _closure_kernel; rain_snow_closure_due reads the key.  __all__ is
+#: unchanged; without the key no launch moved.  Previously 3f621940.
 THOMPSON_PY_SHA256 = (
-    '3f621940db75e793bc1752e804cb0ab72158cb0d4887fa42b966a81cc9cbcdb3')
+    '991843297d4a381ba76d49eb4f730e21e72730920066c6af00883f719e0ff947')
 
 #: ``woof/core/thompson.py::__all__`` verbatim, in declaration order.
 #: mp=28 launchers live in the new ``thompson_aerosol_*.py`` modules; not
@@ -387,7 +409,12 @@ THOMPSON_PY_ALL = (
 #: later sites and the six one-slab reads removed lines below them; counts
 #: 14 / 7 / 3 / 3 and no site edited.
 # Qualified column dispatch added lines; literal values/counts are unchanged.
-THOMPSON_CU_LITERAL_SITES = {'100.0e6f': [416, 1136, 1265, 2572, 3446, 3513, 3762, 4437, 4717, 4840, 4972, 5392, 7658, 9643], '2730.0f': [416, 1136, 1265, 4717, 4840, 5392, 9643], '272.0f': [1142, 1273, 9651], 'cloud_number_bin = 65': [4645, 5058, 7740]}
+#: RE-FROZEN 2026-11-23: FQ5's three #ifdef blocks add lines above later
+#: sites; counts 14 / 7 / 3 / 3 and no site edited.
+#: RE-FROZEN 2026-11-23 (FQ5 zero floor): five more lines in each of the
+#: first two blocks and in the third shift the sites below them; counts
+#: 14 / 7 / 3 / 3 and no site edited.
+THOMPSON_CU_LITERAL_SITES = {'100.0e6f': [416, 1136, 1265, 2572, 3446, 3513, 3762, 4452, 4732, 4855, 4987, 5407, 7687, 9686], '2730.0f': [416, 1136, 1265, 4732, 4855, 5407, 9686], '272.0f': [1142, 1273, 9694], 'cloud_number_bin = 65': [4660, 5073, 7769]}
 
 #: Every ``.cu`` translation unit present at the frozen commit, as
 #: ``name -> (file sha256, assembled-compile-string sha256)``.  Modules
@@ -1154,8 +1181,15 @@ FROZEN_MODULE_DIGESTS = {
         # Review: fork CASE(1) and its buoyancy flux now follow the fork.
         # The stock preprocessed source is unchanged, checked by the sibling test.
         # Wave3: export arm folded from sibling; default tokens unchanged.
-        '0a3cc76ddc7fbdfc9b59d8db1c1365746cc4fd649a1bd7b7ae30c6e455643ba0',
-        'cf6678981492e29c5d58e8c269f6cf247d5b00118cffa47e97d71014cd471342'),
+        # ML1 (fix/mynn-boulac-down-sign): the BouLac downward length's
+        # constant-theta branch takes NCAR/MYNN-EDMF 399f50f's sign under
+        # MYNN_BOULAC_DOWN_SIGN only (correct mode).  Without the define the
+        # PTX is byte-identical to rel/3.0.2 84f22b9076 at compute_89 and
+        # compute_120 under both loader option sets
+        # (tools/kernel_ptx_identity/receipts/mynn-boulac-down-sign-ml1-default.json).
+        # Previously 0a3cc76d/cf667898.
+        '17c4f8c5abb445b2213382c609bfa96ddae9d1c965b28d237b607d9b8b95c58c',
+        'ec6cc52fd9fd9456c8d0a0b16d00b6318b8381d4d9eb784bd96ca58976965455'),
     'mynn_surface': (
         # Re-pinned by the cat6 fix, 2026-11-02: 51bb93111ee (export hygiene)
         # rewrote comments only in glibc_flt32.cuh, flt32_expf_fma.cuh, kf.cu,
@@ -1237,9 +1271,6 @@ FROZEN_MODULE_DIGESTS = {
         # IEEE-correctly.  Previously 6584d2be/ab4befec.
         '784e7c0e0b1f077bbccc9ceef2833c147548e6973a8aad6dc3001e64cfda7653',
         'fa42d757b211f33157ef13e24cdd4b8fd743794024ddb4d2bf012bc07fddaab1'),
-    # Re-pinned for the WOOF 1.0.0 text scrub: comments only (punctuation, host
-    # labels), proven equal with comments stripped; the preprocessor drops
-    # comments, so the compiled binary does not move.
     'noah': (
         # Re-pinned by the cat6 fix, 2026-11-02: 51bb93111ee (export hygiene)
         # rewrote comments only in glibc_flt32.cuh, flt32_expf_fma.cuh, kf.cu,
@@ -1337,11 +1368,28 @@ FROZEN_MODULE_DIGESTS = {
         # identical to 1.1.6's but for __local_depot/callseq/label
         # numbering; tests/test_noah_wrf461_parity.py and
         # tests/test_noah_wrf_hydro_parity.py pass.  Previously b902d662/a8b1e6b2.
-        '96e0b62e529d90ecdc25f06b91bf5aaa918afd508513d66073bec7553b8cef03',
-        '908ffc160b5a9a4a807ceb282ab2fc017431bb5b8b7defb0d6e3bdf889395492'),
+        # RE-PINNED 2026-11-22 by the opt-in noah_smc_floor_booking (default off): a
+        # NOAH_SMC_FLOOR_BOOKING #ifdef block in SSTEP takes the water the 0.02
+        # floor adds from the layer below (WPLUS < 0) or RUNOFF3; without the
+        # define the preprocessed program is the previous one byte for byte
+        # (tests/test_noah_smc_floor_booking.py strips the block and checks the
+        # previous digest).  Previously 96e0b62e/908ffc16.
+        # Upstream 1.1.7 RE-PINNED by fix/305-f31-private-names (2026-11-15), a COMMENT-ONLY
+        # edit: one comment that named a lab host now names the card ("RTX
+        # 4090 test host").  No code token changed, so the compiled kernel is
+        # the same; only the file and compile-string digests move.
+        # Previously ef57884c/42ed557f.
+        # RE-PINNED for the upstream WOOF 1.1.7 merge: both edits above.
+        '3736ba8f07a6ff915255159e6fec8b29a617e76465364d99d276c0795470e17d',
+        'd97d7894899756adbae9cfbc6e388c6fedc9e95292ae9515111f7819c3675aa2'),
+    # fix/noahmp-small-defects (2026-11-09): correct-mode SN1, the Noah-MP
+    # snowmelt reset re-evaluating ESTG at the reset TG, compiled only under
+    # GPUWM_NOAHMP_MELT_RESET_ESAT.  Without it the arithmetic is unchanged
+    # (colo 3 km 9 h and c1 12 km 1 h, SN1 off: 0 of 338,307,610 and
+    # 0 of 24,142,130 history words differ from rel/2.9.13).
     'noahmp_bareflux': (
-        '54fb5065e95b24d4cf676e2deda29bae44b3e9305d3d98cbc1abf5ed55f444ce',
-        'fbb19fc8b5668ea2edbcc1270f8ffe367475124ffa0ce99d3bc34639f3f31e9f'),
+        '883cd6f2cbc8cbf56671469bc0ff08126bc5f7b56573869d336a5c85d7feb916',
+        '18bce629727038d680911ebb57f4e2aa37639dcbaf030d8fada6f4d64f7b9cf4'),
     'noahmp_driver': (
         'bd555be10ccade5a5bdddcaf4c56b7f4353dae1208fc48a5586fb7ce7d32d643',
         'f1913fe0054adb74188effa6499b799e989cfb1e96ecd676edcd43df0083030e'),
@@ -1411,9 +1459,14 @@ FROZEN_MODULE_DIGESTS = {
     # selector.  The default-route arithmetic is unchanged; the
     # composed-unit frame row is re-read for it in
     # kernel_frame_recordings.  Previously 295e9541/c3271c5a.
+    # fix/noahmp-small-defects (2026-11-09): correct-mode SN1, the Noah-MP
+    # snowmelt reset re-evaluating ESTG at the reset TG, compiled only under
+    # GPUWM_NOAHMP_MELT_RESET_ESAT.  Without it the arithmetic is unchanged
+    # (colo 3 km 9 h and c1 12 km 1 h, SN1 off: 0 of 338,307,610 and
+    # 0 of 24,142,130 history words differ from rel/2.9.13).
     'noahmp_vegeflux': (
-        'd55c402a21caf3f52e5aed05a0dd727df76b747906a3e0d082446e6a7bcab014',
-        '0d23b367d88497bb45a2e895e6d85abc826caf2f4467b8b47c7ba7be32d3a9b4'),
+        'b35620d804880453d8cc5b68c03cc0cd15fa6a4c432c53c555d1d4b2fd363d8b',
+        'ecfcaf8d5e8ae09d127a37ca8ecb75ebebfad942f00becdd8d63197e96cb9ce9'),
     'noahmp_vegprecip': (
         '9ce5667599d111be0efc7cb0871e5719d70259bb95b30fbe923e01964b75c26c',
         '599e85f0fe59a28ae5fd5437e47db7f41c31abd21783979f66b987b212f1f41a'),
@@ -2000,8 +2053,17 @@ FROZEN_MODULE_DIGESTS = {
         # physics-on step.  Graded against the strict-recipe oracle
         # (tools/sfclayrev_wrf461_oracle/build_strict.sh).  sfclay is not an
         # mp=8 translation unit.  Previously 09ff5be4/010efce3.
-        '2110f93e4f5ca9fcdee9c2b41844f81082b333af6081133c7078d8d02c82cbb6',
-        '1cbeb1fe01a272288a8afc2a0980182016180c8ec640be8d0fd98fa05044537d'),
+        # Re-pinned port/wrf-480 L07 (WRF v4.8.0 kim_tofd): sfclay.cu gains the
+        # KIM turbulent orographic form drag inside #ifdef GPUWM_SFCLAY_TOFD,
+        # compiled only into the new sfclay_tofd unit.  Reading: the sfclay and
+        # sfclay_dx2d images (fast and strict) are byte-identical to the
+        # previous source's; the WRF 4.6.1 fixture stays 0 ULP; the 4.8.0
+        # referee-object oracle (tools/sfclayrev_wrf480_oracle) is 0 of
+        # 267,960 words under strict numerics.  Previously 2110f93e/1cbeb1fe.
+        # 3.0.0 export hygiene: a comment-only rewrite (a report path in
+        # the dx_factor note became a short name); previously f6932fd1.
+        '29be8e5edf5feac9af91b2bc6702ff09fed7be5f0f5414840b4fa5d539fdcca2',
+        'ad66c56a04b440112ebc6fdfcf1d1d972ac7b86eef48941a3a00feb406fed25b'),
     'smag2d': (
         # Re-pinned by the cat6 fix, 2026-11-02: 51bb93111ee (export hygiene)
         # rewrote comments only in glibc_flt32.cuh, flt32_expf_fma.cuh, kf.cu,
@@ -2141,8 +2203,12 @@ FROZEN_MODULE_DIGESTS = {
         # RE-FROZEN 2026-10-08 for the one-slab rain-graupel reads
         # (thompson_racg_index); see THOMPSON_CU_SHA256 for the reading.
         # Previously 1ab8d031/b3bbf88b.
-        'cad801b72ab59d54c28e7903b125cbced4d8ae7211e1ff28427ffaee0dcd9b43',
-        '90c66834a098ecddb0b4b6aa6bb8a9a92e6545c14a9e580bc1e70acafce10904'),
+        # RE-FROZEN 2026-11-23 for FQ5 (thompson_rain_snow_closure), the
+        # reading at THOMPSON_CU_SHA256.
+        # RE-FROZEN again 2026-11-23 (FQ5 zero floor), the reading at
+        # THOMPSON_CU_SHA256.
+        '0eab875d9757311f1bbed3b66b28e067535e1eec8fd30bdbb93d8e05ee746042',
+        '1bcf40d8a40da3e754abd72fc2a6f2579caffa61c24856ccb46359b9592e2ca4'),
     'uh_diag': (
         'cbfc98e8d025a4511fd7f8a41ca4bd163c261da4a48dec22bb979ec5a496b14e',
         '9dc88c6e14b2aaaa4249a9f844dc231f105431623375c988a2894e322de2f3ea'),
@@ -2699,6 +2765,11 @@ ADAPTER_CALLS_NO_REFL = (
             'scratch[mp_thompson_graupel_number_shadow]',
         'qc':
             'state.qc',
+        # RE-PINNED for the Thompson rain-snow closure (FQ5): both source
+        # networks take RunConfig.thompson_rain_snow_closure (False here:
+        # the recording cfg selects no scheme); see THOMPSON_CU_SHA256.
+        'rain_snow_closure':
+            'False',
         'snow_velocity_boost':
             'scratch[mp_thompson_snow_velocity_boost]',
     }),
@@ -2716,7 +2787,10 @@ ADAPTER_CALLS_NO_REFL = (
         'state.qv',
         '<classic-table-owner>',
         '10.0',
-     ), {}),
+     ), {
+        'rain_snow_closure':
+            'False',
+    }),
     ('launch_adapter_masks', (
         'state.qr',
         'state.qg',
@@ -2987,6 +3061,11 @@ ADAPTER_CALLS_WITH_REFL = (
             'scratch[mp_thompson_graupel_number_shadow]',
         'qc':
             'state.qc',
+        # RE-PINNED for the Thompson rain-snow closure (FQ5): both source
+        # networks take RunConfig.thompson_rain_snow_closure (False here:
+        # the recording cfg selects no scheme); see THOMPSON_CU_SHA256.
+        'rain_snow_closure':
+            'False',
         'snow_velocity_boost':
             'scratch[mp_thompson_snow_velocity_boost]',
     }),
@@ -3004,7 +3083,10 @@ ADAPTER_CALLS_WITH_REFL = (
         'state.qv',
         '<classic-table-owner>',
         '10.0',
-     ), {}),
+     ), {
+        'rain_snow_closure':
+            'False',
+    }),
     ('launch_adapter_masks', (
         'state.qr',
         'state.qg',

@@ -478,7 +478,10 @@ def test_a_remedy_label_names_exactly_the_edit_its_remedy_settings_makes(
                 else:
                     assert (name, option_id) in known_gap, (name, option_id, rule)
     assert emitted > 0
-    assert checked == 30 + 5 + emitted
+    # UDM (mp27) and MAD-WRF (mp96) add theirs in 3.0.2 (upstream 1.1.7): the
+    # builder wrote their rules before the passes that rewrite both options
+    # whole.  That is 32.
+    assert checked == 32 + 5 + emitted
 
 
 def test_the_builder_refuses_a_remedy_label_that_promises_a_second_edit(

@@ -31,7 +31,7 @@ Ratchet schema ``mpas-ratchet-v1`` contains entries keyed by
 (pin_set, mesh, date, deck, stream, field), counters and first differing step.
 Unknown keys have a zero baseline. This door emits a candidate ratchet and
 never mutates the integrator's baseline. The foundation's recorded-missing
-policy (integrator ruling 2026-10-13 07:45Z) permits only existing "field missing
+policy (2026-10-13) permits only existing "field missing
 in hex" entries at the same process count, with no rising counters. All written
 fields must have zero differing words. This scoped acceptance is named
 BITWISE-WRITTEN-FIELDS; it never claims complete native BITWISE identity.
@@ -439,7 +439,7 @@ def recorded_missing_failures(result: dict[str, Any], context: dict[str, Any],
                               baseline: dict[str, Any]) -> list[str]:
     """Enforce the recorded-missing foundation rule without enrolling new gaps.
 
-    Integrator ruling 2026-10-13 07:45Z: every written word is equal; each
+    Since 2026-10-13: every written word is equal; each
     deferred field remains in the ratchet, until its owner's zero landing.
     Structural errors other than that exact missing-field status cannot use
     the allowance, even if their word counters happen to fit the baseline.
@@ -647,7 +647,7 @@ def render_evidence(config: dict[str, Any], root: Path, work: Path) -> dict[str,
 
 
 #: The mode a proof runs when its deck names none.  The door's default for an MPAS suite route is correct
-#: (owner ruling 2026-10-13); every proof harness and gate passes exact explicitly (coordinator 2026-10-14), so the
+#: (since 2026-10-13); every proof harness and gate passes exact explicitly (since 2026-10-14), so the
 #: gates keep running the numerics they ran before the switch existed.
 PROOF_PHYSICS_MODE = "exact"
 
@@ -703,7 +703,73 @@ def proof_default_backend(command: list[str]) -> list[str]:
     return [*command, "--physics-default-backend", PROOF_DEFAULT_BACKEND]
 
 
-#: The kernel numerics a proof runs when its deck names none.  The door default is fast (owner ruling
+def _command_values(command: list[str], flag: str) -> list[str]:
+    values = [command[i + 1] for i, part in enumerate(command[:-1]) if part == flag]
+    return values + [part.split("=", 1)[1] for part in command if part.startswith(flag + "=")]
+
+
+def proof_referee_versions(command: list[str], namelist: Path | None) -> tuple[list[str], dict[str, Any]]:
+    """``command`` with each versioned scheme's referee option appended when the deck names none, and the record.
+
+    Hex defaults are the latest upstream scheme versions (pins are for bitwise proof), so
+    on a route whose table row carries ``mynn_versions`` (rrfs-44c0849) a bare run takes MYNN v6.1, which native
+    44c0849 does not run. Breakage this prevents: a deck written while 'pinned' was the default would compare
+    MYNN v6.1 against native 44c0849 and go RED on every word MYNN touches. A deck that names the selector keeps
+    it, and routes without a versioned scheme are unchanged, so no deck file changes.
+
+    Every MPAS route also names the generations the proof's mode would otherwise pick by default
+    (version_defaults): MMM-physics ``mmm_version=a4baf7f`` (MPAS-A v8.4.2's Externals pin; correct mode takes
+    550b5b4), the v8.4.2 YSU drag ``gwdo_version=v842`` (not on a deck that names the KIM drag, which has no
+    v842 generation), and the TEMPO the route's ``exact_mode_defaults`` pin (v3.0.3, RRFS 44c0849; correct mode
+    takes v3.2.5).  So a proof compares the pinned schemes with the pinned Fortran whatever the defaults become."""
+    from .config import parse_fortran_namelist
+    from .mpasphys.forecast_v842 import suite_route_matches
+    from .errors import ConfigurationRefusal
+    try:
+        groups = parse_fortran_namelist(namelist.read_text()) if namelist is not None else {}
+    except ConfigurationRefusal:
+        # A deck namelist this reader cannot parse names no scheme version here; the model run itself parses it
+        # and refuses it in its own words.  THE BREAKAGE THIS PREVENTS: verify refused at this step, before the
+        # unpinned-gate and reference-environment checks it exists to run, on a deck whose namelist is a stub.
+        groups = {}
+    suites = _command_values(command, "--physics-suite")
+    selected = suites[0] if suites else groups.get("physics", {}).get("config_physics_suite")
+    if selected is None and "mpasphys" in _command_values(command, "--physics-backend"):
+        selected = "mesoscale_reference"
+    pin_sets = _command_values(command, "--physics-pin-set")
+    named = " ".join(_command_values(command, "--physics"))
+    supplied = {key.casefold() for options in groups.values() for key in options}
+    from .mpasphys import gwdo_version as _gwdo, mmm_version as _mmm
+
+    def unnamed(selector: str) -> bool:
+        return selector + "=" not in named and selector.casefold() not in supplied
+
+    # The drag the run takes: the last --physics config_gwdo_scheme= over the namelist's.  THE BREAKAGE THIS
+    # PREVENTS: a namelist naming the KIM drag under a command naming the YSU drag skipped the v842 pin.
+    drag = [part.split("=", 1)[1] for part in _command_values(command, "--physics")
+            if "=" in part and part.split("=", 1)[0].strip().casefold() == "config_gwdo_scheme"]
+    if not drag:
+        drag = [value for options in groups.values() for key, value in options.items()
+                if key.casefold() == "config_gwdo_scheme"]
+    kim = bool(drag) and str(drag[-1]).strip().strip("\"'") == _gwdo.KIM
+    appended = []
+    rows = list(suite_route_matches(selected, pin_sets[0] if pin_sets else None)) if selected else []
+    for _, row in rows:
+        selector = (row.get("mynn_versions") or {}).get("selector")
+        if selector and unnamed(selector):
+            appended += ["--physics", f"{selector}=pinned"]
+        for key, value in (row.get("exact_mode_defaults") or {}).items():
+            if key == "config_tempo_version" and unnamed(key) and f"{key}={value}" not in appended:
+                appended += ["--physics", f"{key}={value}"]
+    if rows and unnamed("mmm_version"):
+        appended += ["--physics", f"mmm_version={_mmm.PINNED}"]
+    if rows and not kim and unnamed("gwdo_version"):
+        appended += ["--physics", f"gwdo_version={_gwdo.PINNED}"]
+    return [*command, *appended], {"appended": appended,
+                                   "source": "verify_mpas referee pins (the deck names no scheme version)"}
+
+
+#: The kernel numerics a proof runs when its deck names none.  The door default is fast (since
 #: 2026-10-16: strict numerics is opt-in, never the default); bitwise identity to native MPAS is a property of
 #: strict numerics, so every proof and gate deck runs ``--numerics strict``, appended here so no deck changes.
 PROOF_NUMERICS = "strict"
@@ -817,6 +883,7 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
     # Proofs name their mode: a deck without one runs exact (the gates' numerics of before the switch).
     run_command, physics_mode = proof_physics_mode(command, inputs["namelist"])
     run_command = proof_default_backend(run_command)
+    run_command, referee_versions = proof_referee_versions(run_command, inputs["namelist"])
     run_command, numerics_record = proof_numerics(run_command)
     run_command = proof_no_products(run_command)
     model_execution = args.hex_output is None
@@ -870,6 +937,10 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         # proof run writes history and diagnostics in the deck's own io_type, not lossless NetCDF-4
         # (woof.hex.history_compression, the default of every other run).
         run_env = {**os.environ, "GPUWM_HISTORY_COMPRESSION": "none"}
+        # A proof is a pinned lane: proof_referee_versions named every scheme generation, and one the run still
+        # takes from a default is refused by name (version_defaults) rather than compared with the pinned Fortran.
+        from .mpasphys.version_defaults import ENVIRONMENT as PINNED_LANE
+        run_env[PINNED_LANE] = "1"
         with (work / "hex.log").open("w") as log:
             completed = subprocess.run(argv, cwd=run_inputs, stdout=log, stderr=subprocess.STDOUT, check=False,
                                        env=run_env)
@@ -999,6 +1070,8 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         "physics_mode": physics_mode,
         # The kernel numerics the model door ran (strict unless the deck names fast: woof.hex.numerics).
         "numerics": numerics_record,
+        # Referee options appended for versioned schemes the deck names no version of (proof_referee_versions).
+        "referee_versions": referee_versions,
         "evidence_kind": "FORECAST-FAILED" if model_error else ("FORECAST" if model_execution else "COMPARISON-ONLY"),
         "failed_model_exit": failed_exit,
         "declared_libm_residue": residue,

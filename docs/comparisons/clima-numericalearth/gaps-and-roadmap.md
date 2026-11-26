@@ -73,7 +73,7 @@ and steep-terrain numerics.
 - Sea-surface temperature is fixed for the whole run. `sst_update`,
   `sst_skin` and `tmn_update` are pinned to 0: "SST update cycling is not
   implemented (single-analysis case runs)" (`woof/namelist_import.py:980-985`,
-  `docs/public/CONFIGURATION.md:898`).
+  `docs/public/CONFIGURATION.md:908`).
 - The initial water temperature is chosen carefully. One provider is used
   per connected body of water, and an optional user-supplied
   high-resolution analysis can replace ERA5 SST
@@ -260,7 +260,7 @@ No sub-10 m DEM reader was found in either stack.
   terrain.
 - *Steepness.* Finer terrain is steeper terrain. woof's terrain clock already
   reduces the time step or adds acoustic substeps on steep ground
-  (`docs/public/CONFIGURATION.md:429-431`). Beyond some slope the
+  (`docs/public/CONFIGURATION.md:430-432`). Beyond some slope the
   terrain-following coordinate itself fails (section 10).
 
 **Candidate approaches.**
@@ -381,7 +381,7 @@ that answer is the point.
 **woof today (documented).** woof runs up to 256 levels. Columns of 256
 levels to a 1 hPa top (roughly 48 km) run through the shipped physics
 launchers with finite results (`docs/kernel_local_memory_bounds.md:736-738`,
-`docs/public/PHYSICS.md:2241-2246`). The UK forecast configurations added in
+`docs/public/PHYSICS.md:2257-2262`). The UK forecast configurations added in
 commit `4adb152b` (later removed from the tree) used 115 levels to a 50 hPa
 top. This review found no receipt in the tree for a real-data run at a 1 hPa
 top. Other relevant settings:
@@ -390,7 +390,7 @@ top. Other relevant settings:
   arm interpolates one median RFMIP ozone profile in log pressure, the same
   profile at every latitude and date (`woof/core/rrtmgp.py:3142-3145`,
   `:3305-3306`). The legacy RRTMG arm uses the CAM climatology by
-  default (`o3input = 2`, `docs/public/CONFIGURATION.md:891`), or the RRTMG
+  default (`o3input = 2`, `docs/public/CONFIGURATION.md:901`), or the RRTMG
   wrapper's built-in profile with `o3input = 0` (`woof/config.py:4583-4586`). Neither reads ozone
   from the forcing source, although sources such as ERA5 carry an ozone
   mixing ratio
@@ -401,12 +401,12 @@ top. Other relevant settings:
   ([README.namelist:1741-1743](https://github.com/wrf-model/WRF/blob/06d4240ae989cc3e50af412bb472df3d9048783c/run/README.namelist#L1741-L1743)).
   WRF has no non-orographic option to port.
 - The upper sponge is Rayleigh damping of `w` (`damp_opt = 3`,
-  `docs/public/CONFIGURATION.md:451-453`).
+  `docs/public/CONFIGURATION.md:452-454`).
 - The hex core warms above level 45 by +0.019 K/h, reaching +0.46 K at 24 h
   (measured, `components/hex/README.md:909-915`).
 
 Note: the "Fixed by WOOF" table row `gwd_opt | 0 | no gravity-wave drag`
-(`docs/public/CONFIGURATION.md:894`) disagrees with
+(`docs/public/CONFIGURATION.md:904`) disagrees with
 `docs/public/TERRAIN-DRAG.md`, which documents options 1 and 3. That row
 appears to be stale.
 
@@ -523,7 +523,7 @@ overfit. The section 6 campaign is the guard.
   immersed-boundary grids
   ([src/ImmersedBoundaries](https://github.com/CliMA/Oceananigans.jl/tree/fec351f0d3657ec3421adfedde30418ee6c0ac3d/src/ImmersedBoundaries)).
   An immersed boundary in woof is L with high risk (judgement). The terrain
-  clock already guards stability (`docs/public/CONFIGURATION.md:429-431`).
+  clock already guards stability (`docs/public/CONFIGURATION.md:430-432`).
 
 ## Reusable external components
 
