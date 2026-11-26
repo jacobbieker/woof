@@ -62,31 +62,6 @@ _SURF_OUT = ("htop", "hbot", "xmb_shallow", "raincv", "pratec")
 _INT_OUT = ("k22_shallow", "kbcon_shallow", "ktop_shallow")
 
 
-#: Why cu_gf_version='gfl_873b414' is refused on the Metal backend (interim).
-METAL_REFUSAL = (
-    "cu_physics=3 with cu_gf_version='gfl_873b414' (WRF v4.8.0 Grell-Freitas-Li, the default) "
-    "does not run on the Metal backend yet: its lane-interleaved CUDA unit does not translate "
-    "to Metal (device-heap spill, mixed thread/device lane pointers and descriptors, 64-bit "
-    "atomics). Select cu_gf_version='wrf_461' (WRF v4.6.1 Grell-Freitas, GFDRV), which runs on "
-    "Metal, or run on CUDA.")
-
-
-def refuse_on_metal(backend_name=None):
-    """Refuse GFL on the Metal backend, before any step, naming the Metal-ready choice.
-
-    ``backend_name`` is the backend the caller prices for (preflight's
-    profile); otherwise the installed backend, or the one this process would
-    select -- read without installing one. No silent fallback: the run must
-    select cu_gf_version='wrf_461' itself.
-    """
-    if backend_name is None:
-        from woof import backend
-        backend_name = backend._active if backend._active is not None else backend.requested()
-    if backend_name == "mlx":
-        from woof.config import UnsupportedConfiguration
-        raise UnsupportedConfiguration(METAL_REFUSAL)
-
-
 class GrellFreitasLi:
     """Stateless ``cu_physics=3`` (WRF v4.8.0 GFL) callable for :class:`PhysicsDriver`.
 
@@ -102,7 +77,6 @@ class GrellFreitasLi:
                         "wrf": "06d4240ae989", "gfl": "873b414670323ae766ec4fe1f4b6b5ab891358ed"}
 
     def __init__(self):
-        refuse_on_metal()
         self._driver = None
         self._scalars = {}
 
@@ -401,6 +375,10 @@ def _pack_lanes(store, names, sources, *, ncol, n, index, nz):
             raise ValueError(f"GFL level source {name} must be [k <= {kme}, {ncol}] columns, got {source.shape}")
         keep.append(source)
         pointers.append(source.data.ptr); levels.append(source.size // ncol)
+    if n == 0:
+        # No active column: nothing to gather, and the kernel's slab count (n+127)/128 would be
+        # 0, a division by zero on CUDA (an illegal address, the all-False active mask).
+        return keep
     total = len(names) * store.shape[1] * kme * 128
     pack, _ = _kernels()
     pack((min(65535, -(-total // 256)),), (256,),

@@ -97,7 +97,7 @@ def test_generated_module_is_the_pinned_transcription():
 
 
 def _spell_back(lane):
-    """Undo gfl_lanes.lane_scheme's spellings: lane pointers, byte displacements, character storage."""
+    """Undo gfl_lanes.lane_scheme's spellings: lane pointers, byte displacements, character and fscav storage."""
     import re
     out, pos = [], 0
     head = re.compile(r'gf_lane_plus<GFReal>\(([A-Za-z_][\w.>-]*), ')
@@ -111,6 +111,8 @@ def _spell_back(lane):
     out.append(lane[pos:])
     text = ''.join(out)
     text = text.replace('GFP ', 'GFReal *').replace('GIP ', 'int *').replace('GBP ', 'bool *')
+    from woof.core import gfl_lanes
+    text = text.replace(gfl_lanes._FSCAV_SCRATCH, gfl_lanes._FSCAV_LOCAL)
     return text.replace(' = (char *) workspace.allocate_bytes (', ' = (char *) workspace.allocate (')
 
 
@@ -153,61 +155,114 @@ def test_lane_scratch_is_bounded_by_the_domain_and_the_cap():
     assert scratch_bytes(49, 424 * 299, 188, free=8 << 30) == (2 << 30) // per_slab * per_slab
 
 
-def test_preflight_prices_gfl_lane_scratch_not_gfdrv_tiles():
+def test_preflight_prices_gfl_lane_scratch_and_spill_pool_not_gfdrv_tiles(monkeypatch):
+    """The admission prices what the GFL launch holds: lane scratch plus the spill pool, with
+    the Metal per-lane region when Metal launches the run.
+
+    Breakage prevented: the spill pool (up to 256 MiB, held for the run) went unpriced, and a
+    reference or declared-budget profile priced a Metal run's scratch with CUDA's 256-byte
+    region instead of Metal's 2048.
+    """
     from types import SimpleNamespace
-    from woof.core.gfl_lanes import scratch_bytes
+    from woof import backend
+    from woof.core.gfl_lanes import (LANES, SPILL_POOL_BYTES, SPILL_SHARES, scratch_bytes, share_bytes,
+                                     spill_pool_bytes)
     from woof.core.preflight import gf_column_workspace_bytes, MEASURED_LOCAL_MEMORY_PROFILE
 
     def exp(version, nx=150, ny=150, nz=49):
         run = SimpleNamespace(cu_physics=3, cu_gf_version=version, nx=nx, ny=ny, nz=nz)
         return SimpleNamespace(domains=[SimpleNamespace(run=run)])
+    per_spill_slab = SPILL_SHARES * share_bytes(50, 49) * LANES
+    pool = spill_pool_bytes(49, 22500)
+    assert pool == min(176, SPILL_POOL_BYTES // per_spill_slab) * per_spill_slab <= SPILL_POOL_BYTES
+    assert spill_pool_bytes(49, 100) == per_spill_slab                  # one slab for a one-slab domain
     sms = MEASURED_LOCAL_MEMORY_PROFILE.multiprocessor_count
-    assert gf_column_workspace_bytes(exp("gfl_873b414")) == scratch_bytes(49, 22500, sms)
-    assert gf_column_workspace_bytes(exp("wrf_461")) != scratch_bytes(49, 22500, sms)
+    monkeypatch.setattr(backend, "_active", "cuda")
+    assert gf_column_workspace_bytes(exp("gfl_873b414")) == scratch_bytes(49, 22500, sms) + pool
+    assert gf_column_workspace_bytes(exp("wrf_461")) != scratch_bytes(49, 22500, sms) + pool
+    metal = scratch_bytes(49, 22500, sms, metal=True) + pool
+    assert metal > scratch_bytes(49, 22500, sms) + pool
+    live = SimpleNamespace(multiprocessor_count=sms, backend="mlx")
+    assert gf_column_workspace_bytes(exp("gfl_873b414"), profile=live) == metal
+    monkeypatch.setattr(backend, "_active", "mlx")                      # reference profile, Metal process
+    assert gf_column_workspace_bytes(exp("gfl_873b414")) == metal
 
 
-def test_gfl_is_refused_on_metal_naming_the_metal_ready_generation(monkeypatch):
-    """Interim: GFL's lane unit does not translate to Metal, so the Metal backend refuses it at setup.
+def test_spill_pool_refuses_a_slab_over_its_cap_and_is_priced_once_per_card():
+    """A spill slab larger than SPILL_POOL_BYTES is refused by name, and a nest prices its
+    largest scratch plus its largest pool (one pool per card, held across domains).
 
-    The breakage it prevents: every Metal forecast with cu_physics=3 (the hex
-    default, so every hex row) failed at step 0 with a translator error deep in
-    the composite step. The refusal names cu_gf_version='wrf_461', and nothing
-    falls back to it silently; CUDA still builds the callable.
+    Breakage prevented: ``max(1, ...)`` restored a slab over the cap (512 MiB at nz=2031),
+    and pricing max(scratch + pool) per domain under-priced a 150 x 150 nest at nz=49 then
+    nz=99, whose larger scratch (nz=99) and larger pool (nz=49) are held together.
     """
-    import dataclasses
     from types import SimpleNamespace
     from woof import backend
-    from woof.config import UnsupportedConfiguration
-    from woof.core import gfl
+    from woof.core.gfl_lanes import LANES, SPILL_POOL_BYTES, scratch_bytes, spill_pool_bytes, spill_pool_slabs
     from woof.core.preflight import gf_column_workspace_bytes, MEASURED_LOCAL_MEMORY_PROFILE
 
-    monkeypatch.setattr(backend, "_active", "mlx")
-    with pytest.raises(UnsupportedConfiguration, match="cu_gf_version='wrf_461'"):
-        gfl.GrellFreitasLi()
-    monkeypatch.setattr(backend, "_active", "cuda")
-    assert gfl.GrellFreitasLi()._driver is None
-    # Preflight refuses before its memory gate prices lane scratch for Metal.
-    run = SimpleNamespace(cu_physics=3, cu_gf_version="gfl_873b414", nx=150, ny=150, nz=49)
-    exp = SimpleNamespace(domains=[SimpleNamespace(run=run)])
-    metal = dataclasses.replace(MEASURED_LOCAL_MEMORY_PROFILE, backend="mlx")
-    with pytest.raises(UnsupportedConfiguration, match="cu_gf_version='wrf_461'"):
-        gf_column_workspace_bytes(exp, profile=metal)
-    assert gf_column_workspace_bytes(exp) > 0
-    run.cu_gf_version = "wrf_461"
-    assert gf_column_workspace_bytes(exp, profile=metal) > 0
+    with pytest.raises(ValueError, match="SPILL_POOL_BYTES"):
+        spill_pool_bytes(2031, 1)
+    assert spill_pool_slabs(SPILL_POOL_BYTES // LANES, 5) == 1             # exactly the cap fits
+    with pytest.raises(ValueError, match="too deep"):
+        spill_pool_slabs(SPILL_POOL_BYTES // LANES + 1, 1)
+    assert spill_pool_bytes(256, 22500) <= SPILL_POOL_BYTES                  # the deepest shipped tier fits
+
+    def run(nz):
+        return SimpleNamespace(cu_physics=3, cu_gf_version="gfl_873b414", nx=150, ny=150, nz=nz)
+    nest = SimpleNamespace(domains=[SimpleNamespace(run=run(49)), SimpleNamespace(run=run(99))])
+    sms = MEASURED_LOCAL_MEMORY_PROFILE.multiprocessor_count
+    backend_active = backend._active
+    try:
+        backend._active = "cuda"
+        priced = gf_column_workspace_bytes(nest)
+    finally:
+        backend._active = backend_active
+    scratch = {nz: scratch_bytes(nz, 22500, sms) for nz in (49, 99)}
+    pool = {nz: spill_pool_bytes(nz, 22500) for nz in (49, 99)}
+    assert scratch[99] > scratch[49] and pool[49] > pool[99]
+    assert priced == scratch[99] + pool[49]
+    assert priced > max(scratch[nz] + pool[nz] for nz in (49, 99))
 
 
-def test_refusal_reads_the_backend_without_installing_one(monkeypatch):
-    """Building the callable must not install a backend process-wide."""
-    from woof import backend
-    from woof.config import UnsupportedConfiguration
-    from woof.core import gfl
+def _unpromote(text):
+    """Undo gfl_lanes.metal_locals: each slot reference back to its local declaration."""
+    import re
+    text = re.sub(r'  GFFrame gf_locals_frame \(workspace\);\n  char \*gf_locals = \(char \*\) '
+                  r'workspace\.allocate_bytes \(\d+\);\n', '', text)
+    text = re.sub(r'(\w[\w ]*) \(&(\w+)\)\[(\d+)\] = \*\(\1 \(\*\)\[\3\]\) \(gf_locals \+ \d+\);', r'\1 \2[\3];', text)
+    text = re.sub(r'(\w[\w ]*) &(\w+) = \*\(\1 \*\) \(gf_locals \+ \d+\); \2 = ([^;]*);', r'\1 \2 = \3;', text)
+    return re.sub(r'(\w[\w ]*) &(\w+) = \*\(\1 \*\) \(gf_locals \+ \d+\);', r'\1 \2;', text)
 
-    monkeypatch.setattr(backend, "_active", None)
-    monkeypatch.setenv(backend.ENV, "mlx")
-    with pytest.raises(UnsupportedConfiguration):
-        gfl.GrellFreitasLi()
-    assert backend._active is None
+
+def test_metal_lowering_moves_only_the_passed_on_locals():
+    """Metal's GFL lowering holds every passed-on local in device memory and changes nothing else.
+
+    The breakage it prevents: a Metal pointer has one address space, so a lane
+    pointer or descriptor that may point at a local (``&itf``) or at scratch did
+    not compile. Undoing the slot references must give the CUDA lane scheme
+    byte for byte, every passed-on scalar or array local must be moved, and
+    the CUDA lowering must not contain any of it.
+    """
+    import re
+    from woof.core import gfl_873b414 as gfl
+    from woof.core import gfl_lanes
+    lane = gfl_lanes.lane_scheme(gfl._SCHEME_SOURCE)
+    metal, need = gfl_lanes.metal_locals(lane)
+    assert metal != lane and 0 < need <= gfl_lanes.METAL_CHARACTER_BYTES - 192 - 16 - 80
+    assert _unpromote(metal) == lane
+    # every local address the scheme passes on is now a slot reference
+    for head in gfl_lanes._SCHEME_FUNCTION.finditer(metal):
+        end = gfl_lanes._FUNCTION_END.search(metal, head.end()).end()
+        body = metal[head.end():end]
+        for name in gfl_lanes._address_taken(body):
+            assert not re.search(r'^\s+(?:GFReal|int|bool|long long|unsigned int) %s(\[\d+\])?( = [^;]*)?;$'
+                                 % name, body, re.M), name
+    cuda = gfl_lanes.lower(gfl._SUPPORT, gfl._SCHEME_SOURCE, gfl._ENTRY)
+    assert 'gf_locals' not in cuda and 'gf_bounds' not in cuda
+    on_metal = gfl_lanes.lower(gfl._SUPPORT, gfl._SCHEME_SOURCE, gfl._ENTRY, metal=True)
+    assert metal in on_metal and 'gf_bounds' in on_metal
+    assert '#define GF_CHARACTER_BYTES %d\n' % gfl_lanes.METAL_CHARACTER_BYTES in on_metal
 
 
 def test_wrf461_gf_on_metal_never_builds_the_gfl_lane():

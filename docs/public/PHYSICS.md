@@ -2193,6 +2193,23 @@ units, and not yet scored against observations. The hex MPAS-suite Noah
 (`woof/hex/mpasphys/noah_v842.py`) does not carry it yet. Off, and in exact
 mode, the arithmetic is WRF's word for word.
 
+**Correction: `noah_land_ice_rain_runoff` (on in correct mode, finding FQ8).** WRF 4.7.1's Noah
+land-ice arm (`module_sf_noahlsm_glacial_only.F`, `SFLX_GLACIAL`) sets
+`PRCPF = PRCP` for liquid rain (:287) and SNOPAC turns it into
+`PRCP1 = PRCPF*0.001` (:912); nothing reads PRCP1 again, and the rain is not
+added to the pack (only snow and freezing rain are, :259-260). The driver
+books `RUNOFF1 = SNOMLT/DT` alone (:404-406), "since there is no soil
+medium", so the rain leaves the water budget unbooked. With the option on,
+`PRCPF*0.001` is added to `RUNOFF1`: all of it, since WRF's own logic
+refreezes none of it into the pack. The pack and energy balance are
+unchanged, and the pack water budget closes
+(`tests/test_noah_land_ice_rain_runoff.py`, float64 mirror and kernel). It is
+per domain, read only where `sf_surface_physics = 2`, carried by the plain,
+mosaic, UA and urban-canopy Noah units and by a WRF-Hydro coupling (the
+glacial arm writes `sfcrunoff` only), and not yet scored against
+observations. The hex MPAS-suite Noah does not carry it. Off, and in exact
+mode, the arithmetic is WRF's word for word.
+
 ## Radiation (`ra_lw_physics` / `ra_sw_physics`)
 
 | option | selection | maturity | evidence, in one line |
@@ -4111,9 +4128,15 @@ these:
 Vertical weighting, time windows, `obs_ionf` cadence, `obs_idynin` ramps
 and surface-ratio factors are WRF's. Checkpoints carry every observation
 carrier, so a restart continues the straight run bit for bit; WRF instead
-refreshes those carriers when it restarts. Adaptive time steps, LTS,
-partitioned runs, the MPAS suite route and `obs_scl_neg_qv_innov` are each
-refused by name. `woof/hex/obs_nudging.py` documents each adaptation.
+refreshes those carriers when it restarts. The MPAS v8.4.2 suite route runs
+the same forcing at the same seat on one card, reading WRF's PBL and
+surface-layer inputs from the suite's `diag_physics` (`hpbl`, `kpbl`,
+`regime`, `u10`, `v10`, `th2m`); its checkpoints do not carry the report
+book yet, so a suite run with `--obs-nudging` starts cold (no checkpoint
+resume, no native restart) and writes no checkpoint. A suite without a PBL
+scheme and a surface layer is refused, and WRF's STEPBL follows the suite's
+PBL cadence (`config_pbl_interval` under correct mode). Adaptive time steps, LTS, partitioned runs and
+`obs_scl_neg_qv_innov` are each refused by name. `woof/hex/obs_nudging.py` documents each adaptation.
 
 ### WRF selector 31 forcing
 

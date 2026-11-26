@@ -296,10 +296,11 @@ BASELINE_PINNED: dict[str, str] = {
     # tendency words (tests/test_smag2d_uv_faces.py, CUDA and Metal, fast and
     # strict numerics, GPUWM_WRF_EXACT=0 and 1).
     "smag2d_uv_faces": "dc9828ca72bc7c7b6acb02b382c7326f33fd3f9eb16ab365e7f3e19a400dabfd",
-    # wrf_tke_rhs on stored defor13/defor23 faces (composes smag2d.cu, which
-    # keeps its bytes): the same TKE source words (tests/test_smag2d_tke_faces.py,
-    # CUDA and Metal, GPUWM_WRF_EXACT=0 and 1).
-    "smag2d_tke_faces": "421c718311e7724d3fd5ba733bfd3c59eca0cf828a753d284bac6e3142128f59",
+    # wrf_tke_rhs on stored defor13/defor23 faces (composes smag2d.cu): the
+    # same TKE source words (tests/test_smag2d_tke_faces.py, CUDA and Metal,
+    # GPUWM_WRF_EXACT=0 and 1).  RE-PINNED by FQ12 (diff_metrics_seam_slope):
+    # smag2d.cu's boundary flag 2 and this unit's bounded-bit test.
+    "smag2d_tke_faces": "36b322176076c25c1d14bb2512af740c635fe21a820495be183c39642f067d8e",
     # The opt-in porous immersed obstacles (obstacle_opt = 1, woof's own,
     # beyond WRF): a new unit, launched only when a domain has buildings
     # (tests/test_obstacles.py; off and zero-obstacle runs never load it).
@@ -1315,7 +1316,12 @@ BASELINE_PINNED: dict[str, str] = {
         # define the preprocessed program is the previous one byte for byte
         # (tests/test_noah_smc_floor_booking.py strips the block and checks the
         # previous digest).  Previously d8739ffa.
-        '5c09214c29f2c9f6b01bec651281778b8d759facfc6c755cbb9cd02bd7237b00',
+        # RE-PINNED 2026-11-23 by the correct-mode noah_land_ice_rain_runoff (FQ8): a
+        # NOAH_LAND_ICE_RAIN_RUNOFF #ifdef block in the glacial tile adds the
+        # rain SFLX_GLACIAL drops to RUNOFF1; without the define the program is
+        # the previous one byte for byte (tests/test_noah_land_ice_rain_runoff.py
+        # strips the block and checks the previous digest).  Previously 5c09214c.
+        '6c208d40e19e5ceb1804eedb2d3c4deebee0cdcfb7b4a3e10a18991e6e9d60c9',
     # development branch (smoke, aerosol and air-quality program).  chem_bdy:
     # WRF-Chem's outer-domain flow_dep_bdy_chem, bit-identical to the
     # Fortran on 24 oracle cases (tests/test_chem_bdy_wrf471_parity.py).
@@ -1555,7 +1561,9 @@ BASELINE_PINNED: dict[str, str] = {
     'rcon': '3d4d3e1b6584c7ea558a75adac9ddf0839d3b6058027b6dae9a9b9d5d0a60e5b',
     'udm': 'bdb41754f151bcfa329e21b3e12c673a0bb9f23f5e3c719baabc088d22d9371a',
     # r290 exact-chain intake: source identity, numerical gates separate.
-    'sfs_output': 'f8df238d672aae46bfbe83e71fdd322feced36a8bda503544f9a9c2701236da9',
+    # RE-PINNED by RunConfig.diff_metrics_seam_slope (FQ12): its inner-axis
+    # test reads the boundary flag's bounded bit (flag 2 is periodic).
+    'sfs_output': 'ccd9df3122703ac600d46a1840120e18581e98b090959f14d1a82fa6518f61bc',
 }
 
 _FROZEN = _frozen_module()
@@ -1816,7 +1824,8 @@ PINNED_HEADERS = {
     'nsas_constants.cuh': 'e50bd02c62e11ec3c4bf5619bab6e30805832401df930c1235a136db2fb4c907',
     'radar_backscatter_common.cuh': '7564e059e3e99be94134b97c625d85a9a74fdee872bba193197ade7196d9fd72',
     'refl.cu': '1e2c45699a721b4b042769f9f868d85d8a6eb4960fc547ce9affb59b69f43f66',
-    'smag2d.cu': '379c2013faaaa3df1ae7fbdbc68cc15cf9f6334d55bf2511083287d126b88b0f',
+    # RE-PINNED by FQ12 (diff_metrics_seam_slope): boundary flag 2.
+    'smag2d.cu': '854ee250c242baa7d9fd6aba459d6e5f460261f51070d61a420fc9442c6d9dc1',
     'swint.cu': '9a79b7e43cb92553ae454975a943acedc3d8510b5c7eae59ec2c5bb8c8b47c5b',
     'temf_log10_flt32.cuh': '61c2596ef9b7456c1328eb5b9064c84b72f15acad698b084b87a831c478bb69f',
     'wdm_common.cuh': '77590100c6d6066bda9bb347caa318839a107104fceaf1c7690ba184779b01f8',
@@ -1836,7 +1845,7 @@ PINNED_HEADERS = {
     'mskf_aerosol.cuh': '91fefcce94ec7bc775ba526b2d4a95eb4d4c7946ffd95da11f53474a2811bfa9',
     'mynn_scalar_mix.cu': 'abc61827d645ce7af664a7294ecfd289834de5cc57b485bff20e20d27ed17c1f',
     # noah_smc_floor_booking's #ifdef block (default program unchanged).
-    'noah_mosaic.cu': '5c09214c29f2c9f6b01bec651281778b8d759facfc6c755cbb9cd02bd7237b00',
+    'noah_mosaic.cu': '6c208d40e19e5ceb1804eedb2d3c4deebee0cdcfb7b4a3e10a18991e6e9d60c9',
     'noah_seaice_options.cuh': '033fec7afc7129e3455aba955f748e6eb49213aeab12e1ad82801b8c2dfd4b7b',
     'noah_ua.cuh': '6ffe8841f48994d15eb1e6dfeb1d2c0667e1ea0ad4b56a2f50c45ca24d07dba1',
     'noah_ua_plain.cuh': '40746bf3560c1922b28a6341a50753c4ec4946842bfa613c5c1f8b8b826f1108',
@@ -2049,4 +2058,6 @@ def test_mosaic_ucm_composed_source_is_pinned():
     assert hashlib.sha256(mosaic_ucm_source().encode()).hexdigest() == (
         # noah_smc_floor_booking's #ifdef block in noah_mosaic.cu, unread
         # without the define.  Previously ebf5a3d1.
-        '5138ec7814e19a0680e9cfd6ff29aba5fc18c3aaa894d3e3b09a3295ccc6c807')
+        # RE-PINNED 2026-11-23 by noah_land_ice_rain_runoff's #ifdef block in
+        # the same file (FQ8), likewise unread.  Previously 5138ec78.
+        '48f6b2fb06086073ead1af5922cb7cf09c55108d5fd19817cab6b135845226fe')

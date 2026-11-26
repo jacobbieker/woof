@@ -1378,14 +1378,20 @@ FROZEN_MODULE_DIGESTS = {
         # define the preprocessed program is the previous one byte for byte
         # (tests/test_noah_smc_floor_booking.py strips the block and checks the
         # previous digest).  Previously 96e0b62e/908ffc16.
+        # RE-PINNED 2026-11-23 by the correct-mode noah_land_ice_rain_runoff (FQ8): a
+        # NOAH_LAND_ICE_RAIN_RUNOFF #ifdef block in the glacial arm adds the
+        # rain SFLX_GLACIAL drops to RUNOFF1; without the define the program is
+        # the previous one byte for byte (tests/test_noah_land_ice_rain_runoff.py
+        # strips the block and checks the previous digest).  Previously
+        # 3736ba8f/d97d7894.
         # Upstream 1.1.7 RE-PINNED by fix/305-f31-private-names (2026-11-15), a COMMENT-ONLY
         # edit: one comment that named a lab host now names the card ("RTX
         # 4090 test host").  No code token changed, so the compiled kernel is
         # the same; only the file and compile-string digests move.
         # Previously ef57884c/42ed557f.
         # RE-PINNED for the upstream WOOF 1.1.7 merge: both edits above.
-        '3736ba8f07a6ff915255159e6fec8b29a617e76465364d99d276c0795470e17d',
-        'd97d7894899756adbae9cfbc6e388c6fedc9e95292ae9515111f7819c3675aa2'),
+        'c812c93845340096214f805aa69fe999e2c8483d2b798671260c6151d59361d4',
+        '140a7f6588fa2123eb9785a5efbc77b194f6bbdc0f981b8d15d2339dbf7c4ebf'),
     # fix/noahmp-small-defects (2026-11-09): correct-mode SN1, the Noah-MP
     # snowmelt reset re-evaluating ESTG at the reset TG, compiled only under
     # GPUWM_NOAHMP_MELT_RESET_ESAT.  Without it the arithmetic is unchanged
@@ -2159,10 +2165,16 @@ FROZEN_MODULE_DIGESTS = {
         # 6ee9ec60's on sm_86, fast and WRF-exact).  The tier's tensors equal
         # wrf_smag_deform's (tests/test_smag_deform_hat.py, CUDA and Metal,
         # every mode).  Previously 6ee9ec60/64164164.
-        '379c2013faaaa3df1ae7fbdbc68cc15cf9f6334d55bf2511083287d126b88b0f',
+        # RE-PINNED by RunConfig.diff_metrics_seam_slope (correct-mode FQ12):
+        # boundary flag 2 (periodic, WRF's cold top seam) decodes in wrf_grid
+        # and wrf_zx/wrf_zy return the cold zero at a seam's top w level; flags
+        # 0 and 1 take the previous arithmetic (tests/test_grad_wrfplus_
+        # diffusion.py, the strict primal against the WRFPLUS fixture).
+        # Previously 379c2013/31b03d4d.
+        '854ee250c242baa7d9fd6aba459d6e5f460261f51070d61a420fc9442c6d9dc1',
         # smag2d's default composition keeps 2.9.1's glibc_flt32 text
         # (glibc_flt32_default.cuh); the exact chain's header is strict-only.
-        '31b03d4dae7e29b0aa327c2b7d016f18d8eb5a47e0449f2896bfcb2d5efb5d0e'),
+        '5d1a1e57828f23f3f1f2d9bc16c57e892746f9c48aed5f54df4fbd7b01a5ac83'),
     'spec_bdy': (
         'bcc7090fbbb8ea307bd6dd6c65ab9b8a3f56948c4752ae3d744127b450d20161',
         'bc03ed595bacc546d8e041fbb1d11b5bb3b3b90760ef06ea1dd1f0f18b4de931'),

@@ -185,6 +185,107 @@ observations. The first guesses come from a WRF 4.7.1 forecast from the 12Z
   |difference| at most 8.4e-5 of the RMS (PSFC; the other fields at most
   1.1e-5) and correlation of at least 0.999999998.
 
+## 4D-Var (opt-in, experimental)
+
+WRFDA's `var4d`: the increment is at the window's start, and each slot's
+observations see it through the tangent-linear model (`H' M'`), with the
+adjoint for the gradient. The plan is
+[docs/dev/WRFDA-4DVAR-PLAN.md](dev/WRFDA-4DVAR-PLAN.md). Not yet checked
+against a compiled WRFDA 4D-Var (its L1 gate is a skipped, data-gated test).
+
+The Python door is `analyse(..., fgat=[fg01, ...], var4d=Var4D(...),
+time_window=(tmin, tmax))` with `woof.da.var.fourd.Var4D`:
+
+- `model`: the TL/AD model. The default is `IdentityModel` (each slot's
+  increment is the start's). `woof.da.var.window4d.WindowModel` runs P3a's
+  WRFPLUS-style window (`woof.grad.wrfplus`) and is binary64 only: it is
+  refused on Metal. Run it on the host or CUDA backend.
+- `var4d_bin`, `time_step`: WRFDA's namelist entries, in whole seconds.
+  Refused, as WRFDA refuses them: a zero `time_step`, a bin that does not
+  divide the window, and a time step that does not divide the bin. A bin
+  shorter than the time step becomes the time step, as in WRFDA. woof also
+  refuses a slot count other than `window / var4d_bin + 1`, and a
+  `WindowModel` that reads its slots at a spacing other than
+  `var4d_bin / time_step`.
+- `press`, `ph`: the transfer's word-exact defaults or their corrections
+  (`woof.da.var.transfer4d.xa_to_tl`).
+- `nl_model`, `base_rtol`: see outer loops below.
+
+**Outer loops** (`max_ext_its > 1`, `woof.da.var.outer4d.outer_loops`)
+follow `da_solve`'s var4d branch (WRFDA 4.7.1 `da_solve.inc`). In each loop
+after the first:
+
+1. `Var4D.nl_model(it, state)` reruns the nonlinear model over the window
+   from the previous loop's analysis (WRFDA's `da_nl_model`). It returns a
+   `Trajectory`: the run's state at each slot time, and its per-step states.
+2. The TL/AD model is relinearised about that run
+   (`model.relinearise(trajectory)`; for a `WindowModel`,
+   `Window.forward(trajectory=...)`).
+3. Every slot's innovations are recomputed against the run.
+4. CG runs again.
+
+As in WRFDA:
+
+- `xhat` restarts at zero in every loop.
+- `Jb` stays measured from the first guess: `0.5 (cvt + xhat)^T (cvt +
+  xhat)`.
+- `cvt` accumulates every loop's `xhat`.
+- Each loop's increment is added to the previous loop's analysis.
+- Each loop logs and reports its own `J`; the last loop's is the result's.
+- `U`, the transfer and the analysis are linearised about the run's first
+  slot (the previous analysis), because WRFDA's var4d innovations do not
+  restore `fg`.
+
+`base_rtol` checks a `WindowModel`'s base against each rerun's slot states.
+Without `nl_model`, `max_ext_its > 1` is refused by name.
+
+Differences from WRFDA (open questions, recorded in the plan):
+
+- In later loops woof recomputes the qc flags from the raw observations.
+  WRFDA carries all of them except `fails_error_max` across loops
+  (`da_get_innov_vector_sound.inc`).
+- woof does not add WRFDA's TL lateral-boundary perturbation in the var4d
+  transfer (`da_transfer_xatowrf.inc`). The rerun's boundaries are
+  `nl_model`'s responsibility.
+- One background-error scaling serves every loop. WRFDA can scale it per
+  loop (`var_scaling1..5`).
+
+The CLI runs one loop with the identity TL. The trajectory is the FGAT
+slots, and `--first-guess` is at the window's start:
+
+```
+woof var --4dvar --be be.dat --first-guess fg01 --out bundle \
+    --fgat-obs ob01.ascii --fgat-first-guess fg01 ... \
+    [--var4d-bin 3600] [--time-step 360] [--time-window-min ...] [--time-window-max ...]
+```
+
+- **Defaults.** The window runs from `--first-guess`'s time to the last
+  slot's. `--time-step` defaults to the first guess's `DT` attribute.
+- **Refused by name.**
+  - `--var4d-lbc` (`var4d_lbc`), `--jcdfi-use` (`jcdfi_use`) and
+    `--multi-inc 1|2` (`multi_inc`): not ported.
+  - WRFDA's bin and time-step rules above.
+  - A first guess that is not at the window's start (WRFDA's 4D-Var
+    analysis is at `time_window_min`).
+  - `--max-ext-its` above 1: the door has no nonlinear model to rerun; use
+    the Python door.
+  - The device tiers, radiances and the hybrid.
+  - The 4D-Var flags without `--4dvar`.
+- **The bundle.** The settings go into `recipe_sha256` and
+  `notes.var.var4d`.
+
+Without `--4dvar`, 3D-Var and FGAT are unchanged.
+
+Tests:
+
+- `tests/test_var_outer4d.py`:
+  - unit tests of the outer loop with toys and a fake window;
+  - an L2-style OSSE on a dry periodic ridge case through P3a's real
+    window. There, two outer loops lower the nonlinear cost (215 to 11.71
+    to 11.68), and the gradient test passes in each loop. The dot test
+    agrees to 5e-14, and TL against finite differences agrees to 1e-6.
+- `tests/test_var_4dvar_cli.py`: the CLI.
+
 ## Tiers
 
 | `--tier` | arithmetic | where |
@@ -315,5 +416,8 @@ print `Jb factor used`.
   (`alpha_hydrometeors`).
 - `cv_options` other than 5.
 - FGAT with outer loops, radiances or PREPBUFR observations.
-- WRFDA's `A2C`, `var4d` and cloud control variables; pseudo-observations other than `u`, `v`, `t`, `q`.
+- WRFDA's `A2C` and cloud control variables; pseudo-observations other than `u`, `v`, `t`, `q`.
+- 4D-Var: the check against compiled WRFDA (L1), `var4d_lbc`, `jcdfi_use`,
+  `multi_inc`, outer loops on the CLI, and the checkpoint policy for long
+  windows.
 - Nested domains.

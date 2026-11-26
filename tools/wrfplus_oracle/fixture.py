@@ -2103,26 +2103,6 @@ DIFF_CASES = {
 DIFF_DIMS = dict(nz=7, ny=8, nx=9)
 
 
-def _df_masks(geom):
-    """The deformation words WRF and woof both define.  WRF's
-    compute_diff_metrics fills a periodic axis's seam slope (zx at ids and
-    ide, zy at jds and jde) for levels 1..ktf only: at the top w level the
-    seam keeps its cold zero, where woof takes the true slope.  So the top
-    level's defor11 (columns 0 and nx-1) and defor12 (column 0) of a
-    periodic x, and defor22 (rows 0 and ny-1) and defor12 (row 0) of a
-    periodic y, are left out, and their adjoint seeds are 0 (so the seam
-    slope's adjoint is 0 on both sides)."""
-    nz, ny, nx = geom.nz, geom.ny, geom.nx
-    m = {n: np.ones((nz, ny, nx), dtype=bool) for n in ("defor11", "defor22", "defor12")}
-    if not geom.boundary_x:
-        m["defor11"][nz - 1][:, [0, nx - 1]] = False
-        m["defor12"][nz - 1][:, 0] = False
-    if not geom.boundary_y:
-        m["defor22"][nz - 1][[0, ny - 1], :] = False
-        m["defor12"][nz - 1][0, :] = False
-    return m
-
-
 def _df_layout(geom):
     from types import SimpleNamespace as NS
     return AdvLayout(NS(nz=geom.nz, ny=geom.ny, nx=geom.nx, open_x=geom.boundary_x,
@@ -2214,16 +2194,15 @@ def diffusion(exe: str, runner: list[str], seed: int = 20261130) -> dict:
         dims.update(over)
         rng = np.random.default_rng(seed + 10 * n + 2)
         if op == "df":
-            geom = cases.df_geometry(**dims)
+            # WRF's compute_diff_metrics keeps a periodic seam's top-level
+            # slope at its cold zero (woof's seam_cold, RunConfig.
+            # diff_metrics_seam_slope off), so every word is compared
+            geom = cases.df_geometry(**dims, seam_cold=1)
             geom.validate()
             tr = cases.df_trajectory(geom, seed + 10 * n)
             pe = cases.df_perturbation(geom, seed + 10 * n + 1)
             sh = D.df_shapes(geom)
             seeds = {s: rng.standard_normal(sh[s]) for s in D.DF_STATE}
-            masks = _df_masks(geom)
-            for s, m in masks.items():
-                seeds[s] = np.where(m, seeds[s], 0.0)
-                out[f"{name}/mask/{s}"] = m
             blob, L = _df_record(geom, tr, pe, seeds, tl_only)
             expected = lambda r, g=geom, L=L: _df_expected(g, r, L)  # noqa: E731
         else:
