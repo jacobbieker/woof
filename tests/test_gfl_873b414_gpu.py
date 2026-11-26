@@ -121,9 +121,10 @@ def test_gfl_pool_entries_return_so_more_columns_spill_than_entries(monkeypatch)
     against tens of thousands of threads) trapped once that many threads had ever
     spilled. Entries now return when their column ends; the limit is the columns
     spilling at the same moment. Here one block (128 threads, 4 warps of 32
-    consecutive columns) runs with 64 entries, and the share is set so no aligned
-    32-column window holds more than 16 spilling columns: at most 64 spill at once,
-    while well over 64 spill over the launch.
+    consecutive columns) runs with as many entries as can spill at once (4 x the
+    most spilling columns in an aligned 32-column window, at most 64, so fewer than
+    the block's threads), and the share is set so at least twice that many spill
+    over the launch.
     """
     cp = pytest.importorskip("cupy")
     from woof.core import gfl_873b414 as gfl
@@ -131,14 +132,18 @@ def test_gfl_pool_entries_return_so_more_columns_spill_than_entries(monkeypatch)
     tile = 8
     _, _, _, _, ncol, _, base = _replay(cp, gfl, tile=1)
     need = cp.asnumpy(base["scratch_highwater"]).astype(np.int64)        # one tile's per-column need
-    entries, window, lanes = 64, 32, 128
+    window, lanes = 32, 128
     total = ncol * tile
     starts = range(0, total, window)
-    share = None
-    for candidate in sorted(set(need.tolist())):                        # the smallest share that fits
-        spills = np.tile(need > candidate, tile)
-        if max(int(spills[s:s + window].sum()) for s in starts) * (lanes // window) <= entries:
-            share = int(candidate) // 16 * 16 + 16
+    share = entries = None
+    for candidate in sorted(set(need.tolist())):                        # the most spilling share that qualifies
+        trial = int(candidate) // 16 * 16 + 16
+        spills = np.tile(need > trial, tile)
+        at_once = max(int(spills[s:s + window].sum()) for s in starts) * (lanes // window)
+        # Entries: the most that can spill at once, under half the block's threads, so a thread that kept its
+        # entry for the launch would run the pool dry; at least twice that many spill over the launch.
+        if 0 < at_once <= lanes // 2 and int(spills.sum()) >= 2 * at_once:
+            share, entries = trial, at_once
             break
     assert share is not None
     monkeypatch.setattr(gfl, "_share_bytes", lambda storage, compute: share)
@@ -153,7 +158,7 @@ def test_gfl_pool_entries_return_so_more_columns_spill_than_entries(monkeypatch)
     highwater = cp.asnumpy(out["scratch_highwater"])
     spilled = highwater > share
     assert out["blocks"] == 1 and out["share_bytes"] == share
-    assert int(spilled.sum()) > 2 * entries, int(spilled.sum())         # oversubscribed over the launch
+    assert int(spilled.sum()) >= 2 * entries, (int(spilled.sum()), entries)  # oversubscribed over the launch
     assert max(int(spilled[s:s + window].sum()) for s in starts) * (lanes // window) <= entries
     assert not cp.asnumpy(gfl._SPILL_MAP[cp.cuda.runtime.getDevice()]).any()
     for n in got:

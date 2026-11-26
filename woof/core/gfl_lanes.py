@@ -215,7 +215,23 @@ struct GFFrame {
 # Positions count this lane's bytes exactly as before (so capacity, highwater
 # and the spill threshold keep their meaning); a lane byte offset b is the
 # address data + b*GF_LANES, i.e. word b/4 of the lane-interleaved slab.
-_WORKSPACE_NEW = '''struct GFWorkspace {
+_WORKSPACE_NEW = '''#ifndef GF_HOST_WITNESS
+// A spilling column's first free pool entry (e+1; 0 = all held): scan the bitmap, claiming a clear bit with
+// atomicOr (the old word says who won). Out of line so the allocate() inlined at every site stays one call.
+__device__ __noinline__ unsigned long long gf_spill_claim(unsigned int* map,unsigned long long entries){
+  const unsigned long long words=(entries+31ULL)/32ULL;
+  for(unsigned long long w=0;w<words;++w){
+    unsigned int seen=map[w];
+    for(unsigned int b=0;b<32u&&w*32ULL+b<entries;++b){
+      if(seen&(1u<<b))continue;
+      seen=atomicOr(map+w,1u<<b);
+      if((seen&(1u<<b))==0u)return w*32ULL+b+1ULL;
+    }
+  }
+  return 0ULL;
+}
+#endif
+struct GFWorkspace {
   char* data;unsigned long long capacity,position,highwater;unsigned int diagnostics;GFReal row_dx_first;
   // Mutable SAVE, including the early return: WRF v4.8.0 phys/GFL 873b414 module_cu_gfl_deep.F90:2641-2705
   bool fct1d3_error;
@@ -240,17 +256,7 @@ _WORKSPACE_NEW = '''struct GFWorkspace {
       if(position<capacity)position=capacity;
       if(position+n>capacity+spill_bytes){gf_trap();return nullptr;}
       if(spill_entry==0ULL){
-        // First free entry: scan the bitmap, claiming a clear bit with atomicOr (the old word says who won).
-        const unsigned long long words=(spill_entries+31ULL)/32ULL;
-        for(unsigned long long w=0;w<words&&spill_entry==0ULL;++w){
-          unsigned int seen=spill_map[w];
-          for(unsigned int b=0;b<32u&&spill_entry==0ULL;++b){
-            if(w*32ULL+b>=spill_entries)break;
-            if(seen&(1u<<b))continue;
-            seen=atomicOr(spill_map+w,1u<<b);
-            if((seen&(1u<<b))==0u)spill_entry=w*32ULL+b+1ULL;
-          }
-        }
+        spill_entry=gf_spill_claim(spill_map,spill_entries);
         if(spill_entry==0ULL){gf_trap();return nullptr;}  // more columns spilling at once than entries
       }
       const unsigned long long entry=spill_entry-1ULL;
