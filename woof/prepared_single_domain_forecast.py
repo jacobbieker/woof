@@ -11437,8 +11437,8 @@ def run_prepared_forecast(
            else {"chem_ledger": chem_ledger}),
         "physics": {
             **dict(inputs.physics_receipt),
-            # The WRF pin the scheme generations amount to (4.8.0, 4.7.1
-            # or custom) and the generation keys themselves.
+            # The WRF pin the scheme generations amount to (4.8.1, 4.8.0,
+            # 4.7.1 or custom) and the generation keys themselves.
             **_wrf_reference_receipt(cfg),
             "resolved_lw_sw": list(radiation_scheme_ids(cfg)),
             "radiation_update_count": _physics_update_count(

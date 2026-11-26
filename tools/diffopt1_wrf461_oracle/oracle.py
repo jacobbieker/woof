@@ -219,7 +219,7 @@ def compare_words(args):
 
 # ---------------------------------------------------------------- engine side
 
-def engine_state(arrays, meta, arm):
+def engine_state(arrays, meta, arm, seam_slope=None):
     import cupy as cp
     from types import SimpleNamespace
     from woof.config import RunConfig
@@ -263,17 +263,22 @@ def engine_state(arrays, meta, arm):
                     specified=boundary == "specified", km_opt=c["km_opt"], diff_opt=1,
                     c_s=C_S, c_k=C_K, mix_isotropic=c["isotropic"], isfflx=c["isfflx"],
                     bl_pbl_physics=c["pbl"], mix_upper_bound=MIX_UPPER_BOUND,
-                    tke_drag_coefficient=0.0013, tke_heat_flux=0.24)
+                    tke_drag_coefficient=0.0013, tke_heat_flux=0.24,
+                    **({} if seam_slope is None else {"diff_metrics_seam_slope": bool(seam_slope)}))
     return state, cfg
 
 
-def engine_outputs(arrays, meta, arm):
-    """Every output word of the production diff_opt=1 path for one case and arm."""
+def engine_outputs(arrays, meta, arm, seam_slope=None):
+    """Every output word of the production diff_opt=1 path for one case and arm.
+
+    ``seam_slope`` is RunConfig.diff_metrics_seam_slope (FQ12; None: the
+    process default): False is unmodified WRF's cold periodic top seam, True
+    the seam control's filled one."""
     import cupy as cp
     from woof.core import dycore
     nx, ny, nz = meta["nx"], meta["ny"], meta["nz"]
     km_opt = ARMS[arm]["km_opt"]
-    state, cfg = engine_state(arrays, meta, arm)
+    state, cfg = engine_state(arrays, meta, arm, seam_slope)
     # WRF t_init: captured from the initial thermal field exactly as a
     # forecast's first step does, then the state moves to the case's theta.
     dycore.initialize_coordinate_reference(state, cfg)
@@ -358,7 +363,8 @@ def compare(args):
             arrays = {k.removeprefix("input__"): data[k] for k in data.files if k.startswith("input__")}
             meta = json.loads(str(data["meta_json"]))
         for arm in ARMS:
-            got = engine_outputs(arrays, meta, arm)
+            # the seam control ("ctl") is FQ12 on; unmodified WRF builds are off
+            got = engine_outputs(arrays, meta, arm, seam_slope=args.reference == "ctl")
             k_equal &= got.pop("k_first_launch_equal")
             result = {}
             for key, value in got.items():
@@ -501,8 +507,9 @@ def seal(args):
 def replay(args):
     """Engine words for every sealed case and arm against the sealed WRF words.
 
-    Writes {case__arm: {field: {"ctl": different, "wrf": different}}}; "wrf"
-    is present only where unmodified WRF differs from the seam control.
+    Writes {case__arm: {field: {"ctl": different, "wrf": different, "seam":
+    moved}}}: "wrf" is the FQ12-off engine against unmodified WRF, "ctl" the
+    FQ12-on engine against the seam control, "seam" the words FQ12 moves.
     """
     from woof import wrf_exact
     manifest = json.loads((args.sealed / "manifest.json").read_text())
@@ -514,15 +521,22 @@ def replay(args):
             meta = json.loads(str(data["meta_json"]))
             sealed = {k: data[k] for k in data.files if k.startswith(("ctl__", "wrf__"))}
         for arm in ARMS:
-            got = engine_outputs(arrays, meta, arm)
-            got.pop("k_first_launch_equal")
+            # "wrf" is held with FQ12 off (unmodified WRF's cold seam), "ctl"
+            # with it on; off a periodic axis the key is unread and one run serves.
+            got = {"wrf": engine_outputs(arrays, meta, arm, seam_slope=False)}
+            got["ctl"] = (engine_outputs(arrays, meta, arm, seam_slope=True)
+                          if meta["boundary"] == "periodic" else got["wrf"])
+            for g in got.values():
+                g.pop("k_first_launch_equal", None)
             fields = {}
-            for key, value in got.items():
+            for key in got["wrf"]:
                 ctl = sealed[f"ctl__{arm}__{key}"]
                 wrf = sealed.get(f"wrf__{arm}__{key}", ctl)
-                a = np.asarray(value, F32).view(np.uint32)
-                fields[key] = {"ctl": int(np.count_nonzero(a != ctl.view(np.uint32))),
+                a = np.asarray(got["wrf"][key], F32).view(np.uint32)
+                b = np.asarray(got["ctl"][key], F32).view(np.uint32)
+                fields[key] = {"ctl": int(np.count_nonzero(b != ctl.view(np.uint32))),
                                "wrf": int(np.count_nonzero(a != wrf.view(np.uint32))),
+                               "seam": int(np.count_nonzero(a != b)),
                                "words": int(a.size)}
             result["cases"][f"{row['case']}__{arm}"] = fields
     args.json.write_text(json.dumps(result, indent=1) + "\n")
