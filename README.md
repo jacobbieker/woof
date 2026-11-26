@@ -905,9 +905,11 @@ Notes on the 1.1.7 sync:
     tolerances, since each admits 256 levels (compile-time tiers or
     runtime-sized workspaces; words at the old level counts unchanged,
     `tests/test_cu_kfcup_mskf_256_levels_gpu.py` and each family's
-    256-level test). KF-CuP now passes admission there too but stops with
-    negative accumulated `rainc` on both backends; the row records that
-    failure while it is investigated. The Metal entries predate the WRF
+    256-level test). KF-CuP now passes admission there too but its CUDA
+    row stops with negative accumulated `rainc` (a binary32 rounding in
+    the capped downdraft, not the level count); the row records that
+    failure until the fix lands. The Metal entries, KF-CuP's 128-level
+    refusal among them, predate the WRF
     4.8.0 sync: the case runs the default Grell-Freitas
     (`gfl_873b414`), which is refused on Metal, so they refresh after the
     GF Metal port lands.

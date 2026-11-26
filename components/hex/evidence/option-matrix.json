@@ -1,5 +1,6 @@
 {
  "backend_notes": {
+  "cuda": "The baseline and the rows of the 256-level families (cumulus.kf-cup, cumulus.multiscale-kf, microphysics.wsm3/wsm5/wsm7/wdm5/wdm7, pbl.boulac, pbl.qnse, surface_layer.qnse, radiation.fu-liou-gu, radiation.gsfc-shortwave, radiation.wrf-gfdleta) were re-run after the WRF 4.8.0 sync and are graded against that baseline; the other CUDA entries predate the sync and were graded against its earlier run.",
   "metal": "Metal entries predate the WRF 4.8.0 sync. Since it, the default Grell-Freitas (cu_gf_version gfl_873b414) is refused on Metal, and this case's base selection runs it; the Metal entries refresh after the GF Metal port lands."
  },
  "backends": [
@@ -6315,9 +6316,9 @@
    "backends": {
     "cuda": {
      "budgets": {
-      "dry_rel_change": -0.0003944606581672507,
-      "dry_rel_change_interior": -0.00047233907908794394,
-      "precip_kg": 964988210.9027002,
+      "dry_rel_change": -0.00039612442285876225,
+      "dry_rel_change_interior": -0.0004750630455740929,
+      "precip_kg": 4417638960.268391,
       "q_min_end": {
        "qc": 0.0,
        "qg": 0.0,
@@ -6334,8 +6335,8 @@
        "qs",
        "qg"
       ],
-      "water_residual_rel": 0.019304016540824837,
-      "water_residual_rel_interior": 0.019181802661013627
+      "water_residual_rel": 0.020206141710556437,
+      "water_residual_rel_interior": 0.019063038078876236
      },
      "call_counts": {
       "cumulus": 120,
@@ -6356,25 +6357,35 @@
      "sealed_physics": {
       "bl_pbl_physics": 1,
       "cu_physics": 3,
+      "gf_deep_rain_evaporation_booking": true,
       "gwd_opt": 0,
       "hydrometeor_handover_numbers": true,
       "icloud": 1,
       "ishallow": 1,
       "mp_physics": 6,
+      "mynn_boulac_down_sign": true,
+      "mynn_fixes_v61": true,
+      "mynn_sfclay_psih_zolzt": true,
+      "noah_smc_floor_booking": true,
+      "noahmp_melt_reset_esat": true,
       "ntiedtke_dry_mass_coupling": true,
+      "pbl_boulac_down_sign": true,
       "ra_physics": 4,
       "ra_rrtmg_variant": "rrtmg_legacy",
+      "rrtmg_lw_model_top": true,
       "sf_sfclay_physics": 1,
       "sf_surface_physics": 4,
       "thompson_cloud_surface_booking": true,
+      "thompson_rain_snow_closure": true,
       "wdm6_conservative_surface": true,
       "wsm3_conservative_surface": true,
       "wsm5_conservative_surface": true,
       "wsm6_conservative_surface": true,
-      "wsm7_conservative_surface": true
+      "wsm7_conservative_surface": true,
+      "ysu_surface_heat_exner": true
      },
      "seam": "engine",
-     "wall_seconds": 109.4
+     "wall_seconds": 342.5
     },
     "metal": {
      "budgets": {
