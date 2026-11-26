@@ -60,6 +60,13 @@ the kernel file too):
   (reports, rko, QC, weights, ratios, step clock and frame), so a restart
   continues the straight run word for word.
 
+Routes.  The WOOF column route (R1, :func:`attach_v841`) and the MPAS v8.4.2
+suite route (R2, :func:`attach_v842`) run the same forcing at the same seat:
+the held physics tendencies after IAU and analysis nudging.  R2 reads WRF's
+PBL and surface-layer inputs from the suite's ``diag_physics`` words
+(:func:`suite_surface`); it runs on one card from a cold start (its checkpoint
+carries no report book yet, so a resume is refused by name).
+
 Refused by name (:func:`refusals`): obs_scl_neg_qv_innov (WRF scales the
 surface innovation in place as it walks each grid row, an order the mesh has
 no equivalent of), a configuration that nudges nothing, a nested domain, and
@@ -685,12 +692,17 @@ class HexObsNudging:
         return dict(self.tend)
 
     def add(self, index: int, held: Any, start: float, dt: float, *, driver: Any = None,
-            rho_edge: Any, normal_velocity: Any, state: Any, **_unused: Any) -> None:
-        """This step's observation-nudging tendencies onto the held physics tendencies (in place)."""
+            rho_edge: Any, normal_velocity: Any, state: Any, theta_m: Any = None, **_unused: Any) -> None:
+        """This step's observation-nudging tendencies onto the held physics tendencies (in place).
+
+        ``theta_m`` is the suite route's saved theta_m (as for woof.hex.nudging); the column route derives it
+        from the state.
+        """
         cp = self.cp
         if float(dt) != self.dt:
             raise HexObsNudgingRefusal("HEX_OBS_NUDGING_ADAPTIVE", "observation nudging was built for a fixed time step")
-        theta_m = cp.ascontiguousarray(state.rho_theta / state.rho)
+        if theta_m is None:
+            theta_m = cp.ascontiguousarray(state.rho_theta / state.rho)
         atmosphere = driver.atmosphere
         tend = self.step_tendencies(
             time_seconds=start, theta_m=theta_m, qv=state.scalars[self.index_qv], normal_velocity=normal_velocity,
@@ -728,6 +740,16 @@ class HexObsNudging:
 # the WOOF column route (R1)
 # ----------------------------------------------------------------------------
 
+def _column(cp, value, dtype, nc: int):
+    """A per-cell surface field padded with zeros to the mesh's ``nc`` columns."""
+    flat = cp.asarray(value).reshape(-1).astype(dtype, copy=False)
+    if flat.size > nc:
+        raise ValueError("a surface field has more columns than the mesh")
+    if flat.size < nc:
+        flat = cp.concatenate([flat, cp.zeros(nc - flat.size, dtype=dtype)])
+    return cp.ascontiguousarray(flat)
+
+
 def _seam_surface(backend, nc: int, *, z_mid, ht, dz1):
     """The column physics' PBL and surface-layer fields, padded to the mesh's columns, read per step."""
     import cupy as cp
@@ -749,12 +771,7 @@ def _seam_surface(backend, nc: int, *, z_mid, ht, dz1):
     zero = cp.zeros(nc, dtype=cp.float32)
 
     def column(value, dtype):
-        flat = cp.asarray(value).reshape(-1).astype(dtype, copy=False)
-        if flat.size > nc:
-            raise ValueError("a surface field has more columns than the mesh")
-        if flat.size < nc:
-            flat = cp.concatenate([flat, cp.zeros(nc - flat.size, dtype=dtype)])
-        return cp.ascontiguousarray(flat)
+        return _column(cp, value, dtype, nc)
 
     lowest_layer = cp.ascontiguousarray(dz1)
 
@@ -800,4 +817,70 @@ def attach_v841(request: Mapping[str, Any], *, stack: Mapping[str, Any], host: M
     forcing.surface = _seam_surface(stack["backend"], forcing.nc, z_mid=forcing.z, ht=forcing.ht, dz1=forcing.dz1)
     if carried is not None:
         forcing.restore(carried)
+    return forcing
+
+
+# ----------------------------------------------------------------------------
+# the MPAS v8.4.2 suite route (R2)
+# ----------------------------------------------------------------------------
+
+def suite_surface(session, config, nc: int, *, z_mid, ht, dz1):
+    """The suite's PBL and surface-layer fields (MPAS ``diag_physics``), padded to the mesh's columns, per step.
+
+    WRF's fddaobs inputs map onto MPAS-A v8.4.2's own words: PBLH is ``hpbl``, KPBL ``kpbl`` (the PBL schemes'
+    1-based level, as in WRF), the surface-layer REGIME ``regime`` (written by all three v8.4.2 surface layers,
+    mpas_atmphys_driver_sfclayer.F:648-694), U10/V10 ``u10``/``v10`` and TH2 ``th2m``.  MPAS calls its PBL every
+    step, so WRF's STEPBL is 1.  Without a surface layer the ratios take WRF's no-surface-layer path and the regime
+    forecast.cu's fallback, as on the column route.
+    """
+    import cupy as cp
+
+    if not config.active("pbl"):
+        raise HexObsNudgingRefusal("HEX_OBS_NUDGING_PBL",
+                                   "observation nudging needs the suite's PBL height and level; this suite runs no PBL "
+                                   "scheme (config_pbl_scheme = off)")
+    sfclay = bool(config.active("surface_layer"))
+    zero = cp.zeros(nc, dtype=cp.float32)
+    lowest_layer = cp.ascontiguousarray(dz1)
+
+    def field(name, dtype):
+        return _column(cp, session.field("diag_physics", name), dtype, nc)
+
+    def read():
+        pblh = field("hpbl", cp.float32)
+        out = {"pblh": pblh, "kpbl": field("kpbl", cp.int32), "sfclay": int(sfclay), "stepbl": 1}
+        if sfclay:
+            out["regime"] = field("regime", cp.float32)
+            out.update(u10=field("u10", cp.float32), v10=field("v10", cp.float32), th2=field("th2m", cp.float32))
+        else:
+            out["regime"] = cp.where(pblh > lowest_layer, cp.float32(4.), cp.float32(1.)).astype(cp.float32)
+            out.update(u10=zero, v10=zero, th2=zero)
+        return out
+    return read
+
+
+def attach_v842(arguments: Any, *, session, config, mesh, prep_geometry, geometry_mesh, zgrid, names, dt: float,
+                cache: Any, start_time: str, partitioned: bool, resumed: bool) -> HexObsNudging:
+    """The MPAS v8.4.2 suite route (R2): the forcing at its IAU seat, after analysis nudging (runtime_v842)."""
+    from .cuda_physics_v841 import CudaPhysicsGeometryV841
+
+    cfg = load_config(arguments.obs_nudging, input_file=getattr(arguments, "obs_nudging_input", None))
+    problems = refusals(cfg)
+    if problems:
+        raise problems[0]
+    if partitioned:
+        raise HexObsNudgingRefusal("HEX_OBS_NUDGING_PARTITIONED",
+                                   "observation nudging runs on one card on a fixed mesh; the partitioned, rate-class "
+                                   "and moving executors have no observation-nudging seat")
+    if resumed:
+        raise HexObsNudgingRefusal("HEX_OBS_NUDGING_RESTART",
+                                   "the suite route's checkpoint carries no observation-nudging report book yet; start "
+                                   "the run cold, or run it on the WOOF column route, whose checkpoint carries it")
+    start = datetime.strptime(str(start_time).replace("T", "_"), "%Y-%m-%d_%H:%M:%S")
+    rows = read_observations(cfg, original_start=start, dt=dt)
+    forcing = HexObsNudging(
+        cfg, observations=rows, mesh=mesh, prep_geometry=prep_geometry,
+        physics_geometry=CudaPhysicsGeometryV841.from_host(geometry_mesh), zgrid=zgrid, scalar_names=names,
+        dt=dt, kernel_cache=cache, surface=lambda: None)
+    forcing.surface = suite_surface(session, config, forcing.nc, z_mid=forcing.z, ht=forcing.ht, dz1=forcing.dz1)
     return forcing

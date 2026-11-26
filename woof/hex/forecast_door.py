@@ -3508,6 +3508,52 @@ def suite_route_seat_refusal(arguments, environ: Mapping[str, str] | None = None
             f"regional runtime on the MPAS suite route; {where}, so it would be accepted and never applied")
 
 
+def suite_route_obs_nudging_refusal(arguments, environ: Mapping[str, str] | None = None) -> str | None:
+    """Admit --obs-nudging on the MPAS suite route, or say why it cannot run there.
+
+    The forcing attaches to the one-card resident dycore from a cold start (mpasphys.runtime_v842,
+    woof.hex.obs_nudging.attach_v842).  Same-host ranks, --hosts, a moving region, local time stepping and the
+    suite route's checkpoints (which carry no report book yet) would accept it and never apply it, or splice it.
+    On admission the configuration and observation paths are resolved in place.
+    """
+    from .fullstep_lts_admission import moving_launch_switches
+
+    environ = os.environ if environ is None else environ
+    config = getattr(arguments, "obs_nudging", None)
+    reports = getattr(arguments, "obs_nudging_input", None)
+    if config is None:
+        if reports is not None:
+            return "--obs-nudging-input names the observation file of --obs-nudging; give the configuration too"
+        return None
+    for value in (config, reports):
+        if value is not None and not Path(value).expanduser().is_file():
+            return f"observation-nudging input {value} does not exist"
+    from .obs_nudging import HexObsNudgingRefusal, load_config, refusals
+    try:
+        problems = refusals(load_config(config, input_file=reports))
+    except HexObsNudgingRefusal as error:
+        return str(error)
+    if problems:
+        return str(problems[0])
+    where = None
+    if getattr(arguments, "samehost_devices", None) is not None:
+        where = "--samehost-devices runs rank dycores that have no observation-nudging seat"
+    elif getattr(arguments, "hosts", None) is not None or environ.get("WOOF_HEX_HOSTS"):
+        where = "--hosts runs rank dycores that have no observation-nudging seat"
+    elif moving_launch_switches(environ):
+        where = f"a moving region ({', '.join(moving_launch_switches(environ))}) remaps onto other meshes"
+    elif any(getattr(arguments, flag, False) for flag in ("local_timestep", "fullstep_local_timestep")):
+        where = "a local time step has no fixed hex step for WRF's obs_ionf clock"
+    elif getattr(arguments, "checkpoint_hours", None) or getattr(arguments, "restart_from", None) is not None:
+        where = ("the suite route's checkpoint carries no observation-nudging report book yet, so a resume would "
+                 "restart WRF's report window and weights")
+    if where is not None:
+        return f"HEX_OBS_NUDGING_ROUTE: --obs-nudging runs on the MPAS suite route on one card from a cold start; {where}"
+    arguments.obs_nudging = Path(config).expanduser().resolve()
+    arguments.obs_nudging_input = None if reports is None else Path(reports).expanduser().resolve()
+    return None
+
+
 def mpas_route_orographic_statistics(arguments, native_config) -> Path | None:
     """The GSL drag statistics an MPAS-route run reads when it names none: beside --grid, else built there.
 
@@ -5474,10 +5520,11 @@ def _run_forecast(arguments: argparse.Namespace) -> int:
             raise ValueError("--nudging and --nudging-analysis go together: a nudging configuration reads its "
                              "analyses, and an analysis without a configuration would never be read")
         if native_config is not None:
-            if getattr(arguments, "obs_nudging", None) is not None:
-                raise ValueError("HEX_OBS_NUDGING_ROUTE: --obs-nudging runs on the WOOF-physics route (--physics-backend "
-                                 "arwen, the column seam); the MPAS suite route has no observation-nudging seat yet "
-                                 "(matrix item 5.2 follow-up) and would accept it and never apply it")
+            # WRF observation nudging attaches at the suite runtime's IAU seat (runtime_v842,
+            # woof.hex.obs_nudging.attach_v842); admitted here, before --hosts starts and before any preparation.
+            obs_refusal = suite_route_obs_nudging_refusal(arguments)
+            if obs_refusal is not None:
+                raise ValueError(obs_refusal)
             if getattr(arguments, "obstacle_opt", None) or getattr(arguments, "obstacle_file", None) is not None \
                     or any(getattr(arguments, key, None) is not None for key in _OBSTACLE_KEYS):
                 raise ValueError("--obstacle-opt and the other --obstacle-* flags are carried by the WOOF-physics "

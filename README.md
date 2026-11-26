@@ -867,7 +867,10 @@ Notes on the 1.1.7 sync:
     threat, gust);
   - `aer_opt = 1, 2`, `w_damping`, grid and spectral analysis nudging, and
     WRF observation nudging (`obs_nudge_opt = 1`, `--obs-nudging`), with
-    WRF's weights and great-circle radii found through a cell KD-tree;
+    WRF's weights and great-circle radii found through a cell KD-tree.
+    Observation nudging runs on both the WOOF column route and the MPAS
+    v8.4.2 suite route (R2, one card, cold start), which reads WRF's PBL
+    and surface-layer inputs from the suite's own fields;
   - stochastic physics: SPP (`spp_conv`, `spp_pbl`, `spp_lsm`) on the WOOF
     column route, WRF-Solar EPS (`multi_perturb`) on regional meshes, and
     WRF's inflow perturbation on the regional relax rings

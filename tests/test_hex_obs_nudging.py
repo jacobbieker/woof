@@ -273,3 +273,70 @@ def test_admission_prices_observation_nudging_storage(tmp_path):
     assert forecast_door.obs_nudging_bytes(request, levels=levels) == expected
     assert forecast_door.diagnostic_workspace_bytes(request, levels=levels) == expected
     assert forecast_door.obs_nudging_bytes(SimpleNamespace(obs_nudging=None), levels=levels) == 0
+
+
+# ----------------------------------------------------------------------------
+# the MPAS v8.4.2 suite route (R2)
+# ----------------------------------------------------------------------------
+
+def test_suite_route_door_admits_one_card_cold_starts_and_refuses_the_rest(tmp_path):
+    from argparse import Namespace
+
+    from woof.hex.forecast_door import suite_route_obs_nudging_refusal as refusal
+
+    config = _toml(tmp_path)
+    reports = tmp_path / "OBS_DOMAIN101"
+    reports.write_text("")
+    assert refusal(Namespace(), environ={}) is None
+    assert "give the configuration" in refusal(Namespace(obs_nudging_input=str(reports)), environ={})
+    assert "does not exist" in refusal(Namespace(obs_nudging=str(tmp_path / "none.toml")), environ={})
+    bad = tmp_path / "bad.toml"
+    bad.write_text(TOML + "obs_rinxyy = 3.0\n")
+    assert "HEX_OBS_NUDGING_KEYS" in refusal(Namespace(obs_nudging=str(bad)), environ={})
+    for extra, word in (({"samehost_devices": "0,1"}, "--samehost-devices"), ({"hosts": "a,b"}, "--hosts"),
+                        ({"local_timestep": True}, "local time step"), ({"checkpoint_hours": 1.0}, "checkpoint"),
+                        ({"restart_from": str(tmp_path / "c.pkl")}, "checkpoint")):
+        message = refusal(Namespace(obs_nudging=str(config), **extra), environ={})
+        assert message.startswith("HEX_OBS_NUDGING_ROUTE") and word in message
+    arguments = Namespace(obs_nudging=str(config), obs_nudging_input=str(reports))
+    assert refusal(arguments, environ={}) is None
+    assert arguments.obs_nudging == config.resolve() and arguments.obs_nudging_input == reports.resolve()
+
+
+def test_suite_surface_reads_wrf_inputs_from_diag_physics():
+    import cupy as cp
+
+    nc = 5
+    words = {"hpbl": np.array([300., 800., 50., 1200.], np.float32), "kpbl": np.array([3, 6, 1, 9], np.int32),
+             "regime": np.array([1., 4., 2., 3.], np.float32), "u10": np.full(4, 2., np.float32),
+             "v10": np.full(4, -1., np.float32), "th2m": np.full(4, 291., np.float32)}
+    session = SimpleNamespace(field=lambda pool, name: words[name] if pool == "diag_physics" else None)
+    active = {"pbl": True, "surface_layer": True}
+    config = SimpleNamespace(active=lambda slot: active[slot])
+    dz1 = cp.full(nc, 60., dtype=cp.float32)
+    read = obs.suite_surface(session, config, nc, z_mid=None, ht=None, dz1=dz1)
+    out = read()
+    assert out["stepbl"] == 1 and out["sfclay"] == 1
+    assert cp.asnumpy(out["kpbl"]).tolist() == [3, 6, 1, 9, 0]
+    assert cp.asnumpy(out["regime"]).tolist() == [1., 4., 2., 3., 0.]
+    assert cp.asnumpy(out["th2"]).tolist()[:4] == [291.] * 4
+    # Without a surface layer: WRF's no-surface-layer ratios and forecast.cu's regime fallback.
+    active["surface_layer"] = False
+    out = obs.suite_surface(session, config, nc, z_mid=None, ht=None, dz1=dz1)()
+    assert out["sfclay"] == 0 and cp.asnumpy(out["regime"]).tolist() == [4., 4., 1., 4., 1.]
+    assert cp.asnumpy(out["u10"]).tolist() == [0.] * nc
+    active["pbl"] = False
+    with pytest.raises(obs.HexObsNudgingRefusal, match="HEX_OBS_NUDGING_PBL"):
+        obs.suite_surface(session, config, nc, z_mid=None, ht=None, dz1=dz1)
+
+
+def test_suite_route_attach_refuses_partitioned_and_resumed_runs(tmp_path):
+    from argparse import Namespace
+
+    arguments = Namespace(obs_nudging=str(_toml(tmp_path)), obs_nudging_input=None)
+    common = dict(session=None, config=None, mesh=None, prep_geometry=None, geometry_mesh=None, zgrid=None,
+                  names=("qv",), dt=30.0, cache=None, start_time="2024-01-01_00:00:00")
+    with pytest.raises(obs.HexObsNudgingRefusal, match="HEX_OBS_NUDGING_PARTITIONED"):
+        obs.attach_v842(arguments, partitioned=True, resumed=False, **common)
+    with pytest.raises(obs.HexObsNudgingRefusal, match="HEX_OBS_NUDGING_RESTART"):
+        obs.attach_v842(arguments, partitioned=False, resumed=True, **common)
