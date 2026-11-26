@@ -527,8 +527,11 @@ Notes on the 1.1.7 sync:
     separated after the pre-dynamics and combined before each ridging, the
     vertical thermodynamics, the shortwave and `coupling_prep`) and the
     coupled step with the velocity solver, word for
-    word with v8.4.2 on CUDA and Metal. Two v8.4.2 quirks there have opt-in
-    corrections: `subcycle_snow_ice_tracers` (v8.4.2 combines every dynamics
+    word with v8.4.2 on CUDA and Metal. Three v8.4.2 quirks there have opt-in
+    corrections: `zap_snow_area` (`zap_small_areas` hands `zap_snow` the area
+    it has just zeroed, so the snow surface layer's tracer drops out of the
+    flux; the correction passes the category's area),
+    `subcycle_snow_ice_tracers` (v8.4.2 combines every dynamics
     subcycle but separates once a step, so an earlier subcycle's ridging of
     the tracers is lost) and `bgc_snow_new_category` (without the vertical
     thermodynamics `update_snow_bgc` divides 0/0 for a category the last
@@ -744,7 +747,7 @@ Notes on the 1.1.7 sync:
     `set_sfcflux_order`, `ice_velocity_at_cell`,
     `ccsm3_absorbed_solar_layers`, `dedd_zero_volume_ice`,
     `zbgc_c2n_proteins`, `bgc_inactive_diagnostics`, `zsal_solve`,
-    `bgc_snow_new_category` and `subcycle_snow_ice_tracers`;
+    `bgc_snow_new_category`, `subcycle_snow_ice_tracers` and `zap_snow_area`;
     and the MPAS-Seaice velocity solver's `planar_metric_terms`,
     `periodic_local_coords` and `weak_ridge_delta`.
     The list and its values are in
