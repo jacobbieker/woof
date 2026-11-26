@@ -3430,6 +3430,34 @@ def _resolve_inflow_perturbation(arguments) -> dict | None:
     return {"seed": seed, "amplitude_scale": scale, "faces": faces}
 
 
+def suite_route_seat_refusal(arguments, environ: Mapping[str, str] | None = None) -> str | None:
+    """Why the MPAS suite route cannot carry this run's --w-damping / --inflow-perturbation, or None.
+
+    Both attach to the one-card resident dycore and regional runtime (mpasphys.runtime_v842).  A same-host
+    rank execution, a multi-host run and a moving region run on other dycores or remap onto other meshes,
+    so the terms would be accepted and never applied.  Reads the door's resolved values
+    (``w_damping_crit_cfl``, ``inflow_perturbation_options``).
+    """
+    from .fullstep_lts_admission import moving_launch_switches
+
+    environ = os.environ if environ is None else environ
+    flags = [flag for flag, on in (
+        ("--w-damping", getattr(arguments, "w_damping_crit_cfl", None) is not None),
+        ("--inflow-perturbation", bool(getattr(arguments, "inflow_perturbation_options", None)))) if on]
+    if not flags:
+        return None
+    if getattr(arguments, "samehost_devices", None) is not None:
+        where = "--samehost-devices runs rank dycores that do not carry it"
+    elif getattr(arguments, "hosts", None) is not None or environ.get("WOOF_HEX_HOSTS"):
+        where = "--hosts runs rank dycores that do not carry it"
+    elif moving_launch_switches(environ):
+        where = f"a moving region ({', '.join(moving_launch_switches(environ))}) remaps onto other meshes"
+    else:
+        return None
+    return (f"{' and '.join(flags)} act{'s' if len(flags) == 1 else ''} in the one-card resident dycore and "
+            f"regional runtime on the MPAS suite route; {where}, so it would be accepted and never applied")
+
+
 def mpas_route_orographic_statistics(arguments, native_config) -> Path | None:
     """The GSL drag statistics an MPAS-route run reads when it names none: beside --grid, else built there.
 
@@ -5367,6 +5395,15 @@ def _run_forecast(arguments: argparse.Namespace) -> int:
             # would be accepted and silently not written.
             raise ValueError("--history-field adds to MPAS's default output stream on the MPAS-physics route; "
                              "this run is on the WOOF-ArWen-physics route, whose history does not read it")
+        if native_config is not None:
+            # --w-damping and --inflow-perturbation attach in the suite runtime's resident dycore and regional
+            # runtime (runtime_v842), the same seats the WOOF-physics route uses.  Resolved and refused here,
+            # before --hosts starts the other hosts and before any preparation.
+            arguments.w_damping_crit_cfl = _resolve_w_damping(arguments)
+            arguments.inflow_perturbation_options = _resolve_inflow_perturbation(arguments)
+            seat_refusal = suite_route_seat_refusal(arguments)
+            if seat_refusal is not None:
+                raise ValueError(seat_refusal)
         if getattr(arguments, "hosts", None) is not None or os.environ.get("WOOF_HEX_HOSTS"):
             if native_config is None:
                 raise ValueError("--hosts runs the MPAS-physics route (--physics-backend mpasphys, the hex default "
@@ -5390,16 +5427,10 @@ def _run_forecast(arguments: argparse.Namespace) -> int:
                 raise ValueError("HEX_OBS_NUDGING_ROUTE: --obs-nudging runs on the WOOF-physics route (--physics-backend "
                                  "arwen, the column seam); the MPAS suite route has no observation-nudging seat yet "
                                  "(matrix item 5.2 follow-up) and would accept it and never apply it")
-            if getattr(arguments, "w_damping", False):
-                raise ValueError("--w-damping is carried by the WOOF-physics route's dycore driver; the MPAS "
-                                 "suite route (matrix item 4.2 follow-up) would accept it and never apply it")
             if getattr(arguments, "obstacle_opt", None) or getattr(arguments, "obstacle_file", None) is not None \
                     or any(getattr(arguments, key, None) is not None for key in _OBSTACLE_KEYS):
                 raise ValueError("--obstacle-opt and the other --obstacle-* flags are carried by the WOOF-physics "
                                  "route's dycore driver; the MPAS suite route would accept them and never apply them")
-            if getattr(arguments, "inflow_perturbation", False):
-                raise ValueError("--inflow-perturbation is carried by the WOOF-physics route's regional runtime; "
-                                 "the MPAS suite route (matrix item 5.7 follow-up) would accept it and never apply it")
             # (--quirk-corrections all leaves the rule off here: this route does not carry it)
             if getattr(arguments, "undriven_species_boundary", None) not in (None, "free"):
                 raise ValueError("--undriven-species-boundary wrf-flow-dependent is carried by the WOOF-physics "
@@ -5996,7 +6027,7 @@ def add_forecast_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--w-damping", action="store_true",
                         help="WRF's w_damping = 1 vertical-velocity limiter as a w-tendency term "
                              "(|w| dt/dz above 1 pushes w back by 0.3 * (cfl - --w-crit-cfl)); "
-                             "WOOF-physics route only; default off")
+                             "both routes (WOOF-physics and the MPAS suite); default off")
     parser.add_argument("--w-crit-cfl", type=float, default=None, metavar="CFL",
                         help="WRF's w_crit_cfl for --w-damping (default 1.0, WOOF's)")
     parser.add_argument("--obstacle-opt", type=int, default=None, choices=(0, 1), metavar="N",
@@ -6015,7 +6046,7 @@ def add_forecast_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--inflow-perturbation", action="store_true",
                         help="WRF's inflow perturbation on a regional mesh: cell-blocked theta increments "
                              "(Eckert amplitude, PBL depth, 100 s holds) on the inflow faces' relaxation-zone "
-                             "target; WOOF-physics route only; default off")
+                             "target; both routes (on the MPAS suite route the PBL depth is the suite's hpbl); default off")
     parser.add_argument("--inflow-perturbation-seed", type=int, default=None, metavar="N",
                         help="WRF's inflow_perturbation_seed (default 0)")
     parser.add_argument("--inflow-perturbation-amplitude-scale", type=float, default=None, metavar="X",

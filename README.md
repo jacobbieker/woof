@@ -864,7 +864,10 @@ Notes on the 1.1.7 sync:
     column route, WRF-Solar EPS (`multi_perturb`) on regional meshes, and
     WRF's inflow perturbation on the regional relax rings
     (`woof hex forecast --inflow-perturbation`, which takes its depth from
-    the run's own boundary-layer height since hex has no parent model);
+    the run's own boundary-layer height since hex has no parent model).
+    `--w-damping` and `--inflow-perturbation` run on both the WOOF column
+    route and the MPAS v8.4.2 suite route (R2), where the depth is the
+    suite's `hpbl`;
   - WRF's flow-dependent specified zone for the microphysics species a
     regional boundary stream does not drive (`woof hex forecast
     --undriven-species-boundary wrf-flow-dependent`: outflow copies the
@@ -982,7 +985,9 @@ Notes on the 1.1.7 sync:
 - **Applied tooling:** wind-energy siting, hindcasts and power products,
   storm-track planning, and delete-after-commit backpressure and domain
   selection for upstream's Icechunk store export
-  (`[output] icechunk_delete_after_commit`, `icechunk_domains`).
+  (`[output] icechunk_delete_after_commit`, `icechunk_domains`), and
+  store-only S3 credentials for a store in another account
+  (`WOOF_ICECHUNK_AWS_*`, read by the writer alone).
 - **Observation referees for MPAS-layout history.** These are for the hex
   model or native MPAS-A.
   - `woof.hex.sonde_profile_referee` scores temperature against radiosondes
