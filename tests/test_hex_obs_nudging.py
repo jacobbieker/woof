@@ -323,7 +323,7 @@ def test_suite_surface_reads_wrf_inputs_from_diag_physics():
     active = {"pbl": True, "surface_layer": True}
     config = SimpleNamespace(active=lambda slot: active[slot])
     dz1 = cp.full(nc, 60., dtype=cp.float32)
-    out = obs.suite_surface(session, config, nc, z_mid=None, ht=None, dz1=dz1, stepbl=3)()
+    out = obs.suite_surface(session, config, nc, dz1=dz1, stepbl=3)()
     assert out["stepbl"] == 3 and out["sfclay"] == 1
     assert cp.asnumpy(out["kpbl"]).tolist() == [3, 6, 1, 9, 0]
     # the padding column past the suite's cells reads the no-surface-layer regime (1 at zero PBL height), not 0
@@ -332,7 +332,7 @@ def test_suite_surface_reads_wrf_inputs_from_diag_physics():
     for slot in ("surface_layer", "pbl"):
         active[slot] = False
         with pytest.raises(obs.HexObsNudgingRefusal, match="HEX_OBS_NUDGING_PBL"):
-            obs.suite_surface(session, config, nc, z_mid=None, ht=None, dz1=dz1)
+            obs.suite_surface(session, config, nc, dz1=dz1)
         active[slot] = True
 
 

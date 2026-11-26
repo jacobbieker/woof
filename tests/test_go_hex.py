@@ -435,7 +435,7 @@ def test_observation_nudging_without_physics_keys_runs_on_the_mpas_suite(tmp_pat
                                            "obs_nudge_wind = 1\nobs_twindo = 0.5\nfdda_end = 60.0",
                     shared="[shared]\nmax_obs = 300\n")
     value = go_hex.plan(_args(str(config)))
-    assert value["physics"] in ({}, None) or not value["physics"]
+    assert not value["physics"]
     table = tmp_path / "hexgo-go" / go_hex.OBS_NUDGING_CONFIG
     assert f"--forecast-arg=--obs-nudging={table}" in value["regional_argv"]
 

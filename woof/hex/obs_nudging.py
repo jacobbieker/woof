@@ -866,7 +866,7 @@ def _suite_pbl_refusal(config) -> None:
                                    "without a surface layer")
 
 
-def suite_surface(session, config, nc: int, *, z_mid, ht, dz1, stepbl: int = 1):
+def suite_surface(session, config, nc: int, *, dz1, stepbl: int = 1):
     """The suite's PBL and surface-layer fields (MPAS ``diag_physics``), padded to the mesh's columns, per step.
 
     WRF's fddaobs inputs map onto MPAS-A v8.4.2's own words: PBLH is ``hpbl``, KPBL ``kpbl`` (the PBL schemes'
@@ -946,6 +946,6 @@ def attach_v842(arguments: Any, *, session, config, mesh, prep_geometry, geometr
         cfg, observations=rows, mesh=mesh, prep_geometry=prep_geometry,
         physics_geometry=physics_geometry or CudaPhysicsGeometryV841.from_host(geometry_mesh), zgrid=zgrid,
         scalar_names=names, dt=dt, kernel_cache=cache, surface=lambda: None)
-    forcing.surface = suite_surface(session, config, forcing.nc, z_mid=forcing.z, ht=forcing.ht, dz1=forcing.dz1,
+    forcing.surface = suite_surface(session, config, forcing.nc, dz1=forcing.dz1,
                                     stepbl=stepbl)
     return forcing
