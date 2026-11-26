@@ -43,8 +43,8 @@ MOVED = {
     "wind_int": (dict(wind_int=10), {"wind_int"}),
     # Thompson runs in these rows, so its FQ5 correction (on by default) is
     # bound too.
-    "thompson_version": (dict(mp_physics=28, moist=True, thompson_version="wrf_39_noaa"), {"thompson_version", "thompson_rain_snow_closure"}),
-    "thompson_fork_snow_fall": (dict(mp_physics=28, moist=True, thompson_version="wrf_39_noaa", thompson_fork_snow_fall="wrf_39_noaa"), {"thompson_version", "thompson_fork_snow_fall", "thompson_rain_snow_closure"}),
+    "thompson_version": (dict(mp_physics=28, moist=True, thompson_version="wrf_39_noaa"), {"thompson_version", "thompson_rain_snow_closure", "thompson_lamc_updated_rc"}),
+    "thompson_fork_snow_fall": (dict(mp_physics=28, moist=True, thompson_version="wrf_39_noaa", thompson_fork_snow_fall="wrf_39_noaa"), {"thompson_version", "thompson_fork_snow_fall", "thompson_rain_snow_closure", "thompson_lamc_updated_rc"}),
     "upper_wind_limiter_form": (dict(upper_wind_limiter_form="noaa_wrf39"),
                                 {"upper_wind_limiter_form"}),
     "adaptive_nest_lattice": (dict(adaptive_nest_lattice=True),
@@ -133,6 +133,11 @@ MOVED = {
     "thompson_rain_snow_closure": (
         dict(mp_physics=8),
         {"thompson_rain_snow_closure"}),
+    # Correct-mode FQ7 (on by default): echoed where the aerosol-aware
+    # Thompson runs (mp_physics = 28, 38).
+    "thompson_lamc_updated_rc": (
+        dict(mp_physics=28, moist=True),
+        {"thompson_lamc_updated_rc", "thompson_rain_snow_closure"}),
     # Correct-mode FQ6 (on by default): echoed where the legacy RRTMG
     # longwave runs, whether it is named by ra_lw_physics or the aggregate.
     "rrtmg_lw_model_top": (
@@ -183,13 +188,14 @@ MOVED = {
     "swint_opt": (dict(swint_opt=1), {"swint_opt"}),
     "aer_opt": (dict(aer_opt=3, mp_physics=28, moist=True,
                      ra_physics=4, ra_rrtmg_variant="rrtmg_legacy"),
-                {"aer_opt", "thompson_rain_snow_closure", "rrtmg_lw_model_top"}),
+                {"aer_opt", "thompson_rain_snow_closure", "thompson_lamc_updated_rc",
+                 "rrtmg_lw_model_top"}),
     "rrtmg_aer3_type_source": (
         dict(aer_opt=3, mp_physics=28, moist=True, ra_physics=4,
              ra_rrtmg_variant="rrtmg_legacy",
              rrtmg_aer3_type_source="landmask"),
         {"aer_opt", "rrtmg_aer3_type_source", "thompson_rain_snow_closure",
-         "rrtmg_lw_model_top"}),
+         "thompson_lamc_updated_rc", "rrtmg_lw_model_top"}),
     "alb_sol": (dict(alb_sol=1), {"alb_sol"}),
 }
 
@@ -292,6 +298,9 @@ DEFAULT_OFF = frozenset({
     # The RRTMG longwave model-top correction (FQ6), absent while off or
     # while the legacy RRTMG longwave does not run.
     "rrtmg_lw_model_top",
+    # The Thompson cloud slope from the updated mass (FQ7), absent while the
+    # aerosol-aware Thompson does not run.
+    "thompson_lamc_updated_rc",
     # WRF v4.8.0 MYNN-SFC roughness keys, absent at their Registry defaults.
     "sf_mynn_sfcflux_land", "sf_mynn_sfcflux_water", "shalwater_z0",
     # The upstream MYNN v6.1 fixes (correct-mode MY1): default on, echoed
@@ -715,6 +724,7 @@ def test_chemistry_off_emitted_config_bytes_match_recovery_staging(
                        "solar_generation": "wrf_461",
                        "hydrometeor_handover_numbers": False,
                        "thompson_rain_snow_closure": False,
+                       "thompson_lamc_updated_rc": False,
                        **row["constructor"]})
     if inactive_nondefaults:
         cfg = dataclasses.replace(cfg, chem_adv_opt=2, kemit=17,

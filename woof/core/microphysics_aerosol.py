@@ -311,7 +311,8 @@ def _apply_thompson_aerosol(
     """
     from woof.config import THOMPSON_AEROSOL_FAMILY
     from woof.core.thompson_aerosol_launch import (
-        hail_aware_scope, rain_snow_closure_scope, thompson_version_scope)
+        hail_aware_scope, lamc_updated_rc_scope, rain_snow_closure_scope,
+        thompson_version_scope)
     version = getattr(cfg, "thompson_version", "wrf_461")
     # The family row decides hail awareness (mp_physics=38): WRF runs one
     # module for both members, so one adapter call runs both, with the
@@ -325,8 +326,11 @@ def _apply_thompson_aerosol(
     # RunConfig.thompson_rain_snow_closure (FQ5).
     from woof.core.thompson import rain_snow_closure_due
     closure = rain_snow_closure_due(cfg)
+    # RunConfig.thompson_lamc_updated_rc (FQ7).
+    from woof.core.thompson import lamc_updated_rc_due
+    lamc = lamc_updated_rc_due(cfg)
     with (thompson_version_scope(version), hail_aware_scope(hail),
-          rain_snow_closure_scope(closure)):
+          rain_snow_closure_scope(closure), lamc_updated_rc_scope(lamc)):
         return _apply_thompson_aerosol_call(
             state, cfg, dt, refl_10cm_due=refl_10cm_due, version=version,
             hail=hail, effective_radii_due=effective_radii_due,
@@ -396,7 +400,7 @@ def _apply_thompson_fork_call(
     save_pre_mp_theta(state)
     refl = state.scratch((nz, ny, nx), "refl_10cm") if refl_10cm_due \
         else None
-    from woof.core.thompson import rain_snow_closure_due
+    from woof.core.thompson import lamc_updated_rc_due, rain_snow_closure_due
     # calc_refl10cm's melting-snow term: off on the fork's first step
     # (itimestep 1, :5374-5379) and wherever WOOF's state policy turns the
     # melting term off (woof.core.refl.refl_melting_for).
@@ -413,7 +417,8 @@ def _apply_thompson_fork_call(
         do_refl=bool(refl_10cm_due),
         singular_fall=getattr(cfg, "thompson_fork_snow_fall",
                               "blend") == "wrf_39_noaa",
-        rain_snow_closure=rain_snow_closure_due(cfg))
+        rain_snow_closure=rain_snow_closure_due(cfg),
+        lamc_updated_rc=lamc_updated_rc_due(cfg))
     if refl_10cm_due:
         stash_refl_10cm(state, refl)
     moist_physics_finish(state, cfg, th, dt)
