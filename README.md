@@ -1794,6 +1794,15 @@ Notes on the 1.1.7 sync:
   range), but T2 is then no better than the physics run (+0.04 K, CI
   spanning zero): no evidence of skill. Results and per-step costs are in
   [docs/nn-physics.md](docs/nn-physics.md).
+- **How long a run takes (`woof estimate`).** Gives a low-high wall clock
+  for a configuration on this box, a card from a built-in table (A6000,
+  A100, H100, L4, L40S, RTX 30/40/50 series, Apple M-series) or a
+  `[runner]` TOML. It breaks the time into prepare, compile, model steps,
+  radiation, output, restart writes and DA. Each figure is labelled
+  measured, scaled by memory bandwidth, calibrated or substituted, and the
+  anchors are named runs with receipts. `--calibrate N` times N steps on
+  this box and remembers the result, and `woof go`'s forecast heartbeat now
+  shows an ETA ([docs/public/HARDWARE.md](docs/public/HARDWARE.md#how-long-a-run-takes-woof-estimate)).
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`

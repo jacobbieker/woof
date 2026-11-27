@@ -790,6 +790,10 @@ def build_parser(*, render_only: bool = False, preset_only: bool = False,
     # store layout with.
     estimate_tracks_register_cli = _lazy_register("woof.track_estimate")
     estimate_tracks_register_cli(sub)
+    # How long a run takes on a runner (this box, a table card or a
+    # [runner] TOML): beside the other estimators, on the pace model
+    # `woof check` quotes.
+    _lazy_register("woof.runtime_estimate")(sub)
     # Turbines placed on a domain's grid: the layout a wind-farm
     # parameterization reads, beside the energy doors whose turbine
     # library it resolves curves through.
