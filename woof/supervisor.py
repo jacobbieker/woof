@@ -1306,19 +1306,6 @@ def _pmon_is_pure_compute(process_type: str | None) -> bool:
 MPS_SERVER_NAME = "nvidia-cuda-mps"
 
 
-def _process_mps_pipe_directory(pid: int) -> str | None:
-    """The ``CUDA_MPS_PIPE_DIRECTORY`` a process was started with, if readable."""
-    try:
-        raw = Path(f"/proc/{pid}/environ").read_bytes()
-    except OSError:
-        return None
-    prefix = b"CUDA_MPS_PIPE_DIRECTORY="
-    for entry in raw.split(b"\0"):
-        if entry.startswith(prefix):
-            return os.fsdecode(entry[len(prefix):])
-    return None
-
-
 #: Per-multi-run token ``woof multi-run --mps`` stamps into every child it
 #: launches (and so every client priced by its packed admission).
 MPS_PACK_TOKEN_ENV = "WOOF_MPS_PACK_TOKEN"

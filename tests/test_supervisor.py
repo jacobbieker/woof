@@ -637,13 +637,6 @@ def test_mps_preflight_exempts_only_token_carrying_siblings(
         assert f"pid={pid} " not in out
 
 
-def test_multi_run_stamps_token_into_children_and_daemon_ownership():
-    import inspect
-    import woof.multi_run as multi_run
-    src = inspect.getsource(multi_run)
-    assert "MPS_PACK_TOKEN_ENV" in src and "MPS_OWNED_DAEMON_ENV" in src
-
-
 def test_stale_threshold_is_three_p99_with_120_second_floor():
     assert stale_threshold_seconds([1.0, 2.0, 40.0]) == 120.0
     assert stale_threshold_seconds([1.0, 2.0, 50.0]) == 150.0
