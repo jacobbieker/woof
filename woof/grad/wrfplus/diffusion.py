@@ -893,10 +893,14 @@ def k2_ad(adj_state, traj, adj, geom: KCGeometry):
     A = _kc_zeros(geom, dtype)
     m = geom.nz * geom.ny * geom.nx
     n = 4 * m + int(np.prod(T["zx"].shape)) + int(np.prod(T["zy"].shape))
-    _kernel("h2_km2_ad", dtype)(
-        _blocks(n), (THREADS,),
+    P = _pieces(geom, 6, dtype)
+    _kernel("h2_km2_lin", dtype)(
+        _blocks(m), (THREADS,),
         (adj_state["xkmh"], adj_state["xkhh"]) + tuple(traj[k] for k in DF_STATE)
-        + (T["zx"], T["zy"], T["rdzw"], traj["msft"]) + tuple(adj[k] for k in DF_STATE)
+        + (T["zx"], T["zy"], T["rdzw"], traj["msft"], P) + geom.args(dtype))
+    _kernel("h2_km2p_ad", dtype)(
+        _blocks(n), (THREADS,),
+        (P, T["zx"], T["zy"]) + tuple(adj[k] for k in DF_STATE)
         + (A["zx"], A["zy"], A["rdzw"]) + geom.args(dtype))
     _kc_met_ad(traj, adj, A, geom)
     _kc_consume(adj_state, K2_STATE, geom)
