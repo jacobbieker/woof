@@ -1104,3 +1104,8 @@ Fixed:
   the lake policies could not reach a downloaded GFS run. A table with any
   other key routes, and is refused, as before; configs without the table
   are unchanged.
+- `woof ducting PATH... --out DIR [--max-height M] [--region FILE.geojson]
+  [--sea-only] [--glob PATTERN]` diagnoses radar ducting from `wrfout`
+  frames: modified refractivity, surface-based and elevated duct base, top
+  and strength per column, and a CSV of coverage over a region. Evaporation
+  ducts are below the model's lowest levels and are not diagnosed.

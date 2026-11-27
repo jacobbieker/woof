@@ -1079,6 +1079,12 @@ Notes on the 1.1.7 sync:
   (`[output] icechunk_delete_after_commit`, `icechunk_domains`), and
   store-only S3 credentials for a store in another account
   (`WOOF_ICECHUNK_AWS_*`, read by the writer alone).
+- **Radar ducting diagnostic.** `woof ducting PATH... --out DIR` reads
+  `wrfout` frames and writes per-frame NetCDF fields of duct type
+  (surface-based or elevated), base, top and strength from modified
+  refractivity, plus a CSV of coverage over an optional `--region` polygon
+  and `--sea-only` mask. Evaporation ducts below the lowest model levels are
+  not diagnosed.
 - **Observation referees for MPAS-layout history.** These are for the hex
   model or native MPAS-A.
   - `woof.hex.sonde_profile_referee` scores temperature against radiosondes
