@@ -1238,18 +1238,17 @@ Each step is one small PR, taken to merged before the next widens.
      strict words, the damper moving w and the geopotential, dot product,
      TL against FD, and the refusals.
    - Cost (A6000, 40 x 120 x 120, binary32, periodic, median of 20 after
-     3 warm-ups, 2026-11-27; primal = the strict `advance_w_phi`;
-     another job held the card at 92-100% throughout, so the
-     repeats spread by up to 2x):
+     3 warm-ups, 2026-11-27, card idle; primal = the strict
+     `advance_w_phi`; the steady repeats of three interleaved runs):
 
      | damper | primal | TL | AD |
      |---|---|---|---|
-     | off (dampmag 0) | 0.36 ms | 2.4-2.7 ms (6.8-7.5x) | 3.0 ms (8.2-8.4x) |
-     | on (dampmag 0.6, zdamp 5 km) | 0.23-0.40 ms | 0.57-2.7 ms (2.5-6.8x) | 0.94-3.1 ms (4.1-7.7x) |
+     | off (dampmag 0) | 0.21 ms | 0.64-0.69 ms (3.0-3.2x) | 1.01-1.03 ms (4.8x) |
+     | on (dampmag 0.6, zdamp 5 km) | 0.245 ms | 0.65-0.71 ms (2.7-2.9x) | 1.08 ms (4.4x) |
 
-     The damper adds no measurable time to the TL or the AD (a few
-     levels of one column loop); the ratios are those of advance_w
-     itself at this size, above item 2's 200 x 200 x 49 figures.
+     The damper adds about 0.035 ms to the primal, 0.02-0.04 ms to the
+     TL and 0.06 ms to the AD (the AD recomputes the damped column and
+     then reverses it); the ratios stay within G3's ~5x.
 
 Cost is measured from item 2 on. Kernel-level AD/forward ratios are
 reported at every merge, so a G3 cost miss shows up before item 8.
