@@ -488,12 +488,31 @@ def multi_run_plan_text(jobs: Sequence[Job], option: Option) -> str:
     return "\n".join(lines)
 
 
-def invocations(option: Option, plan_path: str = "pack-plan.toml"
-                ) -> list[str]:
+#: Why one run per card with more runs than cards is not a multi-run plan.
+SERIAL_NOTE = (
+    "woof multi-run gives each run its own card at --runs-per-gpu 1 and "
+    "refuses two runs on one card (device_discovery), so it does not queue "
+    "more runs than cards; run them one after another")
+
+
+def multi_run_queues(option: Option, runs: int, gpus: int) -> bool:
+    """Whether ``woof multi-run`` runs this option as one plan: a packed
+    plan (``runs_per_gpu`` above 1) queues on admission, an unpacked one
+    needs a card per run."""
+    return option.slots > 1 or runs <= max(1, gpus)
+
+
+def invocations(option: Option, plan_path: str = "pack-plan.toml", *,
+                jobs: Sequence[Job] = (), gpus: int = 1) -> list[str]:
     mps = " --mps" if option.mps else ""
+    worker = (f"woof energy worker ... --slots-per-gpu {option.slots}{mps}  "
+              "(a hindcast queue of runs like these)")
+    if jobs and not multi_run_queues(option, len(jobs), gpus):
+        return ([f"woof go {job.config}" for job in
+                 order_jobs(jobs, option.order)]
+                + [f"(one after another: {SERIAL_NOTE})", worker])
     return [f"woof multi-run {plan_path} --runs-per-gpu {option.slots}{mps}",
-            f"woof energy worker ... --slots-per-gpu {option.slots}{mps}  "
-            "(a hindcast queue of runs like these)"]
+            worker]
 
 
 # --------------------------------------------------------------------------
@@ -570,7 +589,7 @@ def render_text(jobs: Sequence[Job], runner: Runner, opts: Sequence[Option],
             lines.append(f"  note: {job.name} could not be priced; "
                          "admission runs it alone on its card")
     lines.append("  run it with:")
-    for line in invocations(best):
+    for line in invocations(best, jobs=jobs, gpus=runner.gpus):
         lines.append(f"    {line}")
     return "\n".join(lines)
 
@@ -603,7 +622,9 @@ def main(args) -> int:
                    allow_mps=not args.no_mps,
                    margin_gib=args.mem_margin_gib)
     best, note = choose(opts, objective=args.objective, deadline_s=deadline)
-    if best is not None and args.emit_plan:
+    plan_written = (best is not None and bool(args.emit_plan)
+                    and multi_run_queues(best, len(jobs), runner.gpus))
+    if plan_written:
         Path(args.emit_plan).write_text(multi_run_plan_text(jobs, best) + "\n",
                                         encoding="utf-8")
     if args.json:
@@ -617,7 +638,9 @@ def main(args) -> int:
             "options": [o.as_dict(len(jobs)) for o in opts],
             "recommended": None if best is None else best.as_dict(len(jobs)),
             "note": note or None,
-            "invocations": [] if best is None else invocations(best),
+            "invocations": [] if best is None else invocations(
+                best, jobs=jobs, gpus=runner.gpus),
+            "plan_written": args.emit_plan if plan_written else None,
             "admission_rule": PACKED_ADMISSION_RULE,
             "mps_recommendable": mps_launchable(),
             "mps_note": None if mps_launchable() else MPS_PREFLIGHT_NOTE,
@@ -626,8 +649,10 @@ def main(args) -> int:
     else:
         print(render_text(jobs, runner, opts, best, note,
                           objective=args.objective, deadline_s=deadline))
-        if best is not None and args.emit_plan:
+        if plan_written:
             print(f"  wrote {args.emit_plan}")
+        elif best is not None and args.emit_plan:
+            print(f"  not written: {args.emit_plan}: {SERIAL_NOTE}")
     return 0 if best is not None else 1
 
 
@@ -681,6 +706,7 @@ __all__ = [
     "Option", "SCHEMA", "SEPARATION", "mps_launchable",
     "Schedule", "admit", "assign_devices", "choose", "foreign_used_bytes",
     "invocations", "job_from_estimate", "jobs_for", "multi_run_plan_text",
-    "options", "order_jobs", "register_cli", "render_text", "serial_s",
+    "SERIAL_NOTE", "multi_run_queues", "options", "order_jobs",
+    "register_cli", "render_text", "serial_s",
     "simulate", "slot_cap",
 ]

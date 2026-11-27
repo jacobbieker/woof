@@ -1099,14 +1099,14 @@ measured rows (`SHARING_ROWS`), the card's own rows first:
 | RTX A6000 | 450x360x49 (162,000 columns) | 2 / 3 / 4 | off | 2.24x / 3.37x / 4.50x |
 | RTX A6000 | 450x360x49 | 2 / 3 | on | 1.95x / 2.93x |
 | RTX A6000 | 150x120x49 (18,000 columns) | 2 / 4 / 8 | off | 2.24x / 4.51x / 9.05x |
-| RTX A6000 | 150x120x49 | 2 / 3 | on | 1.75x / 2.53x |
+| RTX A6000 | 150x120x49 | 2 / 3 / 5 | on | 1.75x / 2.53x / 4.17x |
 | RTX 4090 | streamed 1200x900x49 | 2 | off | 1.94x |
 | RTX PRO 6000 | 88x78 and 272x232 members | 4 | off | 1.08x |
 
 On the A6000, runs in separate contexts without MPS are time-sliced: each
 ran slower than its share of the card (2.24x for two), whatever the domain
 size, so packing gains only the overlap of the runs' start-up. MPS gained
-4 % (large) and 14-19 % (small) in step throughput. The RTX PRO 6000 row
+2 % (large) and 14-20 % (small) in step throughput. The RTX PRO 6000 row
 disagrees with the A6000 at four small runs; a card with no rows of its own
 is bracketed by both. A count between measured rows is interpolated, and a
 count past the last follows the measured trend at the low end and the
@@ -1154,7 +1154,23 @@ woof pack-plan member.toml --copies 8 --deadline-hours 2 --emit-plan plan.toml
   recommended order. The output also names the matching `woof energy
   worker --slots-per-gpu N` for a hindcast queue.
 
-PB_MEASURED_TABLE
+### Predicted against measured (RTX A6000)
+
+Predicted with `--card a6000 --prepared`, then run under `woof multi-run`
+from one prepared bundle, with no other compute process on the card (the
+same sweep as the sharing rows).
+
+| runs | plan | predicted makespan | measured |
+|---|---|---|---|
+| 4 x 450x360 3 km, 1 h | one at a time (recommended) | 6.4-16 min | 8.2 min |
+| 4 x 450x360 3 km, 1 h | 4 per card, MPS off | 7.2-15 min | 8.1 min |
+| 8 x 150x120 12 km, 6 h | 4 per card, MPS off (recommended) | 3.6-13 min | 3.7 min |
+| 8 x 150x120 12 km, 6 h | 8 per card, MPS off | 3.6-12 min | 3.5 min (3 % under the low end) |
+
+The rows above feed the prediction, so this table checks the simulation
+and the admission replay, not the contention model. The wide high ends
+are each run's alone bracket from `woof estimate`; `--calibrate` narrows
+them.
 
 ## Throughput reference points (all measured, RTX 5090)
 

@@ -278,3 +278,25 @@ def test_mps_launchable_reads_the_supervisors_pmon_parser(monkeypatch):
         raise supervisor.GPUPreflightError("unknown pmon type 'M+C'")
     monkeypatch.setattr(supervisor, "_parse_pmon_output", refuse)
     assert pp.mps_launchable() is False
+
+
+def test_one_per_card_with_more_runs_than_cards_is_not_a_multi_run_plan(
+        tmp_path, capsys, monkeypatch, linear):
+    jobs = [_job(n) for n in "abc"]
+    serial = next(o for o in pp.options(jobs, _runner(), max_slots=1))
+    lines = pp.invocations(serial, jobs=jobs, gpus=1)
+    assert lines[:3] == ["woof go a.toml", "woof go b.toml", "woof go c.toml"]
+    assert not pp.multi_run_queues(serial, 3, 1)
+    assert pp.multi_run_queues(serial, 2, 2)
+    assert pp.invocations(serial, jobs=jobs[:2], gpus=2)[0].startswith(
+        "woof multi-run")
+    import woof.supervisor as supervisor
+
+    monkeypatch.setattr(supervisor, "priced_reservation_bytes",
+                        lambda e: 9 * GIB)
+    cfg = _config(tmp_path, name="ens")
+    plan = tmp_path / "pack.toml"
+    args = _parse(str(cfg), "--copies", "2", "--card", "a6000",
+                  "--max-slots", "1", "--emit-plan", str(plan))
+    assert args.func(args) == 0
+    assert "not written" in capsys.readouterr().out and not plan.exists()

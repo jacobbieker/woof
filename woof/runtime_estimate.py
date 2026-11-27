@@ -957,6 +957,10 @@ SHARING_ROWS: tuple[Mapping[str, Any], ...] = (
      "per_run": 0.06927 / 0.0274,
      "source": _A6000_PACK_SMALL + "; MPS on (four launched, one refused "
                "by the GPU preflight before its first step)"},
+    {"card": "rtx-a6000", "copies": 5, "mps": True, "large": False,
+     "per_run": 0.11418 / 0.0274,
+     "source": _A6000_PACK_SMALL + "; MPS on (eight launched, three "
+               "refused by the GPU preflight before their first step)"},
 )
 
 
