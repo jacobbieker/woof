@@ -309,3 +309,50 @@ def test_the_engine_runs_the_mesh_search_only_with_the_mesh_statics():
     bad[0, 0, 0] = n
     with pytest.raises(ValueError, match="index the mesh"):
         build((bad, geometry))
+
+
+@requires_gpu
+def test_the_engine_applies_the_mesh_shadow_to_the_land_surface_flux():
+    """E2 through the engine's own seam: TopoShortwave.after_radiation runs the mesh search on the
+    run's terrain and clock, and before_land hands the land surface only the diffuse part of SWDOWN in
+    the shadowed cells (WRF's topo_rad_adj with corr_fac = diffuse_frac), the flux unchanged elsewhere
+    on flat ground."""
+    from datetime import datetime
+
+    import cupy as cp
+
+    from woof.core.topo_radiation import TopoShortwave
+
+    lat, lon, cells, counts, x, y = _patch(rows=25, cols=25)
+    n = x.size
+    shape = (1, n)
+    table, geometry = ts.shadow_statics(lat, lon, cells, counts, radius_m=RADIUS)
+    # a ring of hills 4.5 km out, 1500 m above the floor: 18 degrees up from the centre on every side
+    radius = np.hypot(x, y)
+    height = (300.0 + 1500.0 * np.exp(-((radius - 4500.0) ** 2) / (2 * 1200.0 ** 2))).astype(np.float32)
+    state = SimpleNamespace(ht=cp.asarray(height[None, :]), elapsed_seconds=0.0)
+    cfg = SimpleNamespace(nested=False, topo_shading=1, dx=3000.0, dy=3000.0, shadlen=25000.0,
+                          ra_lw_physics=1, ra_sw_physics=1, radt=30.0, radt_minutes=30.0,
+                          solar_generation="wrf_480")
+    flat = (np.zeros(shape, np.float32), np.zeros(shape, np.float32))
+    swdown = cp.full(shape, 300.0, dtype=cp.float32)
+    fields = {"swdown": swdown}
+    # 21 June, 17:00Z at 34.4N 17.2E: the sun about 8 degrees up at the interval midpoint
+    carrier = TopoShortwave(state=state, cfg=cfg, fields=fields, latitude=np.degrees(lat)[None, :],
+                            longitude=np.degrees(lon)[None, :], start_time=datetime(2025, 6, 21, 17),
+                            slope_statics=flat, shadow_mesh=(table, geometry))
+    carrier.after_radiation(SimpleNamespace(swddif=None), state, cfg)
+    coszen = cp.asnumpy(fields["topo_coszen"])[0]
+    assert 0.05 < coszen.max() < 0.25
+    mask = cp.asnumpy(fields["shadowmask"])[0]
+    centre = int(np.argmin(radius))
+    assert mask[centre] == 1 and 0 < mask.sum() < n
+    frac = cp.asnumpy(fields["diffuse_frac"])[0]
+    assert np.all(frac < 1.0)
+    save = carrier.before_land()
+    adjusted = cp.asnumpy(fields["swdown"])[0]
+    np.testing.assert_array_equal(adjusted[mask == 1],
+                                  (np.float32(300.0) * frac[mask == 1]).astype(np.float32))
+    np.testing.assert_array_equal(adjusted[mask == 0], np.float32(300.0))
+    carrier.after_land(save)
+    np.testing.assert_array_equal(cp.asnumpy(fields["swdown"]), np.float32(300.0))
