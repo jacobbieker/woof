@@ -282,7 +282,8 @@ def test_the_contract_table_lists_every_scheme():
                       ("slab", "thermal_inertia"), ("urban", "ivgtyp"),
                       ("user_aerosol", "aerosol_frames"),
                       ("user_aerosol", "aerosol_frame_offsets"),
-                      ("slope_rad", "topo_slope"), ("slope_rad", "topo_slope_azimuth")}
+                      ("slope_rad", "topo_slope"), ("slope_rad", "topo_slope_azimuth"),
+                      ("slope_rad", "topo_shadow_cells"), ("slope_rad", "topo_shadow_geometry")}
 
 
 @needs_generic_seam

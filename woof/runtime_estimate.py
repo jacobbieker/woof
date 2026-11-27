@@ -845,7 +845,7 @@ def estimate(exp, runner: Runner, *, config: str = "<config>",
     sharing = None
     if copies > 1:
         sharing = sharing_bracket(copies, columns=root.columns,
-                                  mps=runner.mps)
+                                  mps=runner.mps, card=runner.card_key)
         for phase in phases:
             if phase.name in ("model steps", "radiation steps"):
                 phase.low_s *= sharing["per_run_slowdown"][0]
@@ -910,46 +910,141 @@ def _da_phase(da: str, cycles: int, members: int,
 # --------------------------------------------------------------------------
 #: MEASURED slowdowns of one run when ``copies`` runs share a card.
 #: ``per_run`` is one run's wall against running alone.
+_A6000_RECEIPT = ("docs/public/receipts/runtime-estimate/"
+                  "a6000-packing-20261127.json")
+_A6000_PACK = (_A6000_RECEIPT + ": 450x360x49 3 km, dt 7.5 s, 480 steps "
+               "per run from one prepared bundle under `woof multi-run`, RTX "
+               "A6000, no other compute process; mean step against 0.2034 s "
+               "alone")
+_A6000_PACK_SMALL = (_A6000_RECEIPT + ": 150x120x49 12 km, dt 30 s, 720 "
+                     "steps per run from one prepared bundle under `woof "
+                     "multi-run`, RTX A6000, no other compute process; mean "
+                     "step against 0.0274 s alone")
+
+#: Measured per-run slowdowns: one run's step wall with ``copies`` runs
+#: on the card over its step wall alone.  ``large`` is the side of
+#: :data:`woof.core.pace.LAUNCH_BOUND_COLUMNS` the domain sits on.
 SHARING_ROWS: tuple[Mapping[str, Any], ...] = (
-    {"copies": 2, "mps": False, "large": True, "per_run": 22.6 / 11.66,
+    {"card": "rtx-4090", "copies": 2, "mps": False, "large": True,
+     "per_run": 22.6 / 11.66,
      "source": "woof/core/pace.py: a streamed HRRR 1200x900x49 forecast on "
                "an RTX 4090 ran 11.66 s/step alone and 22.6 s/step with a "
                "second forecast on the card"},
-    {"copies": 4, "mps": False, "large": False, "per_run": 1.0 / 0.93,
+    {"card": "rtx-pro-6000", "copies": 4, "mps": False, "large": False,
+     "per_run": 1.0 / 0.93,
      "source": "docs/public/MASS-ENSEMBLE.md: four co-resident 12-3 km "
                "members (88x78 and 272x232, 49 levels) in ordinary contexts "
                "ran 0.93x the one-member step rate, RTX PRO 6000"},
+    {"card": "rtx-a6000", "copies": 2, "mps": False, "large": True,
+     "per_run": 0.4559 / 0.2034, "source": _A6000_PACK},
+    {"card": "rtx-a6000", "copies": 3, "mps": False, "large": True,
+     "per_run": 0.6853 / 0.2034, "source": _A6000_PACK},
+    {"card": "rtx-a6000", "copies": 4, "mps": False, "large": True,
+     "per_run": 0.9156 / 0.2034, "source": _A6000_PACK},
+    {"card": "rtx-a6000", "copies": 2, "mps": True, "large": True,
+     "per_run": 0.3976 / 0.2034, "source": _A6000_PACK + "; MPS on"},
+    {"card": "rtx-a6000", "copies": 3, "mps": True, "large": True,
+     "per_run": 0.5962 / 0.2034, "source": _A6000_PACK + "; MPS on"},
+    {"card": "rtx-a6000", "copies": 2, "mps": False, "large": False,
+     "per_run": 0.06135 / 0.0274, "source": _A6000_PACK_SMALL},
+    {"card": "rtx-a6000", "copies": 4, "mps": False, "large": False,
+     "per_run": 0.12345 / 0.0274, "source": _A6000_PACK_SMALL},
+    {"card": "rtx-a6000", "copies": 8, "mps": False, "large": False,
+     "per_run": 0.2480 / 0.0274, "source": _A6000_PACK_SMALL},
+    {"card": "rtx-a6000", "copies": 2, "mps": True, "large": False,
+     "per_run": 0.0480 / 0.0274, "source": _A6000_PACK_SMALL + "; MPS on"},
+    {"card": "rtx-a6000", "copies": 3, "mps": True, "large": False,
+     "per_run": 0.06927 / 0.0274,
+     "source": _A6000_PACK_SMALL + "; MPS on (four launched, one refused "
+               "by the GPU preflight before its first step)"},
+    {"card": "rtx-a6000", "copies": 5, "mps": True, "large": False,
+     "per_run": 0.11418 / 0.0274,
+     "source": _A6000_PACK_SMALL + "; MPS on (eight launched, three "
+               "refused by the GPU preflight before their first step)"},
 )
 
 
-def sharing_bracket(copies: int, *, columns: int, mps: bool
-                    ) -> dict[str, Any]:
+def _sharing_rows(large: bool, mps: bool, card: str | None
+                  ) -> tuple[list[Mapping[str, Any]], str]:
+    """The rows that price a domain of this size class, and what was
+    given up to find them: the same card if it has rows, else any card;
+    the same MPS setting if measured, else the other (MPS on is priced
+    from rows without it, which measured slower).  A non-empty note means
+    the rows are not this card's own measurement of this setting."""
+    sized = [r for r in SHARING_ROWS if r["large"] == large]
+    note = ""
+    if not sized:
+        sized = list(SHARING_ROWS)
+        note = "no row of this size class; "
+    same_mps = [r for r in sized if r["mps"] == bool(mps)]
+    if not same_mps:
+        note += (f"MPS {'on' if mps else 'off'} unmeasured at this size, "
+                 f"priced from MPS {'off' if mps else 'on'} rows; ")
+        same_mps = sized
+    same_card = [r for r in same_mps if card and r["card"] == card]
+    if card and not same_card:
+        note += (f"no contention rows for {card}, priced from other "
+                 "cards' rows; ")
+    return (same_card or same_mps), note
+
+
+def sharing_bracket(copies: int, *, columns: int, mps: bool,
+                    card: str | None = None) -> dict[str, Any]:
     """One run's slowdown when ``copies`` runs share the card, (low, high).
 
-    The low end is the measured row for the domain's size class scaled
-    linearly in copies; the high end is ``copies`` (pure time-slicing: the
-    card does the same total work, so each run waits for the others).  A
-    copy count no row measured is labelled UNMEASURED.
+    A copy count with a row is MEASURED: the bracket spans the rows at
+    that count (this card's rows when it has any).  Between measured
+    counts it is interpolated; past the last it follows the measured
+    per-copy trend at the low end and the worst measured slowdown per
+    copy at the high end, never below pure time-slicing (``copies``), and
+    both are labelled UNMEASURED.  Measured packing has run slower than
+    time-slicing (the A6000 rows), so time-slicing is not a ceiling.
     """
     copies = max(1, int(copies))
     if copies == 1:
         return {"copies": 1, "per_run_slowdown": (1.0, 1.0),
                 "measured": True, "basis": "alone on the card"}
     large = columns >= _launch_bound()
-    rows = [r for r in SHARING_ROWS if r["large"] == large
-            and r["mps"] == bool(mps)] or [
-        r for r in SHARING_ROWS if r["large"] == large] or list(SHARING_ROWS)
-    row = min(rows, key=lambda r: abs(r["copies"] - copies))
-    per_copy_excess = (row["per_run"] - 1.0) / (row["copies"] - 1)
-    low = 1.0 + per_copy_excess * (copies - 1)
-    high = max(float(copies), low)
-    measured = row["copies"] == copies and row["mps"] == bool(mps)
-    return {"copies": copies, "per_run_slowdown": (low, high),
-            "measured": measured,
-            "basis": (f"{'MEASURED' if measured else 'UNMEASURED: scaled from'}"
-                      f" {row['copies']} runs ({row['per_run']:.2f}x each; "
-                      f"{row['source']}) at the low end; pure time-slicing "
-                      f"({copies}x) at the high end")}
+    rows, note = _sharing_rows(large, mps, card)
+    exact = [r for r in rows if r["copies"] == copies]
+    if exact and not note:
+        lo = min(r["per_run"] for r in exact)
+        hi = max(r["per_run"] for r in exact)
+        return {"copies": copies, "per_run_slowdown": (lo, hi),
+                "measured": True,
+                "basis": "MEASURED: " + "; ".join(
+                    f"{r['per_run']:.2f}x each ({r['source']})"
+                    for r in exact)}
+    by_count: dict[int, list[float]] = {1: [1.0]}
+    for r in rows:
+        by_count.setdefault(int(r["copies"]), []).append(float(r["per_run"]))
+    counts = sorted(by_count)
+    below = max(c for c in counts if c <= copies)
+    above = [c for c in counts if c >= copies]
+    if exact:
+        lo, hi = min(by_count[copies]), max(by_count[copies])
+        how = f"{note}the {copies}-run rows"
+    elif above:
+        up = min(above)
+        f = (copies - below) / (up - below)
+        lo = (min(by_count[below]) * (1 - f) + min(by_count[up]) * f)
+        hi = (max(by_count[below]) * (1 - f) + max(by_count[up]) * f)
+        how = f"{note}interpolated between the {below}- and {up}-run rows"
+    else:
+        top = max(counts)
+        trend = (min(by_count[top]) - 1.0) / (top - 1)
+        lo = 1.0 + trend * (copies - 1)
+        worst = max(max(v) / c for c, v in by_count.items())
+        hi = max(float(copies), worst * copies, lo)
+        how = (f"{note}{copies} runs is past the last measured count "
+               f"({top}): the measured per-copy trend at the low end, "
+               f"the worst measured slowdown per copy ({worst:.2f}) or pure "
+               f"time-slicing, whichever is larger, at the high end")
+    lo, hi = min(lo, hi), max(lo, hi)
+    return {"copies": copies, "per_run_slowdown": (lo, hi),
+            "measured": False,
+            "basis": f"UNMEASURED: {how}; rows: " + "; ".join(
+                sorted({r["source"] for r in rows}))}
 
 
 def admitted_copies(exp, runner: Runner, slots: int | str

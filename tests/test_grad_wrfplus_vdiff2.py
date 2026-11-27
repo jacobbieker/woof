@@ -68,6 +68,9 @@ VARIANTS = [("vu", {}), ("vu", dict(surface="ustm")), ("vu", dict(surface="cd0",
             ("vw", {}),
             ("vt", {}), ("vt", dict(heat="const", heat_flux=0.1)), ("vt", dict(heat="hfx")),
             ("vt", dict(heat="hfx", full_theta=1)),
+            # km_opt 4's theta row: smag2d_km's xkhv = 0, so the prescribed
+            # heat flux alone (interior 0)
+            ("vt", dict(interior=0, heat="const", heat_flux=0.1)),
             ("vs", {}), ("vs", dict(qflux=1, moist=1))]
 # Periodic, bounded (both axes, one), the shortest column, single-cell and
 # two-cell lines, moist density and bounded length-2 axes.
@@ -306,13 +309,16 @@ def primal(g, tr):
     bufs[slot[g.row]] = tend
     rows = None
     khv = None
-    if g.row in ("vt", "vs"):
+    # a surface-only row has no K (km_opt 4's theta: xkhv = 0, no
+    # interior scalar launch); the momentum rows still need one
+    xk = tr["xk"] if "xk" in tr else zero(nz, ny, nx)
+    if g.row in ("vt", "vs") and g.interior:
         rows, khv = [(tr["field"], tend, bool(g.full_theta))], tr["xk"]
     # every row's buffer is live (the surface kernels write ru / rv / rth
     # whatever the row); only the row under test is the trajectory's
     dycore.launch_wrf_smag2d_vertical(
-        st, cfg, tr["xk"], ru=bufs["ru"], rv=bufs["rv"], rw=bufs["rw"], rth=bufs["rth"],
-        rqv=bufs["rqv"], time_t=False, kmv=tr["xk"], khv=khv, scalar_rows=rows)
+        st, cfg, xk, ru=bufs["ru"], rv=bufs["rv"], rw=bufs["rw"], rth=bufs["rth"],
+        rqv=bufs["rqv"], time_t=False, kmv=xk, khv=khv, scalar_rows=rows)
     return tend
 for n, (key, over) in enumerate({GEOMS!r}):
     g = C.h2_geometry(rdx=float(f32(1 / dx)), rdy=float(f32(1 / dy)), **over)
@@ -430,13 +436,14 @@ out["diff"] = int(sum(int((cp.asnumpy(a) != cp.asnumpy(b)).sum()) for a, b in zi
 
 def test_geometry_rejects_unported_options():
     """Surface options on rows that have none, qflux off the moist vs row,
-    unknown surface or heat kinds and flags other than 0/1 are refused, not
-    run."""
+    unknown surface or heat kinds, flags other than 0/1 and a surface-only
+    row (interior 0) off vt or with full_theta are refused, not run."""
     from woof.grad.wrfplus import cases as C
     for over in (dict(row="vw", surface="ustm"), dict(row="vs", heat="hfx"),
                  dict(row="vt", qflux=1, moist=1), dict(row="vs", qflux=1),
                  dict(row="vu", surface="drag"), dict(row="vt", heat="flux"),
                  dict(row="vt", full_theta=2), dict(row="u", surface="cd0"),
-                 dict(row="vt", nz=2)):
+                 dict(row="vt", nz=2), dict(row="vu", interior=0),
+                 dict(row="vt", interior=0, full_theta=1), dict(row="vt", interior=2)):
         with pytest.raises(ValueError):
             C.h2_geometry(**over).validate()

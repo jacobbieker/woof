@@ -398,13 +398,45 @@ def test_total_is_the_sum_of_phases_and_low_never_exceeds_high(exp, dt,
 # ---------------------------------------------------------------- sharing
 def test_sharing_measured_row_and_unmeasured_extrapolation():
     two = rte.sharing_bracket(2, columns=1_000_000, mps=False)
-    assert two["measured"] is True
-    assert two["per_run_slowdown"][0] == pytest.approx(22.6 / 11.66)
-    three = rte.sharing_bracket(3, columns=1_000_000, mps=False)
-    assert three["measured"] is False and "UNMEASURED" in three["basis"]
-    assert three["per_run_slowdown"][1] == 3.0
+    assert two["measured"] is True and "MEASURED" in two["basis"]
+    # The 4090 streamed row and the A6000 receipt both measured two.
+    assert two["per_run_slowdown"] == (
+        pytest.approx(22.6 / 11.66), pytest.approx(0.4559 / 0.2034))
+    a6000 = rte.sharing_bracket(2, columns=1_000_000, mps=False,
+                                card="rtx-a6000")
+    assert a6000["per_run_slowdown"] == (pytest.approx(0.4559 / 0.2034),) * 2
+    six = rte.sharing_bracket(6, columns=1_000_000, mps=False,
+                              card="rtx-a6000")
+    assert six["measured"] is False and "UNMEASURED" in six["basis"]
+    lo, hi = six["per_run_slowdown"]
+    assert 6.0 <= hi and lo <= hi and lo > 4.5
     assert rte.sharing_bracket(1, columns=10, mps=False)[
         "per_run_slowdown"] == (1.0, 1.0)
+
+
+def test_sharing_interpolates_and_prices_unmeasured_mps():
+    # MPS on the A6000 was measured at two and three, not four.
+    four = rte.sharing_bracket(4, columns=1_000_000, mps=True,
+                               card="rtx-a6000")
+    assert four["measured"] is False and "past the last" in four["basis"]
+    three = rte.sharing_bracket(3, columns=1_000_000, mps=True,
+                                card="rtx-a6000")
+    assert three["measured"] is True
+    assert three["per_run_slowdown"][0] < rte.sharing_bracket(
+        3, columns=1_000_000, mps=False, card="rtx-a6000")[
+        "per_run_slowdown"][0]
+    # The RTX PRO 6000 measured four small runs only: two is interpolated
+    # between alone and four.
+    small = rte.sharing_bracket(2, columns=10_000, mps=False,
+                                card="rtx-pro-6000")
+    assert small["measured"] is False and "interpolated" in small["basis"]
+    assert 1.0 < small["per_run_slowdown"][0] <= small["per_run_slowdown"][1]
+    # Another card is priced from every card's rows: the PRO 6000's 1.08x
+    # and the A6000's 4.5x at four bracket it.
+    lo, hi = rte.sharing_bracket(4, columns=10_000, mps=False,
+                                 card="l40s")["per_run_slowdown"]
+    assert lo == pytest.approx(1.0 / 0.93)
+    assert hi == pytest.approx(0.12345 / 0.0274)
 
 
 def test_admission_caps_copies_by_priced_memory(exp, monkeypatch):
@@ -672,3 +704,12 @@ def test_estimate_json_is_serialisable(exp):
     assert doc["provenance"] in (rte.MEASURED, rte.SCALED, rte.SUBSTITUTED,
                                  rte.CALIBRATED)
 
+
+
+def test_another_cards_rows_are_a_labelled_fallback_not_a_measurement():
+    own = rte.sharing_bracket(4, columns=10_000, mps=False, card="rtx-a6000")
+    assert own["measured"] is True and own["basis"].startswith("MEASURED")
+    other = rte.sharing_bracket(4, columns=10_000, mps=False, card="l40s")
+    assert other["measured"] is False
+    assert other["basis"].startswith("UNMEASURED")
+    assert "no contention rows for l40s" in other["basis"]

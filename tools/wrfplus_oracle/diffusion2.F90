@@ -40,14 +40,28 @@
 ! (ims:ime, jms:jme) and thb on the 3-D memory.  The field (id 11) is
 ! thp (plus thb when mix_full_fields, t_base = 0), moist(P_QV) for vrow 5
 ! or scalar 2; moist(P_QV) is qv otherwise; xkmv = xkhv = xkmh = xk.
+!
+! Row 7 (item 2b-3) is a diff_opt 2 coefficient routine, its output one
+! coefficient on the 3-D memory (the words the routine leaves alone keep
+! the tendency's input word, -0.0): after the tendency it reads kc (1
+! smag2d_km, 2 calculate_N2, dry, 3 smag_km), the output (1 xkmh, 2 xkhh,
+! 3 xkmv, 4 xkhv, 5 BN2) and isotropic; dx, dy, dt, mix_upper_bound and
+! c_s; thb and BN2 on the 3-D memory.  BN2 is active field 12 (smag_km's
+! input); calculate_N2 takes theta = field + thb (the field is thp), a dry
+! moist array (n_moist 2, qv = 0, P_QC and P_QI unset) and a constant
+! temperature and pressure (280 K, 900 hPa: unsaturated), so its dry
+! branch runs.  smag_km takes defor11, defor22 and defor12 from fields
+! 5-7 and defor33, defor13 and defor23 from cal_deform_and_div of u, v
+! and w (fields 8-10); smag2d_km reads zx and zy (diff_opt 2).
 program wrfplus_diffusion2
   use module_configure, only : grid_config_rec_type
   use module_diffusion_em, only : compute_diff_metrics, cal_deform_and_div, &
        horizontal_diffusion_u_2, horizontal_diffusion_v_2, horizontal_diffusion_w_2, &
        horizontal_diffusion_s, vertical_diffusion_2
-  use module_state_description, only : P_qv, PARAM_FIRST_SCALAR
+  use module_diffusion_em, only : smag2d_km, smag_km, calculate_N2
+  use module_state_description, only : P_qv, P_qc, P_qi, PARAM_FIRST_SCALAR
   implicit none
-  integer, parameter :: nact = 11
+  integer, parameter :: nact = 12
   integer :: nx, ny, nz, iu, ou, hdr(5), flags, row, nrec, r, n, q
   integer :: ids, ide, jds, jde, kds, kde, ims, ime, jms, jme, kms, kme
   logical :: px, py, moist
@@ -63,6 +77,10 @@ program wrfplus_diffusion2
   real, allocatable, dimension(:,:) :: ust, hfx, qfx
   real, allocatable, dimension(:,:,:) :: thb, ru, rv, rw, rt, tket, thp, theta
   real, allocatable, dimension(:,:,:,:) :: mt, sct, mq, scal, chem, chemt, trac, tract
+  integer :: khdr(3), kc, kout
+  real :: ksc(5)
+  real, allocatable, dimension(:,:,:) :: xkmh, xkmv, xkhh, xkhv, kt, kp
+  real, allocatable :: kmoist(:,:,:,:)
   integer, allocatable :: fid(:), word(:)
   character(len=512) :: fin, fout
 
@@ -94,7 +112,8 @@ program wrfplus_diffusion2
   allocate(phb(ims:ime, kms:kme, jms:jme))
   read(iu) phb
   allocate(act(ims:ime, kms:kme, jms:jme, nact))
-  read(iu) act
+  act = 0
+  read(iu) act(:,:,:,1:11)
   allocate(tend0, tend, rho, z, rdz, rdzw, zx, zy, div, e11, e22, e33, e12, e13, e23, tke, &
            mold=phb)
   allocate(nba(ims:ime, kms:kme, jms:jme, 1))
@@ -113,6 +132,18 @@ program wrfplus_diffusion2
     allocate(mq(ims:ime, kms:kme, jms:jme, 2), scal(ims:ime, kms:kme, jms:jme, 2))
     allocate(chem(ims:ime, kms:kme, jms:jme, 1), chemt(ims:ime, kms:kme, jms:jme, 1))
     allocate(trac(ims:ime, kms:kme, jms:jme, 1), tract(ims:ime, kms:kme, jms:jme, 1))
+  end if
+  if (row == 7) then
+    read(iu) khdr, ksc
+    kc = khdr(1); kout = khdr(2)
+    cf%c_s = ksc(5)
+    allocate(thb, xkmh, xkmv, xkhh, xkhv, kt, kp, theta, mold=phb)
+    read(iu) thb
+    read(iu) act(:,:,:,12)
+    kt = 280.; kp = 90000.
+    P_qv = PARAM_FIRST_SCALAR; P_qc = 0; P_qi = 0
+    allocate(kmoist(ims:ime, kms:kme, jms:jme, PARAM_FIRST_SCALAR))
+    kmoist = 0
   end if
 
   open(newunit=ou, file=trim(fout), access='stream', form='unformatted', status='replace')
@@ -196,6 +227,8 @@ contains
            ids, ide, jds, jde, kds, kde)
       call fill(e13, 1, 0); call fill(e23, 0, 1)
       call vertical()
+    case (7)
+      call coefficients()
     case default
       call horizontal_diffusion_s(tend, cf, act(:,:,:,11), msft, msft, msfu, msfu, &
            msfv, msfv, act(:,:,:,4), rdx, rdy, fnm, fnp, cf1, cf2, cf3, &
@@ -204,6 +237,45 @@ contains
            ids, ide, jds, jde, kds, kde)
     end select
   end subroutine evaluate
+
+  subroutine coefficients()
+    xkmh = tend0; xkmv = tend0; xkhh = tend0; xkhv = tend0
+    select case (kc)
+    case (1)
+      call smag2d_km(cf, xkmh, xkmv, xkhh, xkhv, act(:,:,:,5), act(:,:,:,6), act(:,:,:,7), &
+           rdzw, ksc(1), ksc(2), msft, msft, zx, zy, &
+           ids, ide, jds, jde, kds, kde, ims, ime, jms, jme, kms, kme, &
+           ids, ide, jds, jde, kds, kde)
+    case (2)
+      theta = act(:,:,:,11) + thb
+      xkmh = tend0
+      call calculate_N2(cf, xkmh, kmoist, theta, kt, kp, kp, kt, dnw, dn, rdz, rdzw, &
+           PARAM_FIRST_SCALAR, cf1, cf2, cf3, .true., &
+           ids, ide, jds, jde, kds, kde, ims, ime, jms, jme, kms, kme, &
+           ids, ide, jds, jde, kds, kde)
+      tend = xkmh
+      return
+    case default
+      call cal_deform_and_div(cf, act(:,:,:,8), act(:,:,:,9), act(:,:,:,10), div, &
+           e11, e22, e33, e12, e13, e23, nba, 1, ubase, vbase, &
+           msfu, msfu, msfv, msfv, msft, msft, rdx, rdy, dn, dnw, rdz, rdzw, &
+           fnm, fnp, cf1, cf2, cf3, zx, zy, &
+           ids, ide, jds, jde, kds, kde, ims, ime, jms, jme, kms, kme, &
+           ids, ide, jds, jde, kds, kde)
+      call fill(e13, 1, 0); call fill(e23, 0, 1)
+      call smag_km(cf, xkmh, xkmv, xkhh, xkhv, act(:,:,:,12), div, act(:,:,:,5), &
+           act(:,:,:,6), e33, act(:,:,:,7), e13, e23, rdzw, ksc(1), ksc(2), ksc(3), &
+           khdr(3), ksc(4), msft, msft, &
+           ids, ide, jds, jde, kds, kde, ims, ime, jms, jme, kms, kme, &
+           ids, ide, jds, jde, kds, kde)
+    end select
+    select case (kout)
+    case (1); tend = xkmh
+    case (2); tend = xkhh
+    case (3); tend = xkmv
+    case default; tend = xkhv
+    end select
+  end subroutine coefficients
 
   subroutine vertical()
     real :: zb(kms:kme)

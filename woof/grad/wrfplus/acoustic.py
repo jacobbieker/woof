@@ -84,12 +84,30 @@ def _module(unit: str, real: str, defines: tuple = ()):
     return _device_module(unit, real, cp.cuda.Device().id, defines, tl_options())
 
 
+#: The units that take woof/core/kernels headers ahead of their own source
+#: (there is no #include under cupy.RawModule): the diffusion unit's float
+#: build evaluates REAL**REAL with the primal's libm words, gfk_pow, as
+#: kernels/__init__.py composes the smag2d module.  A literal, closed
+#: table; every other unit compiles its own source alone, except that
+#: :func:`_device_module` prepends :data:`TRIG` to advance_w's float build.
+_UNIT_HEADERS = {"diffusion": ("glibc_flt32.cuh",)}
+
+
+def unit_source(unit: str) -> str:
+    """The source a unit compiles: its headers (:data:`_UNIT_HEADERS`),
+    then ``kernels/<unit>.cu``."""
+    from woof.core.kernels import _KDIR
+    head = "".join((_KDIR / h).read_text(encoding="utf-8")
+                   for h in _UNIT_HEADERS.get(unit, ()))
+    return head + (KERNELS / f"{unit}.cu").read_text(encoding="utf-8")
+
+
 @lru_cache(maxsize=None)
 def _device_module(unit: str, real: str, device: int, defines: tuple = (),
                    build: tuple = ()):
     import cupy as cp
     from woof.certify.kernel_manifest import record_module
-    source = (KERNELS / f"{unit}.cu").read_text(encoding="utf-8")
+    source = unit_source(unit)
     if unit == "advance_w" and real == "float":
         # The strict damper's binary32 sinf (MIT-licensed Arm
         # optimized-routines transcription), so the float base state

@@ -1303,8 +1303,15 @@ BASELINE_PINNED: dict[str, str] = {
     # became correctly rounded.  Measured on W1 (RTX PRO 6000, NVRTC
     # 12.9.86): 0 of 425,468 chain values differ from WRF v4.6.1 on glibc
     # 2.43, strict and default arithmetic.
+    # Re-pinned by hex topo_shading (2026-11-26): toposhad's sun moved into
+    # tr_shadow_sun, inlined into topo_shadow_scan with the same statements
+    # in the same order, and the hex mesh scan (topo_shadow_scan_mesh)
+    # added; tests/test_topo_radiation.py's grid oracles hold bitwise on
+    # Metal and CUDA.  Re-pinned again (2026-11-27) for the mesh scan only:
+    # a cell on a limited-area mesh's edge reads its on-mesh triangles
+    # instead of ending its scan, and the nearest-cell walk is bounded by n.
     "topo_radiation":
-        'eed766ccaa9cd8e856423c407750cffb829a9e8e01c0b28c5ef91b9d16861de8',
+        'f2a5614df0125b271b093ae5c637dffc9786e60d1f5c4f4aafc21d82467f8a23',
     # Noah mosaic (sf_surface_mosaic = 1): WRF v4.7.1 lsm_mosaic and its
     # ordinary and glacial SFLX subtrees, bitwise against the byte-unmodified
     # WRF column oracle at every non-FTZ word

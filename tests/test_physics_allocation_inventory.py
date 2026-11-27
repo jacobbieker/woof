@@ -832,6 +832,10 @@ _PHYSICS_ALLOCATION_INVENTORY = {
         'after_radiation': 1,
         'before_land': 2,
         'diffuse_fraction': 1,
+        # topo_shading = 1 on a hex mesh (woof.hex.topo_shading): the same
+        # two (ncol,) outputs terrain_shadow allocates per radiation call,
+        # mask and HT_SHAD, copied into the driver's fields.
+        'mesh_terrain_shadow': 2,
         'slope_geometry': 2,
         'terrain_shadow': 2,
     },

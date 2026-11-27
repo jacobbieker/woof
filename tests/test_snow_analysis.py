@@ -219,7 +219,7 @@ def test_glacier_pixels_enter_on_the_snow_water_cap_density_kept(glacier):
 
 
 def test_cap_perennial_pixels_leaves_rasters_below_the_cap_untouched():
-    swe = np.array([[0.1, np.nan], [4.9, 5.0]])
+    swe = np.array([[0.1, np.nan], [1.9, 2.0]])
     depth = swe * 3
     out_swe, out_depth, capped = sa.cap_perennial_pixels(swe, depth)
     assert out_swe is swe and out_depth is depth
@@ -228,6 +228,6 @@ def test_cap_perennial_pixels_leaves_rasters_below_the_cap_untouched():
     deep = np.array([[30.0, np.nan], [32.767, 1.0]])
     out_swe, out_depth, capped = sa.cap_perennial_pixels(over, deep)
     assert capped.tolist() == [[True, False], [True, False]]
-    assert out_swe[0, 0] == 5.0 and out_depth[0, 0] == pytest.approx(30.0 * 5.0 / 25.0)
+    assert out_swe[0, 0] == 2.0 and out_depth[0, 0] == pytest.approx(30.0 * 2.0 / 25.0)
     assert np.isnan(out_swe[0, 1]) and np.isnan(out_depth[0, 1])
     assert out_swe[1, 1] == 0.5 and out_depth[1, 1] == 1.0
