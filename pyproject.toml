@@ -266,7 +266,7 @@ testpaths = ["tests", "tilestream"]
 [tool.pixi.workspace]
 name = "woof"
 channels = ["conda-forge"]
-platforms = ["linux-64", { subdir = "osx-arm64", macos = "14.0" }]
+platforms = ["linux-64", { platform = "osx-arm64", macos = "14.0" }]
 
 # prefix.dev's conda-to-PyPI hash mapping holds empty records for conda-forge's
 # free-threaded (cp314t) builds of these packages, so without an overlay the
