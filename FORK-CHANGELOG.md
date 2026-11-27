@@ -7,6 +7,13 @@ releases and is kept as upstream wrote it.
 
 ## Unreleased
 
+- Initial snow cap is 2000 kg m-2, not 5000: WRF 4.7.1/4.8.1 and MPAS 8.4.2
+  `NOAHMP_INIT` cap SNOW at 2000 mm (SNOWH scaled, density kept). The 5000
+  was Noah-MP's in-model glacier limit (`SWEMAXGLA`, now its own constant
+  `woof.core.noahmp_snow.SWEMAXGLA_KG_M2`), mis-cited as the init cap. Applies
+  to the WRF path (`cap_snow_water`), the SNODAS glacier-pixel cap, and hex
+  (`rw_mpas_init` caps.rs, `woof.hex.init_caps`).
+
 - `diff_metrics_seam_slope` (correct-mode finding FQ12, read where WRF's
   mixing package runs on a periodic axis): WRF's `compute_diff_metrics` leaves the top w level's slope at a
   periodic seam at zero. On (correct mode, the engine's previous

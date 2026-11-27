@@ -775,11 +775,11 @@ def test_bounded_snow_overshoot_is_repaired_at_zero_not_refused():
     fields, soil_type = _snow_case([44.5, -0.0487, 0.0])
     soil = preprocess_noah_soil(fields, soil_type=soil_type)
     # The 44.5 m maximum is 8900 kg m-2 at real.exe's 5:1 ratio, above the
-    # 5000 kg m-2 snow-water cap (woof.ingest.soil.cap_snow_water, WRF
-    # NOAHMP_INIT's ceiling), so it starts at 5000 kg m-2 and 25 m: the
+    # 2000 kg m-2 snow-water cap (woof.ingest.soil.cap_snow_water, WRF
+    # NOAHMP_INIT's ceiling), so it starts at 2000 kg m-2 and 10 m: the
     # cap scales the depth with the water and keeps the density.  It was
     # 44.5 m before the cap existed; the repaired cell is what this pins.
-    np.testing.assert_array_equal(soil.snow_depth, [[25.0, 0.0, 0.0]])
+    np.testing.assert_array_equal(soil.snow_depth, [[10.0, 0.0, 0.0]])
     assert soil.init_caps["snow"]["cells_capped"] == 1
     # SNOW follows SNOWH through real.exe's 5:1 ratio, and follows the
     # repair with it rather than carrying the negative onward.
@@ -787,9 +787,9 @@ def test_bounded_snow_overshoot_is_repaired_at_zero_not_refused():
 
     # A non-negative field below the cap is untouched: every previously
     # passing case the cap does not reach is byte-identical.
-    fields, soil_type = _snow_case([20.0, 0.0, 1.25])
+    fields, soil_type = _snow_case([8.0, 0.0, 1.25])
     soil = preprocess_noah_soil(fields, soil_type=soil_type)
-    np.testing.assert_array_equal(soil.snow_depth, [[20.0, 0.0, 1.25]])
+    np.testing.assert_array_equal(soil.snow_depth, [[8.0, 0.0, 1.25]])
     assert dict(soil.init_caps) == {}
 
 
