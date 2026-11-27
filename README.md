@@ -916,8 +916,12 @@ Notes on the 1.1.7 sync:
     `slope_rad = 1` on the WOOF column route builds SLOPE and SLP_AZI from
     the least-squares terrain plane through each cell's mesh neighbours, in
     place of WRF's grid-axis centred differences (`woof/hex/slope_statics.py`
-    documents the difference); spherical meshes only, and `topo_shading`
-    stays refused;
+    documents the difference); spherical meshes only. `topo_shading = 1`
+    runs WRF's sun and shadow test along the sun azimuth over the mesh,
+    sampling the terrain every mean neighbour spacing up to `shadlen` by
+    linear interpolation on the Voronoi cells' Delaunay triangles
+    (`woof/hex/topo_shading.py`); on a plane its mask is WRF's, on real
+    terrain it samples different points of the same surface;
   - CCPP TKE-EDMF on the column seam;
   - diagnostics: `nwp_diagnostics` maxima, `p_lev`/`z_lev` levels, `tslist`
     station series, `prec_acc_dt` windows and `acc_phy_tend`, AFWA
