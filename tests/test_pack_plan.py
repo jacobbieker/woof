@@ -165,13 +165,20 @@ def test_metal_has_no_mps_option():
     assert not any(o.mps for o in pp.options(jobs, m3, max_slots=2))
 
 
-def test_longest_first_beats_a_bad_order_on_two_cards(linear):
+def test_longest_first_beats_a_bad_order_on_one_card_with_two_slots(linear):
+    # Device assignment is longest-first whatever the order, so order only
+    # matters in a card's queue: with two slots, the two short runs
+    # sharing first leave the long one to finish alone after them
+    # (15 + 100 s); the long one first shares with one short run, then
+    # the other (110 s).
     jobs = [_job("s1", gpu=10.0, fixed=0.0), _job("s2", gpu=10.0, fixed=0.0),
             _job("long", gpu=100.0, fixed=0.0)]
-    runner = _runner(gpus=2)
-    lpt = pp.simulate(jobs, runner=runner, slots=1, mps=False,
+    bad = pp.simulate(jobs, runner=_runner(), slots=2, mps=False,
+                      order="as-given")
+    lpt = pp.simulate(jobs, runner=_runner(), slots=2, mps=False,
                       order="longest-first")
-    assert lpt.makespan_s == pytest.approx(100.0)
+    assert bad.makespan_s == pytest.approx(115.0)
+    assert lpt.makespan_s == pytest.approx(110.0)
 
 
 def test_emitted_plan_loads_in_multi_run(tmp_path, linear):
@@ -371,3 +378,20 @@ def test_a_streamed_run_is_priced_as_pure_time_slicing(monkeypatch):
     alone = pp.simulate(jobs, runner=_runner(), slots=1, mps=False)
     assert packed.admitted and packed.makespan_s == pytest.approx(
         alone.makespan_s)
+
+
+def test_every_printed_command_line_is_copy_pasteable(linear):
+    import shlex
+
+    jobs = [_job(n) for n in "abc"]
+    for runner, js, slots in ((_runner(gpus=2), jobs, 1),
+                              (_runner(), jobs, 1), (_runner(), jobs, 2)):
+        opt = next(o for o in pp.options(js, runner, max_slots=slots)
+                   if o.slots == slots)
+        for plan in (None, "p lan.toml"):
+            for line in pp.invocations(opt, plan, jobs=js,
+                                       gpus=runner.gpus):
+                if line.startswith("#"):
+                    continue
+                shlex.split(line)  # balanced quoting
+                assert "(" not in line and "..." not in line

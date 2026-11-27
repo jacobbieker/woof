@@ -518,8 +518,8 @@ def invocations(option: Option, plan_path: str | None = None, *,
     import shlex
 
     mps = " --mps" if option.mps else ""
-    worker = (f"woof energy worker ... --slots-per-gpu {option.slots}{mps}  "
-              "(a hindcast queue of runs like these)")
+    worker = ("# for a hindcast queue of runs like these: woof energy "
+              f"worker ... --slots-per-gpu {option.slots}{mps}")
     if jobs and not multi_run_queues(option, len(jobs), gpus):
         # One queue per card, as simulate() runs them: the cards in
         # parallel, each card's runs one after another.
@@ -533,8 +533,8 @@ def invocations(option: Option, plan_path: str | None = None, *,
                                 for j in per_card[card])
             lines.append(f"CUDA_VISIBLE_DEVICES={card} sh -c "
                          f"{shlex.quote(chain)} &")
-        return lines + [f"wait  ({SERIAL_NOTE}; one queue per card, the "
-                        "cards in parallel)", worker]
+        return lines + ["wait", f"# {SERIAL_NOTE}; one queue per card, "
+                        "the cards in parallel", worker]
     plan = shlex.quote(plan_path) if plan_path else NO_PLAN
     return [f"woof multi-run {plan} --runs-per-gpu {option.slots}{mps}",
             worker]
