@@ -55,6 +55,11 @@ from woof.runner_cards import CUDA, GIB, Runner, RunnerSpecError
 SCHEMA = "woof.pack-plan.v1"
 OBJECTIVES = ("makespan", "throughput")
 ORDERS = ("as-given", "longest-first")
+#: Exit codes: 0 a recommendation (meeting the deadline, if one was
+#: given); 1 admission refuses every option; 2 a usage or input error; 3 a
+#: recommendation is shown but no option meets ``--deadline-hours``.
+EXIT_REFUSED = 1
+EXIT_DEADLINE_MISSED = 3
 #: Two options whose predicted makespans (or throughputs) differ by less
 #: than this are not separated by the prediction: the session-to-session
 #: variance measured on one box is up to 1.30x (SESSION_VARIANCE), so 5 %
@@ -518,14 +523,21 @@ NO_PLAN = "<PLAN.toml: not written; re-run with --emit-plan PLAN.toml>"
 
 
 def invocations(option: Option, plan_path: str | None = None, *,
-                jobs: Sequence[Job] = (), gpus: int = 1) -> list[str]:
+                jobs: Sequence[Job] = (), gpus: int = 1,
+                margin_gib: float | None = None) -> list[str]:
     """What to type.  ``plan_path`` is the plan file written, or ``None``
-    when none was (the command then names an obvious placeholder)."""
+    when none was (the command then names an obvious placeholder).
+    ``margin_gib`` is the card-memory margin the prediction was made
+    with; a packed command carries it when it is not multi-run's own."""
     import shlex
+    from woof.gpu_packing import DEFAULT_MEM_MARGIN_GIB
 
     mps = " --mps" if option.mps else ""
+    margin = ("" if margin_gib is None or option.slots <= 1
+              or float(margin_gib) == float(DEFAULT_MEM_MARGIN_GIB)
+              else f" --mem-margin-gib {float(margin_gib):g}")
     worker = ("# for a hindcast queue of runs like these: woof energy "
-              f"worker ... --slots-per-gpu {option.slots}{mps}")
+              f"worker ... --slots-per-gpu {option.slots}{mps}{margin}")
     if jobs and not multi_run_queues(option, len(jobs), gpus):
         # One queue per card, as simulate() runs them: the cards in
         # parallel, each card's runs one after another.
@@ -542,8 +554,8 @@ def invocations(option: Option, plan_path: str | None = None, *,
         return lines + ["wait", f"# {SERIAL_NOTE}; one queue per card, "
                         "the cards in parallel", worker]
     plan = shlex.quote(plan_path) if plan_path else NO_PLAN
-    return [f"woof multi-run {plan} --runs-per-gpu {option.slots}{mps}",
-            worker]
+    return [f"woof multi-run {plan} --runs-per-gpu {option.slots}{mps}"
+            f"{margin}", worker]
 
 
 # --------------------------------------------------------------------------
@@ -552,7 +564,8 @@ def invocations(option: Option, plan_path: str | None = None, *,
 def render_text(jobs: Sequence[Job], runner: Runner, opts: Sequence[Option],
                 best: Option | None, note: str, *, objective: str,
                 deadline_s: float | None,
-                plan_path: str | None = None) -> str:
+                plan_path: str | None = None,
+                margin_gib: float | None = None) -> str:
     from woof.runtime_estimate import fmt_duration
 
     def span(pair):
@@ -612,7 +625,7 @@ def render_text(jobs: Sequence[Job], runner: Runner, opts: Sequence[Option],
                          "admission runs it alone on its card")
     lines.append("  run it with:")
     for line in invocations(best, plan_path, jobs=jobs,
-                           gpus=runner.gpus):
+                           gpus=runner.gpus, margin_gib=margin_gib):
         lines.append(f"    {line}")
     return "\n".join(lines)
 
@@ -654,8 +667,13 @@ def main(args) -> int:
     plan_written = (best is not None and bool(args.emit_plan)
                     and multi_run_queues(best, len(jobs), runner.gpus))
     if plan_written:
-        Path(args.emit_plan).write_text(multi_run_plan_text(jobs, best) + "\n",
-                                        encoding="utf-8")
+        try:
+            Path(args.emit_plan).write_text(
+                multi_run_plan_text(jobs, best) + "\n", encoding="utf-8")
+        except OSError as error:
+            print(f"woof pack-plan: cannot write {args.emit_plan}: {error}",
+                  file=sys.stderr)
+            return 2
     emitted = str(args.emit_plan) if plan_written else None
     if args.json:
         from woof.multi_run import PACKED_ADMISSION_RULE
@@ -669,7 +687,10 @@ def main(args) -> int:
             "recommended": None if best is None else best.as_dict(len(jobs)),
             "note": note or None,
             "invocations": [] if best is None else invocations(
-                best, emitted, jobs=jobs, gpus=runner.gpus),
+                best, emitted, jobs=jobs, gpus=runner.gpus,
+                margin_gib=args.mem_margin_gib),
+            "deadline_met": None if deadline is None or best is None
+            else not note,
             "plan_written": args.emit_plan if plan_written else None,
             "admission_rule": PACKED_ADMISSION_RULE,
         }
@@ -677,12 +698,14 @@ def main(args) -> int:
     else:
         print(render_text(jobs, runner, opts, best, note,
                           objective=args.objective, deadline_s=deadline,
-                          plan_path=emitted))
+                          plan_path=emitted, margin_gib=args.mem_margin_gib))
         if plan_written:
             print(f"  wrote {args.emit_plan}")
         elif best is not None and args.emit_plan:
             print(f"  not written: {args.emit_plan}: {SERIAL_NOTE}")
-    return 0 if best is not None else 1
+    if best is None:
+        return EXIT_REFUSED
+    return EXIT_DEADLINE_MISSED if deadline is not None and note else 0
 
 
 def register_cli(subparsers):
@@ -719,7 +742,10 @@ def register_cli(subparsers):
                         "throughput: most runs per hour")
     p.add_argument("--deadline-hours", type=float, default=None,
                    metavar="H", help="every run must finish within H hours "
-                                     "of the start (judged at the high end)")
+                                     "of the start (judged at the high end); "
+                                     "exits 3 if no option does (1: "
+                                     "admission refuses every option, 2: "
+                                     "usage or input error)")
     p.add_argument("--prepared", action="store_true",
                    help="the runs' inputs are already prepared")
     p.add_argument("--emit-plan", type=Path, default=None, metavar="PLAN",

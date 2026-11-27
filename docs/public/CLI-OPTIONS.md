@@ -2920,7 +2920,7 @@ Takes no options of its own.
 |---|---|
 | `--card, --gpu NAME` | plan for this card from woof estimate's table instead of this box's |
 | `--copies N` | N runs of each CONFIG (ensemble members, a hindcast batch) |
-| `--deadline-hours H` | every run must finish within H hours of the start (judged at the high end) |
+| `--deadline-hours H` | every run must finish within H hours of the start (judged at the high end); exits 3 if no option does (1: admission refuses every option, 2: usage or input error) |
 | `--emit-plan PLAN` | write the recommended multi-run plan here |
 | `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
 | `--gpus N` | cards on the runner (default: detected, else 1) |

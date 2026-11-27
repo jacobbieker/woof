@@ -419,3 +419,52 @@ def test_unknown_card_memory_is_refused_with_a_message(
     assert args.func(args) == 2
     err = capsys.readouterr().err
     assert "memory is unknown" in err and "--card" in err
+
+
+def test_printed_packed_commands_carry_a_non_default_margin(linear):
+    import shlex
+
+    jobs = [_job(n) for n in "ab"]
+    opt = next(o for o in pp.options(jobs, _runner(), max_slots=2,
+                                     allow_mps=False) if o.slots == 2)
+    lines = pp.invocations(opt, "p.toml", jobs=jobs, margin_gib=4.0)
+    assert lines[0].endswith("--runs-per-gpu 2 --mem-margin-gib 4")
+    assert lines[1].endswith("--slots-per-gpu 2 --mem-margin-gib 4")
+    assert shlex.split(lines[0])[-2:] == ["--mem-margin-gib", "4"]
+    assert "--mem-margin-gib" not in pp.invocations(
+        opt, "p.toml", jobs=jobs, margin_gib=1.0)[0]
+    assert "--mem-margin-gib" not in pp.invocations(
+        opt, "p.toml", jobs=jobs)[0]
+
+
+@pytest.mark.parametrize("as_json", [False, True])
+def test_unmet_deadline_exits_3(tmp_path, capsys, monkeypatch, as_json):
+    import woof.supervisor as supervisor
+
+    monkeypatch.setattr(supervisor, "priced_reservation_bytes",
+                        lambda e: 9 * GIB)
+    cfg = _config(tmp_path, name="ens")
+    argv = [str(cfg), "--card", "a6000", "--max-slots", "2",
+            "--deadline-hours", "0.0001"] + (["--json"] if as_json else [])
+    args = _parse(*argv)
+    assert args.func(args) == pp.EXIT_DEADLINE_MISSED == 3
+    out = capsys.readouterr().out
+    if as_json:
+        assert json.loads(out)["deadline_met"] is False
+    args = _parse(str(cfg), "--card", "a6000", "--max-slots", "2",
+                  "--deadline-hours", "1000")
+    assert args.func(args) == 0
+
+
+def test_emit_plan_to_a_missing_directory_is_a_clean_error(
+        tmp_path, capsys, monkeypatch):
+    import woof.supervisor as supervisor
+
+    monkeypatch.setattr(supervisor, "priced_reservation_bytes",
+                        lambda e: 9 * GIB)
+    cfg = _config(tmp_path, name="ens")
+    args = _parse(str(cfg), "--copies", "2", "--card", "a6000",
+                  "--max-slots", "2", "--emit-plan",
+                  str(tmp_path / "nope" / "p.toml"))
+    assert args.func(args) == 2
+    assert "cannot write" in capsys.readouterr().err
