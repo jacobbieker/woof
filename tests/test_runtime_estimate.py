@@ -146,6 +146,10 @@ def test_the_asked_cards_are_in_the_table():
     ("NVIDIA GeForce RTX 4090", "rtx-4090"),
     ("NVIDIA A100-SXM4-80GB", "a100-80gb"),
     ("Apple M3 Max", "m3-max"),
+    ("NVIDIA RTX PRO 6000 Blackwell Server Edition", "rtx-pro-6000"),
+    ("NVIDIA RTX PRO 6000 Blackwell Workstation Edition", "rtx-pro-6000"),
+    ("RTX PRO 6000", "rtx-pro-6000"),
+    ("rtxpro6000", "rtx-pro-6000"),
 ])
 def test_card_spellings_resolve(spelling, key):
     assert card_for(spelling).key == key

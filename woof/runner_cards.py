@@ -122,8 +122,11 @@ RUNNER_CARDS: Mapping[str, RunnerCard] = MappingProxyType({
               97_887, 1792.0, 188, None, None, "PCIe 5.0 x16",
               f"{_NV} (RTX PRO 6000 Blackwell); capacity and SMs as "
               "woof/hex/device_admission.py KNOWN_CARDS measured",
-              "rtxpro6000", "pro6000", "rtxpro6000blackwell",
-              "rtxpro6000blackwellserveredition"),
+              "rtxpro6000", "pro6000", "RTX PRO 6000 Blackwell",
+              # nvidia-smi's names; spaced, so "RTX" drops as it does
+              # from the spelling being looked up.
+              "RTX PRO 6000 Blackwell Server Edition",
+              "RTX PRO 6000 Blackwell Workstation Edition"),
         # -- datacentre NVIDIA (capacities as woof.card_catalog) ----------
         _card("l4", "NVIDIA L4 24GB", CUDA, 23_034, 300.0, 58, 30.3, None,
               "PCIe 4.0 x16", f"{_NV} (L4)", "l424gb"),
