@@ -25,7 +25,7 @@ The rules, the same on every route:
   coupling, the MPAS-Seaice ``ice_velocity_at_cell`` without the
   velocity solver's pools) it stays off; the WRF route's run receipt
   lists such a finding as uncorrected (woof.correct_mode.uncorrected).
-* On the WRF route the RunConfig keys are correct-mode findings FQ1-FQ8 and FQ12
+* On the WRF route the RunConfig keys are correct-mode findings FQ1-FQ8, FQ11 and FQ12
   of woof.correct_mode: their defaults are ``CORRECT_KEYS_DEFAULT``,
   exact mode authors them off with every other correct-mode key, and the
   checkpoint echo binds one only where it is on and read.
@@ -132,6 +132,10 @@ CORRECTIONS: tuple[QuirkCorrection, ...] = (
         "the MYNN surface layer caps its 2 m mixing ratio at 1.05 times the lowest level over land only, as the surface driver does, not over water",
         # the gsl_wrf39 fork is another source: nothing to correct
         active=lambda get: int(get("sf_sfclay_physics")) == 5 and get("mynn_sfclay_variant") == "wrf_461"),
+    QuirkCorrection(
+        "kf_capped_downdraft_rain_floor", "wrf", False, True, "cu_physics = 1, 10 or 11",
+        "Kain-Fritsch, KF-CuP and MSKF floor the capped downdraft's precipitation flux at zero, so convective rain is never negative",
+        active=lambda get: int(get("cu_physics")) in (1, 10, 11)),
     QuirkCorrection(
         "diff_metrics_seam_slope", "wrf", False, True, "diff_opt = 1 or 2",
         "the diffusion metrics take the true terrain slope at a periodic axis's seam on the top w level, "
