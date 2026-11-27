@@ -1804,6 +1804,17 @@ Notes on the 1.1.7 sync:
   anchors are named runs with receipts. `--calibrate N` times N steps on
   this box and remembers the result, and `woof go`'s forecast heartbeat now
   shows an ETA ([docs/public/HARDWARE.md](docs/public/HARDWARE.md#how-long-a-run-takes-woof-estimate)).
+- **Packing runs onto cards (`woof pack-plan`).** Takes one or more
+  configurations, or N copies of one, and a runner. It recommends runs
+  per card, MPS on or off, and the order, with every option's predicted
+  makespan against one run at a time and the `woof multi-run` /
+  `woof energy worker` command to run it. Every option goes through
+  multi-run's own admission (priced memory, margin, slot and CPU caps), so
+  it never recommends a packing admission would refuse. Contention comes
+  from measured rows: on an RTX A6000, two to eight runs sharing the card
+  without MPS each ran 2.2-9.1x slower, so packing gains only start-up
+  overlap there. MPS options compete on their measured makespan like the
+  others ([docs/public/HARDWARE.md](docs/public/HARDWARE.md#packing-runs-onto-cards-woof-pack-plan)).
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`
