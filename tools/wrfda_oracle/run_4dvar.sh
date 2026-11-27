@@ -9,7 +9,10 @@
 #        per-slot H' are all that is left, the gate for woof's
 #        transfer4d (4D.1) and FourDObsTerm (4D.2).
 #   l1   adiabatic: no physics in the nonlinear, TL or AD model
-#        (mp/cu/bl/ra/sfclay/surface 0, diff_opt 0).
+#        (mp/cu/bl/ra/sfclay/surface 0, diff_opt 0), and the dynamics P3a's
+#        window covers (damp_opt 0, emdiv 0, moist_adv_opt 0, mp_zero_out 0;
+#        before 4D.4 the lane kept WRF's defaults 3, 0.01, 1 and the
+#        namelist's 2).
 #   l0   the tutorial's namelist as shipped (warm rain, PBL 98, CU 98).
 #
 # Every lane: hybrid_opt = 0 and use_theta_m = 0 (the testdata are
@@ -104,6 +107,12 @@ if lane == "l1":
     # WRFPLUS has no cu/bl_pbl _ad keys: its simplified TL/AD PBL and
     # cumulus (98) follow cu_physics / bl_pbl_physics being non-zero
     want["dynamics"]["diff_opt"] = "0"
+    # and the dynamics P3a's window covers (woof/grad/wrfplus/model.py
+    # _refuse): no Rayleigh w damping (damp_opt 3, WRF's default), no
+    # external-mode filter (emdiv 0.01), the non-positive-definite moist
+    # advection (moist_adv_opt 0); mp_zero_out 0 so nothing clips qv
+    want["dynamics"].update({"damp_opt": "0", "emdiv": "0", "moist_adv_opt": "0"})
+    want["physics"]["mp_zero_out"] = "0"
 lines = open(src).read().splitlines()
 out, group, seen = [], None, set()
 for line in lines:
