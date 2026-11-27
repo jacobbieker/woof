@@ -2011,27 +2011,55 @@ static __device__ __forceinline__ Dl h2_theta(const H2Src& s, int k, int j, int 
 // wrf_calc_n2, dry (no saturated branch, qv = qtot = 0, their zero terms
 // kept as the primal forms them): the centred interior, the MARTA surface
 // form and BN2(ktf) = BN2(ktf-1); zero on a bounded axis's outer row.
-static __device__ Dl h2_n2(const H2Src& s, int k, int j, int i)
+// As a function of six pieces (the AD's h2_n2_lin; each a stored word):
+// 0 theta(ke + 1), 1 theta(ke - 1) (ke > 0), 2 theta(ke), 3 and 4 rdz(ke),
+// rdz(ke + 1) (ke > 0), 5 rdzw(0) (ke = 0).
+static __device__ __forceinline__ int h2_n2_ke(const H2Src& s, int k)
 {
-    if (h2_outer(s, j, i)) return dl((wreal)0, (wreal)0);
-    int ke = (k == s.nz - 1 && s.nz > 1) ? s.nz - 2 : k;
-    Dl th_c = h2_theta(s, ke, j, i);
+    return (k == s.nz - 1 && s.nz > 1) ? s.nz - 2 : k;
+}
+
+static __device__ void h2_n2_pieces(const H2Src& s, int ke, int j, int i, Dl* p)
+{
+    Dl zero = dl((wreal)0, (wreal)0);
+    p[2] = h2_theta(s, ke, j, i);
+    if (ke > 0) {
+        p[3] = h2_rdz(s, ke, j, i);
+        p[4] = h2_rdz(s, ke + 1, j, i);
+        p[0] = h2_theta(s, ke + 1, j, i);
+        p[1] = h2_theta(s, ke - 1, j, i);
+        p[5] = zero;
+    } else {
+        p[0] = h2_theta(s, 1, j, i);
+        p[5] = h2_rw(s, 0, j, i);
+        p[1] = p[3] = p[4] = zero;
+    }
+}
+
+static __device__ Dl h2_n2_f(const H2Src& s, int ke, const Dl* p)
+{
     Dl zero = dl((wreal)0, (wreal)0);
     if (ke > 0) {
-        Dl tmpdz = (wreal)1.0f / h2_rdz(s, ke, j, i) + (wreal)1.0f / h2_rdz(s, ke + 1, j, i);
-        Dl th_p = h2_theta(s, ke + 1, j, i);
-        Dl th_m = h2_theta(s, ke - 1, j, i);
-        return DF_G * (((((th_p - th_m) / th_c) / tmpdz)
+        Dl tmpdz = (wreal)1.0f / p[3] + (wreal)1.0f / p[4];
+        return DF_G * (((((p[0] - p[1]) / p[2]) / tmpdz)
                         + (((wreal)1.61 * (zero - zero)) / tmpdz))
                        - ((zero - zero) / tmpdz));
     }
-    Dl th_p = h2_theta(s, 1, j, i);
     wreal z = (wreal)0;
     wreal qvsfc = ((s.cf1 * z) + (s.cf2 * z)) + (s.cf3 * z);
-    Dl tmpdz = (wreal)1.0f / h2_rw(s, 0, j, i);
-    return DF_G * (((((th_p - th_c) / th_c) / tmpdz)
+    Dl tmpdz = (wreal)1.0f / p[5];
+    return DF_G * (((((p[0] - p[2]) / p[2]) / tmpdz)
                     + (((wreal)1.61 * dl(z - qvsfc, (wreal)0)) / tmpdz))
                    - ((zero - zero) / tmpdz));
+}
+
+static __device__ Dl h2_n2(const H2Src& s, int k, int j, int i)
+{
+    if (h2_outer(s, j, i)) return dl((wreal)0, (wreal)0);
+    int ke = h2_n2_ke(s, k);
+    Dl p[6];
+    h2_n2_pieces(s, ke, j, i, p);
+    return h2_n2_f(s, ke, p);
 }
 
 // wrf_smag3d_km (the GPUWM_WRF_EXACT_C_DIFFUSION statements) then
@@ -3843,20 +3871,75 @@ extern "C" __global__ void h2_n2_tl(const wreal* __restrict__ thp,
     if (WRFPLUS_TL) bn2d[t] = r.d;
 }
 
-extern "C" __global__ void h2_n2_ad(const wreal* __restrict__ abn2,
-                                    const wreal* __restrict__ thp,
-                                    const wreal* __restrict__ thb,
-                                    const wreal* __restrict__ rdz,
-                                    const wreal* __restrict__ rdzw, wreal* __restrict__ athp,
-                                    wreal* __restrict__ ardz, wreal* __restrict__ ardzw, H2_GEOM)
+// calculate_N2's AD, first pass: one thread per mass point, BN2's
+// adjoint onto its six pieces (h2_n2_pieces) in P's blocks 0-5 (zero on
+// the outer rows; every word written).
+extern "C" __global__ void h2_n2_lin(const wreal* __restrict__ abn2,
+                                     const wreal* __restrict__ thp,
+                                     const wreal* __restrict__ thb,
+                                     const wreal* __restrict__ rdz,
+                                     const wreal* __restrict__ rdzw, wreal* __restrict__ P,
+                                     H2_GEOM)
 {
-    H2Src s = h2_src(H2_GARGS, 0);
+    H2Src s = h2_src(H2_GARGS, 2);
     s.f = s.fd = thp; s.thb = thb; s.rz = s.rzd = rdz; s.rw = s.rwd = rdzw;
     size_t t = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
-    int q;
-    size_t at;
-    wreal acc;
-    if (!h2_ad_word(s, H2S_N2, t, abn2, abn2, abn2, abn2, &q, &at, &acc)) return;
+    if (t >= (size_t)nz * ny * nx) return;
+    unsigned u = (unsigned)t, r = u / (unsigned)nx;
+    int i = (int)(u - r * (unsigned)nx), j = (int)(r % (unsigned)ny), k = (int)(r / (unsigned)ny);
+    size_t pst = h2_pstride(s);
+    wreal a = abn2[t];
+    bool live = a != (wreal)0 && !h2_outer(s, j, i);
+    int ke = h2_n2_ke(s, k);
+    Dl p[6];
+    if (live) h2_n2_pieces(s, ke, j, i, p);
+    for (int q = 0; q < 6; ++q) {
+        wreal g = (wreal)0;
+        if (live) {
+            Dl x[6];
+            for (int c = 0; c < 6; ++c) x[c] = dl(p[c].v, c == q ? (wreal)1 : (wreal)0);
+            g = a * h2_n2_f(s, ke, x).d;
+        }
+        P[(size_t)q * pst + t] = g;
+    }
+}
+
+// calculate_N2's AD gather: each word of theta, rdz, rdzw from the points
+// of its column whose pieces are that word (coefficient 1).
+extern "C" __global__ void h2_n2p_ad(const wreal* __restrict__ P, wreal* __restrict__ athp,
+                                     wreal* __restrict__ ardz, wreal* __restrict__ ardzw,
+                                     H2_GEOM)
+{
+    H2Src s = h2_src(H2_GARGS, 2);
+    size_t t = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    size_t pst = h2_pstride(s);
+    size_t m = (size_t)nz * ny * nx, m2 = (size_t)ny * nx;
+    int q = t < m ? 0 : (t < 2 * m + m2 ? 1 : 2);
+    size_t at = q == 0 ? t : (q == 1 ? t - m : t - 2 * m - m2);
+    if (q == 2 && at >= m) return;
+    unsigned c = (unsigned)(at % m2);
+    int lw = (int)(at / m2);
+    wreal acc = (wreal)0;
+    int cand[4] = {lw - 1, lw, lw + 1, nz - 1};
+    for (int e = 0; e < 4; ++e) {
+        int k = cand[e];
+        if (k < 0 || k >= nz) continue;
+        bool seen = false;
+        for (int f = 0; f < e; ++f) seen = seen || cand[f] == k;
+        if (seen) continue;
+        int ke = h2_n2_ke(s, k);
+        size_t pt = (size_t)k * m2 + c;
+        if (q == 0) {
+            if (lw == ke + 1) acc = acc + P[pt];
+            if (ke > 0 && lw == ke - 1) acc = acc + P[pst + pt];
+            if (lw == ke) acc = acc + P[2 * pst + pt];
+        } else if (q == 1) {
+            if (ke > 0 && lw == ke) acc = acc + P[3 * pst + pt];
+            if (ke > 0 && lw == ke + 1) acc = acc + P[4 * pst + pt];
+        } else if (ke == 0 && lw == 0) {
+            acc = acc + P[5 * pst + pt];
+        }
+    }
     wreal* out = q == 0 ? athp : q == 1 ? ardz : ardzw;
     out[at] = out[at] + acc;
 }

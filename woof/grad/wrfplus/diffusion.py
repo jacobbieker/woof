@@ -942,10 +942,13 @@ def n2_ad(adj_state, traj, adj, geom: KCGeometry):
     A = _kc_zeros(geom, dtype)
     m = geom.nz * geom.ny * geom.nx
     n = 2 * m + int(np.prod(T["rdz"].shape))
-    _kernel("h2_n2_ad", dtype)(
-        _blocks(n), (THREADS,),
-        (adj_state["bn2"], traj["thp"], traj["thb"], T["rdz"], T["rdzw"], adj["thp"],
-         A["rdz"], A["rdzw"]) + geom.h2().args(dtype))
+    P = _pieces(geom, 6, dtype)
+    _kernel("h2_n2_lin", dtype)(
+        _blocks(m), (THREADS,),
+        (adj_state["bn2"], traj["thp"], traj["thb"], T["rdz"], T["rdzw"], P)
+        + geom.h2().args(dtype))
+    _kernel("h2_n2p_ad", dtype)(
+        _blocks(n), (THREADS,), (P, adj["thp"], A["rdz"], A["rdzw"]) + geom.h2().args(dtype))
     _kc_met_ad(traj, adj, A, geom)
     _kc_consume(adj_state, N2_STATE, geom)
 
