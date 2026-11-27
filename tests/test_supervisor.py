@@ -566,7 +566,7 @@ def test_pmon_malformed_pid_with_mps_type_still_fails_closed():
         _parse_pmon_output("0 - M+C - - - - - - 5 0 python\n")
 
 
-def test_mps_preflight_tolerates_own_daemon_and_still_prices_foreign_compute(
+def test_mps_preflight_exempts_only_token_carrying_siblings(
         monkeypatch, tmp_path):
     import woof.supervisor as supervisor
 
@@ -579,41 +579,69 @@ def test_mps_preflight_tolerates_own_daemon_and_still_prices_foreign_compute(
     own = tmp_path / "pipe"
     own.mkdir()
     other = tmp_path / "other-pipe"
-    pipe_of = {3108601: str(own), 3108653: str(own), 3108800: str(own),
-               3108700: str(other), 3108701: None}
-    monkeypatch.setattr(supervisor, "_process_mps_pipe_directory",
-                        lambda pid: pipe_of.get(pid))
+    token = "tok-1"
+    # 3108601 sibling (token); 3108653 SAME pipe dir but no token (an
+    # unrelated client of the same/external daemon); 3108700 another daemon.
+    envs = {
+        3108601: {"CUDA_MPS_PIPE_DIRECTORY": str(own),
+                  supervisor.MPS_PACK_TOKEN_ENV: token},
+        3108653: {"CUDA_MPS_PIPE_DIRECTORY": str(own)},
+        3108800: {"CUDA_MPS_PIPE_DIRECTORY": str(own)},
+        3108700: {"CUDA_MPS_PIPE_DIRECTORY": str(other),
+                  supervisor.MPS_PACK_TOKEN_ENV: token},
+    }
+    monkeypatch.setattr(
+        supervisor, "_process_environ_value",
+        lambda pid, name: envs.get(pid, {}).get(name))
     monkeypatch.setattr(supervisor, "select_gpu", lambda uuid: gpu)
     monkeypatch.setattr(
         supervisor, "query_compute_processes", lambda uuid: processes)
     monkeypatch.setattr(supervisor, "_ADMISSION_WARNED", set())
     _priced_device(monkeypatch)
-
-    # Under our MPS daemon: siblings and the MPS server are tolerated, the
-    # foreign plain-C process is still the (only) priced co-tenant.
     monkeypatch.setenv("CUDA_MPS_PIPE_DIRECTORY", str(own))
-    receipt = preflight_exclusive_gpu(gpu.uuid, reservation_bytes=2 ** 30)
-    assert "pid=3999999" in receipt["cotenants"]
-    for pid in (3108601, 3108653, 3108800):
-        assert f"pid={pid} " not in receipt["cotenants"]
-    with pytest.raises(GPUPreflightError, match="pid=3999999"):
+    monkeypatch.setenv(supervisor.MPS_PACK_TOKEN_ENV, token)
+    monkeypatch.delenv(supervisor.MPS_OWNED_DAEMON_ENV, raising=False)
+
+    def cotenants():
+        return preflight_exclusive_gpu(
+            gpu.uuid, reservation_bytes=2 ** 30)["cotenants"]
+
+    # External/adopted daemon (not owned): the token sibling is exempt; the
+    # untokened same-pipe client, the server and the foreign C are priced.
+    out = cotenants()
+    assert "pid=3108601 " not in out
+    for pid in (3108653, 3108800, 3999999):
+        assert f"pid={pid} " in out
+    with pytest.raises(GPUPreflightError, match="pid=3108653"):
         preflight_exclusive_gpu(gpu.uuid, reservation_bytes=30 * 2 ** 30)
 
-    # Without our daemon nothing is a sibling: the M+C clients and the MPS
-    # server are compute co-tenants like any other.
-    monkeypatch.delenv("CUDA_MPS_PIPE_DIRECTORY")
-    receipt = preflight_exclusive_gpu(gpu.uuid, reservation_bytes=2 ** 30)
-    for pid in (3108601, 3108653, 3108800, 3999999):
-        assert f"pid={pid} " in receipt["cotenants"]
+    # Daemon this multi-run started: its server is exempt too, the
+    # untokened same-pipe client and foreign C are still co-tenants.
+    monkeypatch.setenv(supervisor.MPS_OWNED_DAEMON_ENV, "1")
+    out = cotenants()
+    assert "pid=3108800 " not in out and "pid=3108601 " not in out
+    assert "pid=3108653 " in out and "pid=3999999 " in out
 
-    # A client of ANOTHER daemon (different pipe dir) is foreign even with
-    # ours set; M+G and M (no compute) are never co-tenants.
-    monkeypatch.setenv("CUDA_MPS_PIPE_DIRECTORY", str(own))
-    pipe_of[3108601] = str(other)
-    receipt = preflight_exclusive_gpu(gpu.uuid, reservation_bytes=2 ** 30)
-    assert "pid=3108601 " in receipt["cotenants"]
+    # No token (not a packed MPS child): nothing is a sibling.
+    monkeypatch.delenv(supervisor.MPS_PACK_TOKEN_ENV)
+    out = cotenants()
+    for pid in (3108601, 3108653, 3108800, 3999999):
+        assert f"pid={pid} " in out
+
+    # Wrong token / another daemon's client stay co-tenants; M+G, M and
+    # M+C+G (graphics) are never co-tenants.
+    monkeypatch.setenv(supervisor.MPS_PACK_TOKEN_ENV, "tok-other")
+    out = cotenants()
+    assert "pid=3108601 " in out and "pid=3108700 " not in out
     for pid in (3108700, 3108701, 3108702):
-        assert f"pid={pid} " not in receipt["cotenants"]
+        assert f"pid={pid} " not in out
+
+
+def test_multi_run_stamps_token_into_children_and_daemon_ownership():
+    import inspect
+    import woof.multi_run as multi_run
+    src = inspect.getsource(multi_run)
+    assert "MPS_PACK_TOKEN_ENV" in src and "MPS_OWNED_DAEMON_ENV" in src
 
 
 def test_stale_threshold_is_three_p99_with_120_second_floor():

@@ -1303,7 +1303,7 @@ def _pmon_is_pure_compute(process_type: str | None) -> bool:
     return "C" in letters and "G" not in letters
 
 
-MPS_SERVER_NAME = "nvidia-cuda-mps-server"
+MPS_SERVER_NAME = "nvidia-cuda-mps"
 
 
 def _process_mps_pipe_directory(pid: int) -> str | None:
@@ -1319,18 +1319,48 @@ def _process_mps_pipe_directory(pid: int) -> str | None:
     return None
 
 
-def _own_mps_sibling(process: "GPUProcess") -> bool:
-    """True for a process of this run's own MPS daemon.
+#: Per-multi-run token ``woof multi-run --mps`` stamps into every child it
+#: launches (and so every client priced by its packed admission).
+MPS_PACK_TOKEN_ENV = "WOOF_MPS_PACK_TOKEN"
+#: Set to ``1`` in those children only when the multi-run itself started
+#: the MPS daemon (not an adopted external one).
+MPS_OWNED_DAEMON_ENV = "WOOF_MPS_DAEMON_OWNED"
 
-    That is this run's sibling MPS clients (``M+C`` rows) and the
-    ``nvidia-cuda-mps-server`` that multiplexes them: both are started
-    under the pipe directory this process was given, and a packed
-    multi-run's admission has already priced them.  Anything that cannot be
-    shown to share the pipe directory (another daemon, no MPS here, an
-    unreadable /proc entry) is NOT ours and stays a co-tenant.
+
+def _process_environ_value(pid: int, name: str) -> str | None:
+    """One variable from /proc/<pid>/environ, None when unreadable/absent."""
+    try:
+        raw = Path(f"/proc/{pid}/environ").read_bytes()
+    except OSError:
+        return None
+    prefix = name.encode() + b"="
+    for entry in raw.split(b"\0"):
+        if entry.startswith(prefix):
+            return os.fsdecode(entry[len(prefix):])
+    return None
+
+
+def _process_mps_pipe_directory(pid: int) -> str | None:
+    """The ``CUDA_MPS_PIPE_DIRECTORY`` a process was started with, if readable."""
+    return _process_environ_value(pid, "CUDA_MPS_PIPE_DIRECTORY")
+
+
+def _own_mps_sibling(process: "GPUProcess") -> bool:
+    """True only for what this packed multi-run launched and priced.
+
+    * An MPS client (``M`` in its type) is a sibling when its environment
+      carries this process's :data:`MPS_PACK_TOKEN_ENV` and the same pipe
+      directory.  A client of the same daemon without the token (another
+      user's job on an adopted or system daemon) is a co-tenant.
+    * ``nvidia-cuda-mps-server`` is exempt only when this multi-run started
+      the daemon (:data:`MPS_OWNED_DAEMON_ENV`) and the server runs under
+      this pipe directory; the server of an adopted daemon stays priced.
+
+    Anything unreadable or unmatched is NOT ours.
     """
     own = os.environ.get("CUDA_MPS_PIPE_DIRECTORY")
-    if not own:
+    token = os.environ.get(MPS_PACK_TOKEN_ENV)
+    if not own or not token:
         return False
     is_client = (process.process_type is not None
                  and "M" in process.process_type.split("+"))
@@ -1338,7 +1368,11 @@ def _own_mps_sibling(process: "GPUProcess") -> bool:
     if not (is_client or is_server):
         return False
     theirs = _process_mps_pipe_directory(process.pid)
-    return theirs is not None and os.path.realpath(theirs) == os.path.realpath(own)
+    if theirs is None or os.path.realpath(theirs) != os.path.realpath(own):
+        return False
+    if is_client:
+        return _process_environ_value(process.pid, MPS_PACK_TOKEN_ENV) == token
+    return os.environ.get(MPS_OWNED_DAEMON_ENV) == "1"
 
 
 def _parse_pmon_output(output: str) -> dict[int, tuple[str, int | None]]:
