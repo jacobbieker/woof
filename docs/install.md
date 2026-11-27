@@ -119,8 +119,9 @@ re-run keeps an existing `.venv` and warns when it has the lock; remove
 conda-forge's free-threaded CPython 3.14t: `default` (CUDA 13), `cuda12`,
 `mlx` (Apple silicon) and `cpu` (Linux and macOS). Each one has a twin on
 the standard CPython 3.14 build, which holds the GIL: `default-gil`,
-`cuda12-gil`, `mlx-gil` and `cpu-gil`. The twins lock exactly the packages
-the environments of the same name locked before the switch.
+`cuda12-gil`, `mlx-gil` and `cpu-gil`. A twin locks the same package
+versions as its free-threaded environment; only the interpreter build and
+the builds compiled against it differ.
 
 ```bash
 pixi install                    # default: CUDA 13 on 3.14t
@@ -161,7 +162,7 @@ pixi install -e cpu-gil         # the standard-CPython twin
   library and archive directories are read under a lock.
   `woof.backend.metal.ext.load()` builds and loads the launcher once, even
   when several threads ask for it at once. It builds against MLX 0.32.4
-  (`mlx-gil`) and 0.32.5 (`mlx`), which renamed the
+  and 0.32.5 (which both `mlx` and `mlx-gil` lock), and 0.32.5 renamed the
   `mlx/backend/common/metal_kernel.h` header.
 - The `libradtran` and `mpas-oracle` oracle environments are unchanged. They
   pin Python 3.11 for conda-forge's builds, and woof never imports them.

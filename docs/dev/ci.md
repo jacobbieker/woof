@@ -34,7 +34,9 @@ cache on. `cpu`, `mlx` and `default` run on free-threaded CPython 3.14t with
 `PYTHON_GIL=0`; only the `interpreter` job also runs the standard-CPython
 twin, `cpu-gil`. The pixi version is `PIXI_VERSION` in `tests.yml` (0.85.0),
 and the lock must be written by that version or one that writes the same
-lock. The helper scripts are in `.github/ci/`.
+lock. `publish-metal.yml` still pins 0.81.0; 0.81 reads the lock only while
+its virtual-package lines read `__unix=0=0` (0.85 writes `__unix=0`, which
+0.81 treats as stale and re-solves), so keep that spelling until it moves. The helper scripts are in `.github/ci/`.
 
 The file is named `tests.yml` and not `ci.yml` on purpose. Several tools and
 tests in this tree describe the engine's own `ci.yml`

@@ -9,8 +9,11 @@ releases and is kept as upstream wrote it.
 
 - The Pixi model environments (`default`, `cuda12`, `mlx`, `cpu`) run on
   free-threaded CPython 3.14t (conda-forge) and set `PYTHON_GIL=0`. The
-  standard-CPython environments keep their locked packages under
-  `default-gil`, `cuda12-gil`, `mlx-gil` and `cpu-gil`. The Metal launcher
+  standard-CPython environments become `default-gil`, `cuda12-gil`,
+  `mlx-gil` and `cpu-gil`, each locking the same package versions as its
+  free-threaded twin. The lock is upgraded with pixi 0.85.0 (for example
+  NumPy 2.5.5, SciPy 1.18.1, zarr 3.4.2, icechunk 2.4.0, MLX 0.32.5); the
+  `libradtran` and `mpas-oracle` oracle environments are unchanged. The Metal launcher
   builds with nanobind's `FREE_THREADED` option, guards its shared state, and
   builds against MLX 0.32.5's renamed kernel header, so `mlx` takes MLX
   0.32.5. A CI `interpreter` job checks `cpu` and `cpu-gil`. See
