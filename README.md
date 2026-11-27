@@ -737,8 +737,13 @@ Notes on the 1.1.7 sync:
   imports under the 4.8.1 Registry, which has the same keys and defaults as
   4.8.0's. The scheme fixes in 4.8.1 are being ported one family at a time.
   Until a family lands, a run receipt that says `"4.8.1"` also lists the
-  changes the engine does not run yet (`wrf_reference_pending`). Noah-MP
-  5.2.2 stays excluded on licence grounds.
+  changes the engine does not run yet (`wrf_reference_pending`). Of the 42
+  dycore, advection, nesting and diffusion oracle lanes, 23 are re-pinned to
+  4.8.1 with their fixtures as they are: no routine they exercise differs
+  from their 4.6.1, 4.7.1 or 4.8.0 pin (`tools/wrf481_source/lanes-v4.8.1.json`,
+  built by `python -m tools.wrf481_source.lanes`). The other 19 wait for the
+  port that changes their words. Noah-MP 5.2.2 stays excluded on licence
+  grounds.
 - **Corrections of WRF/MPAS quirks, on by default (correct mode).**
   Each key changes only the arithmetic it names, where its scheme runs.
   Exact mode turns every one off, so the run is the WRF 4.7.1 / MPAS v8.4.2
