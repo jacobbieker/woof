@@ -1502,8 +1502,10 @@ Notes on the 1.1.7 sync:
   1e-14, WRFPLUS `g_/a_advance_w` and `g_/a_calc_p_rho` to about 1e-15,
   and the float build reproduces the strict primal's words, with map
   factors too (`advance_w_phi_msf`, against WRFPLUS with msftx = msfty =
-  msft). The w damper
-  (`damp_opt=3`) is refused, since WRFPLUS has none. `calc_coef_w`
+  msft). The `damp_opt=3` implicit w damper is linearised too (heights
+  from the geopotential, the column mass and WRF's w_save active),
+  matching WRFPLUS's own damper to 1e-12; the step TL/AD runs with it,
+  but not with the fork's `noaa_wrf39` upper-wind limiter. `calc_coef_w`
   (woof's `calc_coefs`: c2a and the implicit w factors) matches WRFPLUS
   `g_/a_calc_coef_w` to about 1e-15. `advance_mu_t` (woof's
   `advance_mu_th` and the specified-frame mu/theta/muts update) matches
