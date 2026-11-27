@@ -1433,18 +1433,25 @@ static __device__ __forceinline__ Dl h2_wavg(const H2Src& s, int kw, Dl upper, D
     return (wreal)0.5 * ((s.fnm[kw] * upper) + (s.fnp[kw] * lower));
 }
 
-static __device__ Dl h2_row_u(const H2Src& s, int k, int j, int i)
+// The rows as functions of six pieces (the AD's stage ROWP; the primal's
+// statements in its order).  u and v: 0 tmpdz, 1 and 2 the zx and zy
+// averages, 3 divh, 4 and 5 the first and second terms' vertical stress
+// differences; w and scalars: 0 and 1 the zx and zy averages, 2 rdz
+// (rdzw), 3 divh, 4 and 5 the s1 and s2 vertical differences.
+#define ROWP_N 6
+
+static __device__ void h2_row_u_p(const H2Src& s, int k, int j, int i, Dl* p, wreal* msf_out)
 {
     int ic = h2_ix(s, i), im = h2_ix(s, i - 1), iu = h2_iu(s, i), jj = h2_iy(s, j);
     wreal msf = s.msfu[(size_t)jj * (s.nx + 1) + iu];
-    Dl tmpdz = (wreal)0.5 * (((wreal)1 / h2_rdzw(s, k, j, ic)) + ((wreal)1 / h2_rdzw(s, k, j, im)));
-    Dl zxu = (wreal)0.5 * (h2_zx(s, k, j, i) + h2_zx(s, k + 1, j, i));
-    Dl zyu = (wreal)0.125 * (((((((h2_zy(s, k, j, im) + h2_zy(s, k, j, ic))
-                                  + h2_zy(s, k, j + 1, im)) + h2_zy(s, k, j + 1, ic))
-                                + h2_zy(s, k + 1, j, im)) + h2_zy(s, k + 1, j, ic))
-                              + h2_zy(s, k + 1, j + 1, im)) + h2_zy(s, k + 1, j + 1, ic));
-    Dl divh = ((msf * s.rdx) * (h2_ta(s, k, j, ic) - h2_ta(s, k, j, im)))
-              + ((msf * s.rdy) * (h2_t12(s, k, j + 1, i) - h2_t12(s, k, j, i)));
+    p[0] = (wreal)0.5 * (((wreal)1 / h2_rdzw(s, k, j, ic)) + ((wreal)1 / h2_rdzw(s, k, j, im)));
+    p[1] = (wreal)0.5 * (h2_zx(s, k, j, i) + h2_zx(s, k + 1, j, i));
+    p[2] = (wreal)0.125 * (((((((h2_zy(s, k, j, im) + h2_zy(s, k, j, ic))
+                                + h2_zy(s, k, j + 1, im)) + h2_zy(s, k, j + 1, ic))
+                              + h2_zy(s, k + 1, j, im)) + h2_zy(s, k + 1, j, ic))
+                            + h2_zy(s, k + 1, j + 1, im)) + h2_zy(s, k + 1, j + 1, ic));
+    p[3] = ((msf * s.rdx) * (h2_ta(s, k, j, ic) - h2_ta(s, k, j, im)))
+           + ((msf * s.rdy) * (h2_t12(s, k, j + 1, i) - h2_t12(s, k, j, i)));
     Dl a11[2], a12[2];
     for (int q = 0; q < 2; ++q) {
         int kw = k + 1 - q;
@@ -1458,23 +1465,23 @@ static __device__ Dl h2_row_u(const H2Src& s, int k, int j, int i)
         a12[q] = h2_wavg(s, kw, h2_t12(s, kw, j + 1, i) + h2_t12(s, kw, j, i),
                          h2_t12(s, kw - 1, j + 1, i) + h2_t12(s, kw - 1, j, i));
     }
-    Dl first = ((msf * zxu) * (a11[0] - a11[1])) / tmpdz;
-    Dl second = ((msf * zyu) * (a12[0] - a12[1])) / tmpdz;
-    return ((DF_G * tmpdz) / s.dnw[k]) * ((divh - first) - second);
+    p[4] = a11[0] - a11[1];
+    p[5] = a12[0] - a12[1];
+    *msf_out = msf;
 }
 
-static __device__ Dl h2_row_v(const H2Src& s, int k, int j, int i)
+static __device__ void h2_row_v_p(const H2Src& s, int k, int j, int i, Dl* p, wreal* msf_out)
 {
     int jc = h2_iy(s, j), jm = h2_iy(s, j - 1), jv = h2_jv(s, j), ii = h2_ix(s, i);
     wreal msf = s.msfv[(size_t)jv * s.nx + ii];
-    Dl tmpdz = (wreal)0.5 * (((wreal)1 / h2_rdzw(s, k, jc, i)) + ((wreal)1 / h2_rdzw(s, k, jm, i)));
-    Dl zxv = (wreal)0.125 * (((((((h2_zx(s, k, jc, i) + h2_zx(s, k, jc, i + 1))
-                                  + h2_zx(s, k, jm, i)) + h2_zx(s, k, jm, i + 1))
-                                + h2_zx(s, k + 1, jc, i)) + h2_zx(s, k + 1, jc, i + 1))
-                              + h2_zx(s, k + 1, jm, i)) + h2_zx(s, k + 1, jm, i + 1));
-    Dl zyv = (wreal)0.5 * (h2_zy(s, k, j, i) + h2_zy(s, k + 1, j, i));
-    Dl divh = ((msf * s.rdy) * (h2_ta(s, k, jc, i) - h2_ta(s, k, jm, i)))
-              + ((msf * s.rdx) * (h2_t12(s, k, j, i + 1) - h2_t12(s, k, j, i)));
+    p[0] = (wreal)0.5 * (((wreal)1 / h2_rdzw(s, k, jc, i)) + ((wreal)1 / h2_rdzw(s, k, jm, i)));
+    p[1] = (wreal)0.125 * (((((((h2_zx(s, k, jc, i) + h2_zx(s, k, jc, i + 1))
+                                + h2_zx(s, k, jm, i)) + h2_zx(s, k, jm, i + 1))
+                              + h2_zx(s, k + 1, jc, i)) + h2_zx(s, k + 1, jc, i + 1))
+                            + h2_zx(s, k + 1, jm, i)) + h2_zx(s, k + 1, jm, i + 1));
+    p[2] = (wreal)0.5 * (h2_zy(s, k, j, i) + h2_zy(s, k + 1, j, i));
+    p[3] = ((msf * s.rdy) * (h2_ta(s, k, jc, i) - h2_ta(s, k, jm, i)))
+           + ((msf * s.rdx) * (h2_t12(s, k, j, i + 1) - h2_t12(s, k, j, i)));
     Dl a12[2], a22[2];
     for (int q = 0; q < 2; ++q) {
         int kw = k + 1 - q;
@@ -1488,9 +1495,33 @@ static __device__ Dl h2_row_v(const H2Src& s, int k, int j, int i)
         a22[q] = h2_wavg(s, kw, h2_ta(s, kw, j - 1, i) + h2_ta(s, kw, j, i),
                          h2_ta(s, kw - 1, j - 1, i) + h2_ta(s, kw - 1, j, i));
     }
-    Dl first = ((msf * zxv) * (a12[0] - a12[1])) / tmpdz;
-    Dl second = ((msf * zyv) * (a22[0] - a22[1])) / tmpdz;
-    return ((DF_G * tmpdz) / s.dnw[k]) * ((divh - first) - second);
+    p[4] = a12[0] - a12[1];
+    p[5] = a22[0] - a22[1];
+    *msf_out = msf;
+}
+
+// the u and v rows of their pieces
+static __device__ Dl h2_row_uv_f(const H2Src& s, int k, wreal msf, const Dl* p)
+{
+    Dl first = ((msf * p[1]) * p[4]) / p[0];
+    Dl second = ((msf * p[2]) * p[5]) / p[0];
+    return ((DF_G * p[0]) / s.dnw[k]) * ((p[3] - first) - second);
+}
+
+static __device__ Dl h2_row_u(const H2Src& s, int k, int j, int i)
+{
+    Dl p[ROWP_N];
+    wreal msf;
+    h2_row_u_p(s, k, j, i, p, &msf);
+    return h2_row_uv_f(s, k, msf, p);
+}
+
+static __device__ Dl h2_row_v(const H2Src& s, int k, int j, int i)
+{
+    Dl p[ROWP_N];
+    wreal msf;
+    h2_row_v_p(s, k, j, i, p, &msf);
+    return h2_row_uv_f(s, k, msf, p);
 }
 
 // the w row's stresses, stored on (nz + 1) w levels at the faces
@@ -1503,15 +1534,14 @@ static __device__ __forceinline__ Dl h2_t23(const H2Src& s, int kw, int j, int i
     return h2_in(s, H2_S2, s.s2, s.s2d, R3(kw, j, i, s.ny + 1, s.nx));
 }
 
-static __device__ Dl h2_row_w(const H2Src& s, int kw, int j, int i)
+static __device__ void h2_row_w_p(const H2Src& s, int kw, int j, int i, Dl* p)
 {
-    if (kw <= 0 || kw >= s.nz) return dl((wreal)0, (wreal)0);
     wreal map = s.msft[(size_t)j * s.nx + i];
-    Dl zxw = (wreal)0.5 * (h2_zx(s, kw, j, i) + h2_zx(s, kw, j, i + 1));
-    Dl zyw = (wreal)0.5 * (h2_zy(s, kw, j, i) + h2_zy(s, kw, j + 1, i));
-    Dl rz = h2_rdz(s, kw, j, i);
-    Dl divh = ((map * s.rdx) * (h2_t13(s, kw, j, i + 1) - h2_t13(s, kw, j, i)))
-              + ((map * s.rdy) * (h2_t23(s, kw, j + 1, i) - h2_t23(s, kw, j, i)));
+    p[0] = (wreal)0.5 * (h2_zx(s, kw, j, i) + h2_zx(s, kw, j, i + 1));
+    p[1] = (wreal)0.5 * (h2_zy(s, kw, j, i) + h2_zy(s, kw, j + 1, i));
+    p[2] = h2_rdz(s, kw, j, i);
+    p[3] = ((map * s.rdx) * (h2_t13(s, kw, j, i + 1) - h2_t13(s, kw, j, i)))
+           + ((map * s.rdy) * (h2_t23(s, kw, j + 1, i) - h2_t23(s, kw, j, i)));
     Dl m13[2], m23[2];
     for (int q = 0; q < 2; ++q) {
         int k = kw - q;
@@ -1520,8 +1550,23 @@ static __device__ Dl h2_row_w(const H2Src& s, int kw, int j, int i)
         m23[q] = (wreal)0.25 * (((h2_t23(s, k + 1, j + 1, i) + h2_t23(s, k + 1, j, i))
                                  + h2_t23(s, k, j + 1, i)) + h2_t23(s, k, j, i));
     }
-    Dl divz = (map * rz) * ((zxw * (m13[0] - m13[1])) + (zyw * (m23[0] - m23[1])));
-    return (DF_G / (s.dn[kw] * rz)) * (divh - divz);
+    p[4] = m13[0] - m13[1];
+    p[5] = m23[0] - m23[1];
+}
+
+static __device__ Dl h2_row_w_f(const H2Src& s, int kw, int j, int i, const Dl* p)
+{
+    wreal map = s.msft[(size_t)j * s.nx + i];
+    Dl divz = (map * p[2]) * ((p[0] * p[4]) + (p[1] * p[5]));
+    return (DF_G / (s.dn[kw] * p[2])) * (p[3] - divz);
+}
+
+static __device__ Dl h2_row_w(const H2Src& s, int kw, int j, int i)
+{
+    if (kw <= 0 || kw >= s.nz) return dl((wreal)0, (wreal)0);
+    Dl p[ROWP_N];
+    h2_row_w_p(s, kw, j, i, p);
+    return h2_row_w_f(s, kw, j, i, p);
 }
 
 // the scalar fluxes, read as wrf_fx / wrf_fy
@@ -1534,16 +1579,16 @@ static __device__ __forceinline__ Dl h2_fy(const H2Src& s, int k, int j, int i)
     return h2_in(s, H2_S2, s.s2, s.s2d, R3(k, h2_jv(s, j), h2_ix(s, i), s.ny + 1, s.nx));
 }
 
-static __device__ Dl h2_row_s(const H2Src& s, int k, int j, int i)
+static __device__ void h2_row_s_p(const H2Src& s, int k, int j, int i, Dl* p)
 {
     wreal map = s.msft[(size_t)j * s.nx + i];
-    Dl zxm = (wreal)0.25 * (((h2_zx(s, k, j, i) + h2_zx(s, k, j, i + 1)) + h2_zx(s, k + 1, j, i))
-                            + h2_zx(s, k + 1, j, i + 1));
-    Dl zym = (wreal)0.25 * (((h2_zy(s, k, j, i) + h2_zy(s, k, j + 1, i)) + h2_zy(s, k + 1, j, i))
-                            + h2_zy(s, k + 1, j + 1, i));
-    Dl rz = h2_rdzw(s, k, j, i);
-    Dl divh = ((map * s.rdx) * (h2_fx(s, k, j, i + 1) - h2_fx(s, k, j, i)))
-              + ((map * s.rdy) * (h2_fy(s, k, j + 1, i) - h2_fy(s, k, j, i)));
+    p[0] = (wreal)0.25 * (((h2_zx(s, k, j, i) + h2_zx(s, k, j, i + 1)) + h2_zx(s, k + 1, j, i))
+                          + h2_zx(s, k + 1, j, i + 1));
+    p[1] = (wreal)0.25 * (((h2_zy(s, k, j, i) + h2_zy(s, k, j + 1, i)) + h2_zy(s, k + 1, j, i))
+                          + h2_zy(s, k + 1, j + 1, i));
+    p[2] = h2_rdzw(s, k, j, i);
+    p[3] = ((map * s.rdx) * (h2_fx(s, k, j, i + 1) - h2_fx(s, k, j, i)))
+           + ((map * s.rdy) * (h2_fy(s, k, j + 1, i) - h2_fy(s, k, j, i)));
     Dl m1[2], m2[2];
     for (int q = 0; q < 2; ++q) {
         int kw = k + 1 - q;
@@ -1557,9 +1602,43 @@ static __device__ Dl h2_row_s(const H2Src& s, int k, int j, int i)
         m2[q] = h2_wavg(s, kw, h2_fy(s, kw, j + 1, i) + h2_fy(s, kw, j, i),
                         h2_fy(s, kw - 1, j + 1, i) + h2_fy(s, kw - 1, j, i));
     }
-    Dl first = ((map * zxm) * (m1[0] - m1[1])) * rz;
-    Dl second = ((map * zym) * (m2[0] - m2[1])) * rz;
-    return (DF_G / (s.dnw[k] * rz)) * ((divh - first) - second);
+    p[4] = m1[0] - m1[1];
+    p[5] = m2[0] - m2[1];
+}
+
+static __device__ Dl h2_row_s_f(const H2Src& s, int k, int j, int i, const Dl* p)
+{
+    wreal map = s.msft[(size_t)j * s.nx + i];
+    Dl first = ((map * p[0]) * p[4]) * p[2];
+    Dl second = ((map * p[1]) * p[5]) * p[2];
+    return (DF_G / (s.dnw[k] * p[2])) * ((p[3] - first) - second);
+}
+
+static __device__ Dl h2_row_s(const H2Src& s, int k, int j, int i)
+{
+    Dl p[ROWP_N];
+    h2_row_s_p(s, k, j, i, p);
+    return h2_row_s_f(s, k, j, i, p);
+}
+
+// the horizontal row's pieces at (k, j, i) (false where the row is zero:
+// the w row's end levels) and the row of its pieces
+static __device__ bool h2_row_pieces(const H2Src& s, int k, int j, int i, Dl* p, wreal* msf)
+{
+    *msf = (wreal)0;
+    if (s.row == 1) h2_row_u_p(s, k, j, i, p, msf);
+    else if (s.row == 2) h2_row_v_p(s, k, j, i, p, msf);
+    else if (s.row == 3) {
+        if (k <= 0 || k >= s.nz) return false;
+        h2_row_w_p(s, k, j, i, p);
+    } else h2_row_s_p(s, k, j, i, p);
+    return true;
+}
+static __device__ Dl h2_row_f(const H2Src& s, int k, int j, int i, wreal msf, const Dl* p)
+{
+    if (s.row == 1 || s.row == 2) return h2_row_uv_f(s, k, msf, p);
+    if (s.row == 3) return h2_row_w_f(s, k, j, i, p);
+    return h2_row_s_f(s, k, j, i, p);
 }
 
 // ---- the vertical rows (wrf_smag_vd_u / _v / _w / _s and the surface
