@@ -106,6 +106,12 @@ class FirstGuess:
     fields: dict
     attrs: dict
     times: str
+    #: 4D-Var outer loops: the boundary-table perturbation of the loop that
+    #: made this analysis (``WindowModel.boundary_increment``, its tables'
+    #: names and layout), which WRFDA adds to the tables the next loop's
+    #: nonlinear run reads (da_transfer_xatowrf.inc:665-727).  None
+    #: elsewhere.
+    lbc_increment: dict | None = None
 
     def __getitem__(self, k):
         return self.fields[k]
@@ -705,6 +711,17 @@ def _analyse_var4d(b, fg, xb, grid, obs, fgat, proj, window, var4d, *, max_ext_i
         wrf = xatowrf(grid0, xb0, xa, check_rh=check_rh, var4d=True)
         last.update(xa=xa, wrf=wrf)
         state = _analysis_state(start, wrf) if it < max_ext_its else None
+        if state is not None and callable(getattr(var4d.model, "boundary_increment", None)):
+            # da_transfer_xatowrf.inc:665-727: the last TL call's table
+            # perturbation (da_minimise_cg.inc:258, this loop's xhat) joins
+            # the tables; the TL model's now, the nonlinear run's from
+            # state.lbc_increment (a run sharing the model's window has it)
+            from . import transfer4d as t4
+            x0 = {k: np.asarray(xa[k], dtype=np.float64) for k in ("u", "v", "t", "q", "psfc")}
+            inc = var4d.model.boundary_increment(t4.xa_to_tl(x0, xb0, grid0, press=var4d.press, ph=var4d.ph))
+            if inc:
+                var4d.model.add_boundary_increment(inc)
+                state.lbc_increment = inc
         clock["transfer_s"] += time.perf_counter() - t
         return state
 
