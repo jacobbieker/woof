@@ -172,3 +172,62 @@ def test_unpublished_newest_analysis_falls_back_to_the_previous_one(cached, monk
     assert receipt["analysis_time"] == "2023-04-27T06Z"
     assert "404" in receipt["newer_analyses_unreadable"][0]
     assert out["SNOW"].max() == pytest.approx(500.0)
+
+
+@pytest.fixture
+def glacier(tmp_path, monkeypatch):
+    """The 2026-11-06 Mount Rainier shape: a summit block of glacier pixels
+    at the 2-byte ceiling (32 767 mm, depth likewise) and an apron at
+    25 000 mm, in seasonal snow of 500 mm."""
+    monkeypatch.setenv("WOOF_SNOW_ANALYSIS_CACHE", str(tmp_path))
+    monkeypatch.delenv("WOOF_SNOW_ANALYSIS", raising=False)
+    swe = np.full((30, 40), 500, np.int16)
+    swe[12:18, 3:9] = 25000
+    swe[14:17, 4:7] = 32767
+    depth = np.full((30, 40), 1000, np.int16)
+    depth[12:18, 3:9] = 30000
+    depth[14:17, 4:7] = 32767
+    (tmp_path / "snodas-conus").mkdir()
+    _tar(tmp_path / "snodas-conus" / "SNODAS_20230427.tar", swe, depth)
+    return tmp_path
+
+
+def test_glacier_pixels_enter_on_the_snow_water_cap_density_kept(glacier):
+    from woof.ingest.soil import (SNOW_WATER_CAP_KG_M2, _SNOW_WATER_CEILING_KG_M2,
+                                  _admitted_snow_field)
+
+    lat, lon = _grid()
+    snow = np.full(lat.shape, 0.2, np.float32)
+    out, receipt = sa.apply_snow_analysis({"SNOW": snow, "SNOWH": snow * np.float32(0.005)},
+                                          context=_context(lat, lon),
+                                          landmask=np.ones(lat.shape))
+    # Cell (0, 0)'s footprint is all summit pixels: exactly the cap, and the
+    # pixel density (32 767 / 32 767 -> 1000 kg m-3) is kept, not invented.
+    assert out["SNOW"][0, 0] == SNOW_WATER_CAP_KG_M2
+    assert out["SNOWH"][0, 0] == pytest.approx(SNOW_WATER_CAP_KG_M2 / 1000.0)
+    assert out["SNOW"].max() <= SNOW_WATER_CAP_KG_M2
+    # Seasonal snow off the glacier is untouched.
+    assert out["SNOW"][:, -1] == pytest.approx(500.0)
+    assert receipt["perennial_cap_cells"] > 0
+    assert receipt["perennial_raw_max_kg_m2"] == pytest.approx(32767.0)
+    # The preparation's plausibility ceiling now admits the field; before
+    # the cap the summit cell carried 32 767 kg m-2 and was refused.
+    admitted = _admitted_snow_field("snow water", out["SNOW"], lat.shape,
+                                    _SNOW_WATER_CEILING_KG_M2, "kg m-2",
+                                    land_ice=np.zeros(lat.shape, bool))
+    assert admitted.max() == SNOW_WATER_CAP_KG_M2
+
+
+def test_cap_perennial_pixels_leaves_rasters_below_the_cap_untouched():
+    swe = np.array([[0.1, np.nan], [4.9, 5.0]])
+    depth = swe * 3
+    out_swe, out_depth, capped = sa.cap_perennial_pixels(swe, depth)
+    assert out_swe is swe and out_depth is depth
+    assert not capped.any()
+    over = np.array([[25.0, np.nan], [32.767, 0.5]])
+    deep = np.array([[30.0, np.nan], [32.767, 1.0]])
+    out_swe, out_depth, capped = sa.cap_perennial_pixels(over, deep)
+    assert capped.tolist() == [[True, False], [True, False]]
+    assert out_swe[0, 0] == 5.0 and out_depth[0, 0] == pytest.approx(30.0 * 5.0 / 25.0)
+    assert np.isnan(out_swe[0, 1]) and np.isnan(out_depth[0, 1])
+    assert out_swe[1, 1] == 0.5 and out_depth[1, 1] == 1.0
