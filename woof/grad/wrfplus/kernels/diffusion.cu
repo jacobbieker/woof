@@ -3015,14 +3015,64 @@ extern "C" __global__ void h2_met_ad(const wreal* __restrict__ azx,
                                      const wreal* __restrict__ phb, wreal* __restrict__ aphp,
                                      H2_GEOM)
 {
-    H2Src s = h2_src(H2_GARGS, 0);
+    // each php word (kw, j, i) gathers the metrics that read it, their
+    // derivatives by index (zx, zy: rdx / g at the face's two columns;
+    // rdzw, rdz: their reciprocal's derivative from the column's values)
+    H2Src s = h2_src(H2_GARGS, 2);
     s.php = php; s.phpd = php; s.phb = phb;
     size_t t = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
-    int q;
-    size_t at;
-    wreal acc;
-    if (!h2_ad_word(s, H2S_MET, t, azx, azy, ardzw, ardz, &q, &at, &acc)) return;
-    aphp[at] = aphp[at] + acc;
+    if (t >= (size_t)(nz + 1) * ny * nx) return;
+    unsigned u = (unsigned)t, r = u / (unsigned)nx;
+    int i = (int)(u - r * (unsigned)nx), j = (int)(r % (unsigned)ny), kw = (int)(r / (unsigned)ny);
+    wreal acc = (wreal)0;
+    for (int o = 0; o <= 2; ++o) {           // zx: faces i .. i + 2 (the copied end face)
+        int f0, f1;
+        int nf = h2_axis(i, 0, o, nx, 1, s.bx, &f0, &f1);
+        for (int b = 0; b < nf; ++b) {
+            int f = b ? f1 : f0;
+            wreal a = azx[R3(kw, j, f, ny, nx + 1)];
+            if (a == (wreal)0 || (s.bx && f <= 0)) continue;
+            int g = (s.bx && f >= nx) ? nx - 1 : f;
+            if (s.seam_x && kw >= nz && df_per(g, nx) == 0) continue;
+            int c = (h2_ix(s, g) == i) - (h2_ix(s, g - 1) == i);
+            if (c) acc = acc + a * wdiv(rdx * (wreal)c, DF_G);
+        }
+    }
+    for (int o = 0; o <= 2; ++o) {           // zy
+        int f0, f1;
+        int nf = h2_axis(j, 0, o, ny, 1, s.by, &f0, &f1);
+        for (int b = 0; b < nf; ++b) {
+            int f = b ? f1 : f0;
+            wreal a = azy[R3(kw, f, i, ny + 1, nx)];
+            if (a == (wreal)0 || (s.by && f <= 0)) continue;
+            int g = (s.by && f >= ny) ? ny - 1 : f;
+            if (s.seam_y && kw >= nz && df_per(g, ny) == 0) continue;
+            int c = (h2_iy(s, g) == j) - (h2_iy(s, g - 1) == j);
+            if (c) acc = acc + a * wdiv(rdy * (wreal)c, DF_G);
+        }
+    }
+    wreal dz = wdiv((wreal)1, DF_G);
+    for (int k = kw - 1; k <= kw; ++k) {     // rdzw at k reads levels k, k + 1
+        if (k < 0 || k >= nz) continue;
+        wreal a = ardzw[R3(k, j, i, ny, nx)];
+        if (a == (wreal)0) continue;
+        wreal d = h2_zw(s, k + 1, j, i).v - h2_zw(s, k, j, i).v;
+        wreal v = wdiv((wreal)1, d);
+        wreal dd = k + 1 == kw ? dz : -dz;
+        acc = acc + a * wdiv(-(v * dd), d);
+    }
+    for (int k = kw - 1; k <= kw + 1; ++k) { // rdz: kw' - 1, kw' + 1 (the bottom: 0, 1)
+        if (k < 0 || k >= nz) continue;
+        int top = k <= 0 ? 1 : k + 1, bot = k <= 0 ? 0 : k - 1;
+        if (kw != top && kw != bot) continue;
+        wreal a = ardz[R3(k, j, i, ny, nx)];
+        if (a == (wreal)0) continue;
+        wreal d = h2_zw(s, top, j, i).v - h2_zw(s, bot, j, i).v;
+        wreal v = wdiv((wreal)2, d);
+        wreal dd = kw == top ? dz : -dz;
+        acc = acc + a * wdiv(-(v * dd), d);
+    }
+    aphp[t] = aphp[t] + acc;
 }
 
 extern "C" __global__ void h2_rho_tl(const wreal* __restrict__ alt,
