@@ -624,9 +624,11 @@ def h2_ad(adj_state, traj, adj, geom: H2Geometry):
     m = sz["rho"]
     if c in (1, 2):
         da = "defor11" if c == 1 else "defor22"
-        _h2_launch("h2_tuv_ad", dtype, 4 * m,
-                   (A["s1"], A["s2"], T["rho"], traj["xk"], traj[da], traj["defor12"],
-                    A["rho"], adj["xk"], adj[da], adj["defor12"]), geom)
+        P = _pieces(geom, 6, dtype)
+        _h2_launch("h2_tuv_lin", dtype, sz["s1"] + sz["s2"],
+                   (A["s1"], A["s2"], T["rho"], traj["xk"], traj[da], traj["defor12"], P), geom)
+        _h2_launch("h2_tuvp_ad", dtype, 4 * m,
+                   (P, A["rho"], adj["xk"], adj[da], adj["defor12"]), geom)
     elif c in (3, 4, 5):
         sh = h2_shapes(geom)
         n = (sum(int(np.prod(sh[k])) for k in ("u", "v", "w")) + sz["zx"] + sz["zy"]

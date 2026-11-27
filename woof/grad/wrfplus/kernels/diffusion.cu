@@ -3079,25 +3079,101 @@ extern "C" __global__ void h2_tuv_tl(const wreal* __restrict__ rho,
     if (WRFPLUS_TL && tl) (q == 0 ? tad : t12d)[at] = r.d;
 }
 
-extern "C" __global__ void h2_tuv_ad(const wreal* __restrict__ ata,
-                                     const wreal* __restrict__ at12,
-                                     const wreal* __restrict__ rho,
-                                     const wreal* __restrict__ km,
-                                     const wreal* __restrict__ da,
-                                     const wreal* __restrict__ d12, wreal* __restrict__ arho,
-                                     wreal* __restrict__ akm, wreal* __restrict__ ada,
-                                     wreal* __restrict__ ad12, H2_GEOM)
+// The stresses' AD, first pass: one thread per mass point (tau11 or
+// tau22 = ((-rho) K) da) then per corner (tau12 = ((-rhoavg) kavg) d12),
+// each adjoint taken onto its statement's three factors, into P's blocks
+// 0-2 (mass) and 3-5 (corners); every word written.
+extern "C" __global__ void h2_tuv_lin(const wreal* __restrict__ ata,
+                                      const wreal* __restrict__ at12,
+                                      const wreal* __restrict__ rho,
+                                      const wreal* __restrict__ km,
+                                      const wreal* __restrict__ da,
+                                      const wreal* __restrict__ d12, wreal* __restrict__ P,
+                                      H2_GEOM)
 {
-    H2Src s = h2_src(H2_GARGS, 0);
+    H2Src s = h2_src(H2_GARGS, 2);
     s.rho = rho; s.rhod = rho; s.km = km; s.kmd = km;
-    s.da = da; s.dad = da; s.d12 = d12; s.d12d = d12;
     size_t t = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
-    int q;
-    size_t at;
-    wreal acc;
-    if (!h2_ad_word(s, H2S_TUV, t, ata, at12, ata, ata, &q, &at, &acc)) return;
+    size_t m = (size_t)nz * ny * nx;
+    int c = t >= m;
+    size_t at = c ? t - m : t;
+    unsigned nyy = (unsigned)(ny + c), nxx = (unsigned)(nx + c);
+    if (at >= (size_t)nz * nyy * nxx) return;
+    unsigned u = (unsigned)at, r = u / nxx;
+    int i = (int)(u - r * nxx), j = (int)(r % nyy), k = (int)(r / nyy);
+    size_t pst = h2_pstride(s);
+    wreal a = (c ? at12 : ata)[at];
+    Dl x[3];
+    if (a != (wreal)0) {
+        if (!c) {
+            x[0] = h2_rho(s, k, j, i);
+            x[1] = h2_k(s, k, j, i);
+            x[2] = dl(da[at], (wreal)0);
+        } else {
+            x[0] = (wreal)0.25 * (((h2_rho(s, k, j, i) + h2_rho(s, k, j, i - 1))
+                                   + h2_rho(s, k, j - 1, i - 1)) + h2_rho(s, k, j - 1, i));
+            x[1] = (wreal)0.25 * (((h2_k(s, k, j, i) + h2_k(s, k, j, i - 1))
+                                   + h2_k(s, k, j - 1, i - 1)) + h2_k(s, k, j - 1, i));
+            x[2] = dl(d12[R3(k, h2_iy(s, j), h2_ix(s, i), ny, nx)], (wreal)0);
+        }
+    }
+    for (int q = 0; q < 3; ++q) {
+        wreal g = (wreal)0;
+        if (a != (wreal)0) {
+            Dl y[3];
+            for (int e = 0; e < 3; ++e) y[e] = dl(x[e].v, e == q ? (wreal)1 : (wreal)0);
+            g = a * (((-y[0]) * y[1]) * y[2]).d;
+        }
+        P[(size_t)(3 * c + q) * pst + at] = g;
+    }
+}
+
+// The stresses' AD gather: each mass word of rho, K, da, d12 from its own
+// point's factor and (rho, K: 0.25 per read; d12: the corner's own read)
+// the corners that read it.
+extern "C" __global__ void h2_tuvp_ad(const wreal* __restrict__ P, wreal* __restrict__ arho,
+                                      wreal* __restrict__ akm, wreal* __restrict__ ada,
+                                      wreal* __restrict__ ad12, H2_GEOM)
+{
+    H2Src s = h2_src(H2_GARGS, 2);
+    size_t t = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    unsigned m = (unsigned)(nz * ny * nx);
+    if (t >= (size_t)4 * m) return;
+    unsigned u = (unsigned)t, q = u / m, w = u - q * m, r = w / (unsigned)nx;
+    int i = (int)(w - r * (unsigned)nx), j = (int)(r % (unsigned)ny), k = (int)(r / (unsigned)ny);
+    size_t pst = h2_pstride(s);
+    wreal acc = q < 3 ? P[(size_t)q * pst + w] : (wreal)0;
+    if (q != 2) {
+        size_t base = (size_t)(q == 3 ? 5 : 3 + q) * pst;
+        for (int oj = 0; oj <= 1; ++oj) {
+            int j0, j1;
+            int nj = h2_axis(j, 0, oj, ny, 1, s.by, &j0, &j1);
+            for (int bj = 0; bj < nj; ++bj) {
+                int jj = bj ? j1 : j0;
+                for (int oi = 0; oi <= 1; ++oi) {
+                    int i0, i1;
+                    int ni = h2_axis(i, 0, oi, nx, 1, s.bx, &i0, &i1);
+                    for (int bi = 0; bi < ni; ++bi) {
+                        int ii = bi ? i1 : i0;
+                        wreal a = P[base + R3(k, jj, ii, ny + 1, nx + 1)];
+                        if (a == (wreal)0) continue;
+                        wreal cy, cx;
+                        if (q == 3) {
+                            cy = h2_iy(s, jj) == j ? (wreal)1 : (wreal)0;
+                            cx = h2_ix(s, ii) == i ? (wreal)1 : (wreal)0;
+                            acc = acc + a * (cy * cx);
+                        } else {
+                            cy = (wreal)((h2_iy(s, jj) == j) + (h2_iy(s, jj - 1) == j));
+                            cx = (wreal)((h2_ix(s, ii) == i) + (h2_ix(s, ii - 1) == i));
+                            acc = acc + a * ((wreal)0.25 * (cy * cx));
+                        }
+                    }
+                }
+            }
+        }
+    }
     wreal* out = q == 0 ? arho : q == 1 ? akm : q == 2 ? ada : ad12;
-    out[at] = out[at] + acc;
+    out[w] = out[w] + acc;
 }
 
 #define H2_TW_PASSIVE const wreal* __restrict__ msft, const wreal* __restrict__ msfu, \
