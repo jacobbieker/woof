@@ -5189,7 +5189,7 @@
    },
    {
     "file": "woof/grad/wrfplus/kernels/diffusion.cu",
-    "sha256": "0532532a9f431cf371a831b4c7006791d0247f2366db4cfab0ec6374738d8ac8"
+    "sha256": "16be67beae42d3d3299da974660095e297c4ea7cc35b1819c47c905719a8c490"
    },
    {
     "file": "woof/grad/wrfplus/kernels/lbc.cu",
