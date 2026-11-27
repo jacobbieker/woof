@@ -559,17 +559,20 @@ def test_l1_two_outer_loops_against_wrfda(tmp_path):
         assert w[-1][2] == pytest.approx(f[-1][2], rel=L1_JF_RTOL[it - 1])
         assert abs(len(w) - len(f)) <= L1_ITER_SLACK
     for name, fields in out["increments"].items():
-        for k in ("U", "V", "T", "MU"):
+        for k in ("U", "V", "T", "QVAPOR", "MU", "PH"):
             assert fields[k]["corr"] > L1_INC_CORR, (name, k, fields[k])
+            assert abs(fields[k]["rms_ratio"] - 1.0) < 0.01, (name, k, fields[k])
 
 
-#: L1 tolerances, set from the first agreed runs (docs/var.md records them): two
-#: models from one start, not word-exact (the test's docstring).
-L1_J0_RTOL = (1e-2, 1e-2)
-L1_G0_RTOL = (1e-2, 1e-2)
-L1_JF_RTOL = (1e-2, 1e-2)
-L1_ITER_SLACK = 5
-L1_INC_CORR = 0.9
+#: L1 tolerances (two models from one start, not word-exact: the test's docstring),
+#: from the 2026-11-27 pb runs, whose agreement docs/var.md records: loop 1 J0 4.2e-4,
+#: |grad J0| 1.8e-3, final J 1.1e-3; loop 2 J0 5.7e-6, |grad J0| 9.7e-3, final J 6.8e-6;
+#: 35 iterations in each loop on both sides; increments correlate to >= 0.99947.
+L1_J0_RTOL = (1e-3, 1e-4)
+L1_G0_RTOL = (5e-3, 2e-2)
+L1_JF_RTOL = (3e-3, 1e-4)
+L1_ITER_SLACK = 2
+L1_INC_CORR = 0.999
 
 
 # ------------------------------------------------------------ the L2-style OSSE on the real window

@@ -190,8 +190,8 @@ observations. The first guesses come from a WRF 4.7.1 forecast from the 12Z
 WRFDA's `var4d`: the increment is at the window's start, and each slot's
 observations see it through the tangent-linear model (`H' M'`), with the
 adjoint for the gradient. The plan is
-[docs/dev/WRFDA-4DVAR-PLAN.md](dev/WRFDA-4DVAR-PLAN.md). Not yet checked
-against a compiled WRFDA 4D-Var (its L1 gate is a skipped, data-gated test).
+[docs/dev/WRFDA-4DVAR-PLAN.md](dev/WRFDA-4DVAR-PLAN.md). Checked against
+compiled WRFDA 4.7.1 + WRFPLUS 4.7.1 on lane L1 (below), to tolerance.
 
 The Python door is `analyse(..., fgat=[fg01, ...], var4d=Var4D(...),
 time_window=(tmin, tmax))` with `woof.da.var.fourd.Var4D`:
@@ -242,8 +242,10 @@ Without `nl_model`, `max_ext_its > 1` is refused by name.
 Differences from WRFDA (open questions, recorded in the plan):
 
 - In later loops woof recomputes the qc flags from the raw observations.
-  WRFDA carries all of them except `fails_error_max` across loops
-  (`da_get_innov_vector_sound.inc`).
+  WRFDA carries them across loops and resets only `fails_error_max` to 0
+  before redoing the max-innovation check (`da_get_innov_vector_sound.inc:47-56`
+  and its siblings). On L1 this changes nothing measurable (loop 2's `J0`
+  agrees to 5.7e-6), so it is not ported.
 - One background-error scaling serves every loop. WRFDA rescales per loop
   (`da_scale_background_errors.inc:19-51`, `var_scaling1..5(it)` and
   `len_scaling1..5(it)`), but their defaults are 1.0 in every loop
@@ -298,6 +300,32 @@ Tests:
     to 11.68), and the gradient test passes in each loop. The dot test
     agrees to 5e-14, and TL against finite differences agrees to 1e-6.
 - `tests/test_var_4dvar_cli.py`: the CLI.
+- The L1 gate, `test_l1_two_outer_loops_against_wrfda`
+  (`WOOF_WRFDA471_4DVAR_L1_DIR` = `tools/wrfda_oracle/run_4dvar.sh l1`'s run
+  directory, `MAX_EXT_ITS` 1 or 2; CUDA, `WOOF_TEST_VAR4D_BACKEND=cuda`;
+  `tests/_var4d_l1.py`). L1 is the tutorial case (2008-02-05 12-18Z, 7
+  slots) with no physics, `diff_opt 0`, `damp_opt 0`, `emdiv 0` and
+  `moist_adv_opt 0`: the dynamics P3a's window covers. P3a's window is both
+  woof's nonlinear and TL/AD model, because WRFPLUS's trajectory cannot be
+  read out of this WRFDA build (`trajectory_io = .false.` is broken). So
+  the two sides run two models from one start, and agreement is a
+  tolerance, not word for word. Two loops on pb (2026-11-27):
+
+  | | loop 1 | loop 2 |
+  |---|---|---|
+  | `J0` (woof / WRFDA) | 60582.76 / 60557.17 (4.2e-4) | 43933.48 / 43933.23 (5.7e-6) |
+  | `|grad J0|` | 2002.03 / 1998.48 (1.8e-3) | 1193.66 / 1205.40 (9.7e-3) |
+  | final `J` | 35712.31 / 35672.88 (1.1e-3) | 39012.68 / 39012.41 (6.8e-6) |
+  | iterations | 35 / 35 | 35 / 35 |
+  | increment correlation (U V T QVAPOR MU PH) | >= 0.99985 | >= 0.99947 |
+  | increment rms ratio | within 0.3% | within 0.5% |
+
+  Without the boundary-table perturbation (`lbc="fixed"`), loop 1's final
+  `J` is 2.3% off and the increments correlate to only 0.91-0.97.
+  The window's dot product with the tables agrees to 1.5e-15. The lane
+  needs two importer workarounds, which live in the test only
+  (`tests/_var4d_l1_case.py`): `diff_opt 0` and a qv-only state at
+  `mp_physics 0`.
 
 ## Tiers
 

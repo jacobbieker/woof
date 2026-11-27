@@ -28,6 +28,7 @@ from the same start, not WRF's trajectory under woof's DA.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -130,8 +131,10 @@ def main(lane: Path, work: Path, max_ext_its: int) -> dict:
     case = prepare_case(lane, work / "case")
     c = build_window(case, NSLOTS * SPS - SPS, checkpoint_every=1)
     win = c.window
-    model = w4.WindowModel(win, SPS)   # halo_start "wrfplus", lbc "wrfda", moisture "advect"
-    assert model.lbc == "wrfda" and model.moisture == "advect"
+    # halo_start "wrfplus", moisture "advect"; lbc "wrfda" (WOOF_L1_LBC=fixed: the
+    # tables unperturbed, to measure what WRFDA's boundary perturbation is worth)
+    model = w4.WindowModel(win, SPS, lbc=os.environ.get("WOOF_L1_LBC", "wrfda"))
+    assert model.moisture == "advect"
     fg = read_first_guess(lane / "fg")
     states = {k: win._checkpoints[k] for k in range(win.nsteps)}
     states[win.nsteps] = win.forward()

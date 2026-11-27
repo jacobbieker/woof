@@ -1662,8 +1662,12 @@ Notes on the 1.1.7 sync:
   `time_step` rules are enforced, and `var4d_lbc`, `jcdfi_use` and
   `multi_inc` are refused by name. On a dry OSSE, two outer loops lower
   the nonlinear cost and pass the gradient, dot-product and TL-vs-FD
-  checks. It has not yet been checked against compiled WRFDA 4D-Var. The
-  window model is binary64 and refused on Metal.
+  checks. The window model perturbs the lateral boundary tables as WRFDA
+  does with `var4d_lbc` off, and carries each loop's table increment to
+  the next. Against compiled WRFDA 4.7.1 + WRFPLUS 4.7.1 on the adiabatic
+  L1 lane it agrees to tolerance, not word for word, because woof runs its
+  own trajectory (docs/var.md). The window model is binary64 and refused
+  on Metal.
   `woof.da.var.gen_be` (experimental, Python API, host binary64) makes a
   `be.dat` from woof or WRF history files (NMC 24 h minus 12 h pairs, or
   ensemble members minus their mean): WRFDA's gen_be stages for
