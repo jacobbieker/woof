@@ -8,11 +8,13 @@ the order a caller layers them:
 1. :data:`RUNNER_CARDS`, the built-in card table.  Every figure is a
    vendor nameplate number with its source named on the row: memory,
    memory bandwidth, SM (or GPU-core) count and FP32 throughput, and
-   FP64 only where the vendor's datasheet states it.  No figure here is
-   a measurement of this project's; the timing measurements live in
-   :mod:`woof.runtime_estimate` and name their card.  Memory on the
-   cards this project has run on is what ``nvidia-smi`` reported, and
-   the row says so.
+   FP64 only where the vendor's datasheet states it.  The exceptions
+   are this project's own readings, and each row that carries one says
+   so: memory on the cards this project has run on is what
+   ``nvidia-smi`` reported there, and some capacity and SM figures are
+   the ones ``woof/hex/device_admission.py`` ``KNOWN_CARDS`` measured.
+   No TIMING is in this table; the timing measurements live in
+   :mod:`woof.runtime_estimate` and name their card.
 2. :func:`detect_local_runner`, which reads THIS box without creating a
    CUDA context: ``nvidia-smi`` for an NVIDIA card (name, total memory,
    PCIe generation and width), ``sysctl`` and ``system_profiler`` for
@@ -120,8 +122,11 @@ RUNNER_CARDS: Mapping[str, RunnerCard] = MappingProxyType({
               97_887, 1792.0, 188, None, None, "PCIe 5.0 x16",
               f"{_NV} (RTX PRO 6000 Blackwell); capacity and SMs as "
               "woof/hex/device_admission.py KNOWN_CARDS measured",
-              "rtxpro6000", "pro6000", "rtxpro6000blackwell",
-              "rtxpro6000blackwellserveredition"),
+              "rtxpro6000", "pro6000", "RTX PRO 6000 Blackwell",
+              # nvidia-smi's names; spaced, so "RTX" drops as it does
+              # from the spelling being looked up.
+              "RTX PRO 6000 Blackwell Server Edition",
+              "RTX PRO 6000 Blackwell Workstation Edition"),
         # -- datacentre NVIDIA (capacities as woof.card_catalog) ----------
         _card("l4", "NVIDIA L4 24GB", CUDA, 23_034, 300.0, 58, 30.3, None,
               "PCIe 4.0 x16", f"{_NV} (L4)", "l424gb"),
