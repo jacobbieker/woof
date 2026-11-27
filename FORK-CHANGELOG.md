@@ -13,6 +13,14 @@ releases and is kept as upstream wrote it.
   arithmetic) the slope is filled; off (exact mode) the smag kernels and
   the WRFPLUS diffusion TL/AD take WRF's cold seam word for word, and the
   WRFPLUS diffusion fixture grades the seam words it used to mask.
+- Eclipse on split runs: a `[devices]` (or tiled) forecast whose window
+  meets a pinned eclipse no longer refuses its first frame with
+  `ShortFrameRefused(['ELAT_TRACK', 'ELON_TRACK'])`; the centre-line
+  scalars are read off their carried planes. Each buffer's eclipse shadow
+  now follows the gathered geography; with a radiation adapter holding its
+  grid on the host or in FP64 (legacy RRTMG, the RRTM/Dudhia pair) it
+  stayed at the buffer's neutral point, so ECOBSC, ECMASK and the dimmed
+  shortwave were wrong when split.
 
 Merged upstream WOOF 1.1.5 (with 1.1.4). Where upstream built a feature the
 fork already had, upstream's keys and flags are now the only ones:

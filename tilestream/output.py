@@ -249,10 +249,20 @@ _DERIVED_RULES = {
     # 'OCEAN_SST_CHANGE']) (full-CONUS HRRR 48 h on 2026-10-21).
     "OCEAN_SST": "fields/ocean_sst where xland > 1.5 and lakemask < 0.5, else NaN",
     "OCEAN_SST_CHANGE": "fields/ocean_sst_change where xland > 1.5 and lakemask < 0.5, else NaN",
+    # The eclipse centre line is one point per domain: history publishes a
+    # fresh 0-d view ``fields[...][0, 0]`` of a carried uniform plane
+    # (io.history_layout), so no carrier identity matches it.  Named
+    # breakage: every [devices] split run whose window met an eclipse
+    # refused its first frame with ShortFrameRefused(['ELAT_TRACK',
+    # 'ELON_TRACK']) and origin "unknown".
+    "ELAT_TRACK": "fields/elat_track[0, 0] (uniform plane)",
+    "ELON_TRACK": "fields/elon_track[0, 0] (uniform plane)",
 }
 
 _OCEAN_DIAGNOSTIC_ROWS = {"OCEAN_SST": "fields/ocean_sst",
                           "OCEAN_SST_CHANGE": "fields/ocean_sst_change"}
+_ECLIPSE_TRACK_ROWS = {"ELAT_TRACK": "fields/elat_track",
+                       "ELON_TRACK": "fields/elon_track"}
 
 #: WRF history rows woof emits UNCONDITIONALLY and fills with exact zeros
 #: when the producing scheme is absent.  ``RAINSH`` is always in this set --
@@ -940,7 +950,8 @@ class StoreFrame:
                        "PSFC": ("state/php", "state/p"),
                        "FS_GEN_IDMAX": ("fire/spotting.control",),
                        **{row: (key, "fields/xland", "fields/lakemask")
-                          for row, key in _OCEAN_DIAGNOSTIC_ROWS.items()}}
+                          for row, key in _OCEAN_DIAGNOSTIC_ROWS.items()},
+                       **{row: (key,) for row, key in _ECLIPSE_TRACK_ROWS.items()}}
 
     def store_keys(self) -> tuple[str, ...]:
         """Every store member :meth:`fields` reads, in frame order."""
@@ -1052,6 +1063,13 @@ class StoreFrame:
                               else store["fields/ocean_sst_change"])
                     np.copyto(dst, source, where=wet)
                     out[name] = dst
+                elif name in _ECLIPSE_TRACK_ROWS:
+                    # Every tile writes the same centre-line point, so any
+                    # cell of the joined plane is the resident scalar.
+                    source = (store["fields/elat_track"] if name == "ELAT_TRACK"
+                              else store["fields/elon_track"])
+                    self._dst[name][...] = source[0, 0]
+                    out[name] = self._dst[name]
                 else:                                  # unreachable by _DERIVED_RULES
                     raise KeyError(f"no host rule for derived field {name}")
             else:

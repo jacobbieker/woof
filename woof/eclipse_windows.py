@@ -133,6 +133,20 @@ class EclipseGeometry:
         self.track_latitude = cp.empty(1,cp.float32)
         self.track_longitude = cp.empty(1,cp.float32)
 
+    def locate(self, latitude_deg, longitude_deg):
+        """Re-read the live grids the radiation adapter holds now.
+
+        A split or tiled buffer is built on neutral geography and the gather
+        then writes, or re-points, the adapter's own grids.  An FP32 device
+        grid is aliased above and follows; a host or FP64 grid was copied,
+        and without this the shadow stays at the neutral point.
+        """
+        import cupy as cp
+        for source, grid in ((latitude_deg, self.latitude),
+                             (longitude_deg, self.longitude)):
+            if source is not None and source is not grid:
+                grid[...] = cp.asarray(source, dtype=cp.float32).reshape(grid.shape)
+
     def at(self, valid_time, native_hour=None):
         import cupy as cp
         import numpy as np
@@ -222,7 +236,7 @@ class EclipseRadiation:
             self._ready = bool(self.initialized.ravel()[0])
         return self._ready
 
-    def update(self, state, cfg):
+    def update(self, state, cfg, radiation=None):
         # module_ra_eclipse.F:150-156: single precision MOD and hour sum.
         import numpy as np
         from woof.core.swint import calendar_scalars
@@ -231,6 +245,9 @@ class EclipseRadiation:
         _,xtime,gmt=calendar_scalars(self.start_time,state.elapsed_seconds,generation=getattr(cfg,'solar_generation','wrf_480'))
         hour=F(gmt+F(F(np.fmod(F(xtime+F(effective_radt_minutes(cfg))),F(1440)))/F(60)))
         if hour>=F(24): hour=F(hour-F(24))
+        if radiation is not None:
+            self.geometry.locate(getattr(radiation, "latitude_deg", None),
+                                 getattr(radiation, "longitude_deg", None))
         result = self.geometry.at(self.start_time+timedelta(
             seconds=float(state.elapsed_seconds)),native_hour=float(hour))
         self.track_fields["elat_track"][...] = self.geometry.track_latitude[0]
@@ -254,7 +271,7 @@ class EclipseRadiation:
         import cupy as cp
         from woof.core.physics import couple_column_tendencies
         DTYPE = cp.float32
-        obscur = self.update(state,cfg)
+        obscur = self.update(state,cfg,getattr(driver,"radiation_callable",None))
         transmission = DTYPE(1.0)-obscur
         driver.fields["ecobsc"] = self.geometry.obscuration
         driver.fields["ecmask"] = self.geometry.mask
