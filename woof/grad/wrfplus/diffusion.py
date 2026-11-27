@@ -640,11 +640,14 @@ def h2_ad(adj_state, traj, adj, geom: H2Geometry):
                    (P,) + base + (adj["u"], adj["v"], adj["w"], A["zx"], A["zy"], A["rdz"],
                                   A["rho"], adj["xk"]), geom)
     elif c == 0:
-        _h2_launch("h2_hs_ad", dtype, 3 * m + sz["zx"] + sz["zy"] + sz["rdzw"],
-                   (A["s1"], A["s2"], traj["field"], traj["xk"], T["rho"], T["zx"], T["zy"],
-                    T["rdzw"], traj["msfu"], traj["msfv"], traj["fnm"], traj["fnp"],
-                    traj["dn"], traj["dnw"], adj["field"], adj["xk"], A["rho"], A["zx"],
-                    A["zy"], A["rdzw"]), geom)
+        base = (traj["field"], traj["xk"], T["rho"], T["zx"], T["zy"], T["rdzw"],
+                traj["msfu"], traj["msfv"], traj["fnm"], traj["fnp"], traj["dn"], traj["dnw"])
+        P = _pieces(geom, 14, dtype)
+        _h2_launch("h2_hs_lin", dtype, sz["s1"] + sz["s2"], (A["s1"], A["s2"]) + base + (P,),
+                   geom)
+        _h2_launch("h2_hsp_ad", dtype, 3 * m + sz["zx"] + sz["zy"] + sz["rdzw"],
+                   (P,) + base + (adj["field"], adj["xk"], A["rho"], A["zx"], A["zy"],
+                                  A["rdzw"]), geom)
     import cupy as cp
     qv = traj["qv"] if geom.moist else traj["alt"]
     aqv = adj["qv"] if geom.moist else cp.zeros(1, dtype=dtype)
