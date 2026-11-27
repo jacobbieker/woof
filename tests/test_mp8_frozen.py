@@ -1396,14 +1396,21 @@ FROZEN_MODULE_DIGESTS = {
         # the previous one byte for byte (tests/test_noah_land_ice_rain_runoff.py
         # strips the block and checks the previous digest).  Previously
         # 3736ba8f/d97d7894.
+        # RE-PINNED 2026-11-26 by the correct-mode noah_snow_series_conductivity (FQ9): a
+        # NOAH_SNOW_SERIES_CONDUCTIVITY #ifdef block in SFLX's snow soil-heat-flux
+        # blend takes the series DF1H WRF computes and never reads in place of
+        # DF1A (module_sf_noahlsm.F:649, :656); without the define the program
+        # is the previous one byte for byte (tests/test_noah_snow_series_conductivity.py
+        # strips the block and checks the previous digest).  Previously
+        # c812c938/140a7f65.
         # Upstream 1.1.7 RE-PINNED by fix/305-f31-private-names (2026-11-15), a COMMENT-ONLY
         # edit: one comment that named a lab host now names the card ("RTX
         # 4090 test host").  No code token changed, so the compiled kernel is
         # the same; only the file and compile-string digests move.
         # Previously ef57884c/42ed557f.
         # RE-PINNED for the upstream WOOF 1.1.7 merge: both edits above.
-        'c812c93845340096214f805aa69fe999e2c8483d2b798671260c6151d59361d4',
-        '140a7f6588fa2123eb9785a5efbc77b194f6bbdc0f981b8d15d2339dbf7c4ebf'),
+        '8c82ad5398c0defabd5c672dc848d1e902416d4cf53dc6c86dcc502b0ab7fdec',
+        '69c41184f86c3b7c73426700a4611239a6401ae710ca9123ef11e15293e2f2cd'),
     # fix/noahmp-small-defects (2026-11-09): correct-mode SN1, the Noah-MP
     # snowmelt reset re-evaluating ESTG at the reset TG, compiled only under
     # GPUWM_NOAHMP_MELT_RESET_ESAT.  Without it the arithmetic is unchanged

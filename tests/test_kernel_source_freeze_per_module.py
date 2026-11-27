@@ -1321,7 +1321,13 @@ BASELINE_PINNED: dict[str, str] = {
         # rain SFLX_GLACIAL drops to RUNOFF1; without the define the program is
         # the previous one byte for byte (tests/test_noah_land_ice_rain_runoff.py
         # strips the block and checks the previous digest).  Previously 5c09214c.
-        '6c208d40e19e5ceb1804eedb2d3c4deebee0cdcfb7b4a3e10a18991e6e9d60c9',
+        # RE-PINNED 2026-11-26 by the correct-mode noah_snow_series_conductivity (FQ9): a
+        # NOAH_SNOW_SERIES_CONDUCTIVITY #ifdef block in the snow soil-heat-flux
+        # blend swaps DF1A for the series DF1H WRF computes and never reads
+        # (module_sf_noahlsm.F:649, :656); without the define the program is
+        # the previous one byte for byte (tests/test_noah_snow_series_conductivity.py
+        # strips the block and checks the previous digest).  Previously 6c208d40.
+        'aeb8c2de7a04c73f2c828c0bf6581e8d414f9c2f75cd398d6e59bda2f87e381c',
     # development branch (smoke, aerosol and air-quality program).  chem_bdy:
     # WRF-Chem's outer-domain flow_dep_bdy_chem, bit-identical to the
     # Fortran on 24 oracle cases (tests/test_chem_bdy_wrf471_parity.py).
@@ -1845,7 +1851,7 @@ PINNED_HEADERS = {
     'mskf_aerosol.cuh': '91fefcce94ec7bc775ba526b2d4a95eb4d4c7946ffd95da11f53474a2811bfa9',
     'mynn_scalar_mix.cu': 'abc61827d645ce7af664a7294ecfd289834de5cc57b485bff20e20d27ed17c1f',
     # noah_smc_floor_booking's #ifdef block (default program unchanged).
-    'noah_mosaic.cu': '6c208d40e19e5ceb1804eedb2d3c4deebee0cdcfb7b4a3e10a18991e6e9d60c9',
+    'noah_mosaic.cu': 'aeb8c2de7a04c73f2c828c0bf6581e8d414f9c2f75cd398d6e59bda2f87e381c',
     'noah_seaice_options.cuh': '033fec7afc7129e3455aba955f748e6eb49213aeab12e1ad82801b8c2dfd4b7b',
     'noah_ua.cuh': '6ffe8841f48994d15eb1e6dfeb1d2c0667e1ea0ad4b56a2f50c45ca24d07dba1',
     'noah_ua_plain.cuh': '40746bf3560c1922b28a6341a50753c4ec4946842bfa613c5c1f8b8b826f1108',
@@ -2060,4 +2066,6 @@ def test_mosaic_ucm_composed_source_is_pinned():
         # without the define.  Previously ebf5a3d1.
         # RE-PINNED 2026-11-23 by noah_land_ice_rain_runoff's #ifdef block in
         # the same file (FQ8), likewise unread.  Previously 5138ec78.
-        '48f6b2fb06086073ead1af5922cb7cf09c55108d5fd19817cab6b135845226fe')
+        # RE-PINNED 2026-11-26 by noah_snow_series_conductivity's #ifdef block in
+        # the same file (FQ9), likewise unread.  Previously 48f6b2fb.
+        '9dd67a4488f07e934d12ba56b31994bf807bdfbeb0d39d069836d80e207ec008')

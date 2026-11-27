@@ -680,19 +680,31 @@ NOAH_LAND_ICE_RAIN_RUNOFF_DEFINES = (("NOAH_LAND_ICE_RAIN_RUNOFF", 1),)
 LAND_ICE_RAIN_RUNOFF_PREFIX = "#define NOAH_LAND_ICE_RAIN_RUNOFF 1\n"
 
 
+#: RunConfig.noah_snow_series_conductivity (on in correct mode, FQ9):
+#: module_sf_noahlsm.F:649-663.  SFLX computes the series (harmonic) snow-soil
+#: conductivity DF1H and never reads it; the surface soil heat flux blends the
+#: arithmetic DF1A instead.  The define blends DF1H.
+NOAH_SNOW_SERIES_CONDUCTIVITY_DEFINES = (("NOAH_SNOW_SERIES_CONDUCTIVITY", 1),)
+SNOW_SERIES_CONDUCTIVITY_PREFIX = "#define NOAH_SNOW_SERIES_CONDUCTIVITY 1\n"
+
+
 def noah_define_tier(smc_floor_booking: bool = False,
-                     land_ice_rain_runoff: bool = False) -> tuple:
+                     land_ice_rain_runoff: bool = False,
+                     snow_series_conductivity: bool = False) -> tuple:
     """The integer defines the Noah corrections compose, in one fixed order
-    (FQ4 then FQ8): the unit the run launches, ``()`` when both are off."""
+    (FQ4, FQ8, then FQ9): the unit the run launches, ``()`` when all are off."""
     return ((NOAH_SMC_FLOOR_BOOKING_DEFINES if smc_floor_booking else ())
-            + (NOAH_LAND_ICE_RAIN_RUNOFF_DEFINES if land_ice_rain_runoff else ()))
+            + (NOAH_LAND_ICE_RAIN_RUNOFF_DEFINES if land_ice_rain_runoff else ())
+            + (NOAH_SNOW_SERIES_CONDUCTIVITY_DEFINES if snow_series_conductivity else ()))
 
 
 def noah_define_prefix(smc_floor_booking: bool = False,
-                       land_ice_rain_runoff: bool = False) -> str:
+                       land_ice_rain_runoff: bool = False,
+                       snow_series_conductivity: bool = False) -> str:
     """:func:`noah_define_tier` as the first lines of a unit."""
     return ((SMC_FLOOR_BOOKING_PREFIX if smc_floor_booking else "")
-            + (LAND_ICE_RAIN_RUNOFF_PREFIX if land_ice_rain_runoff else ""))
+            + (LAND_ICE_RAIN_RUNOFF_PREFIX if land_ice_rain_runoff else "")
+            + (SNOW_SERIES_CONDUCTIVITY_PREFIX if snow_series_conductivity else ""))
 
 
 @cuda_cache(maxsize=None)
@@ -718,7 +730,8 @@ def launch_noah(dev: dict, params: NoahParams, dt: float, dzs,
                 urban: dict | None = None,
                 wrf_hydro: dict | None = None, fasdas: dict | None = None, ua_phys: bool = False, irrigation_channel=None,
                 smc_floor_booking: bool = False,
-                land_ice_rain_runoff: bool = False) -> None:
+                land_ice_rain_runoff: bool = False,
+                snow_series_conductivity: bool = False) -> None:
     """Run the ``noah_column`` kernel on device arrays (in place).
 
     ``dev`` maps field names to CuPy arrays: every name in ``_F2D`` as
@@ -848,7 +861,10 @@ def launch_noah(dev: dict, params: NoahParams, dt: float, dzs,
     # RunConfig.noah_land_ice_rain_runoff (on in correct mode, FQ8) books the
     # rain on land ice as RUNOFF1; the two defines compose.  A WRF-Hydro coupling
     # carries it: the glacial arm writes SFCRUNOFF only, never the routing planes.
-    tier = noah_define_tier(smc_floor_booking, land_ice_rain_runoff)
+    # RunConfig.noah_snow_series_conductivity (on in correct mode, FQ9) blends the
+    # series snow-soil conductivity; the three defines compose.
+    tier = noah_define_tier(smc_floor_booking, land_ice_rain_runoff,
+                            snow_series_conductivity)
     if not tier:
         kern = get_kernel(module, name)
     elif ua_phys:

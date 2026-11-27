@@ -45,6 +45,8 @@ BEFORE = {
     "noah_mosaic.cu": "5c09214c29f2c9f6b01bec651281778b8d759facfc6c755cbb9cd02bd7237b00",
 }
 BLOCK = re.compile(r"#ifdef NOAH_LAND_ICE_RAIN_RUNOFF\n.*?#endif\n", re.S)
+#: noah_snow_series_conductivity's block (FQ9) came after this option: stripped too
+FQ9_BLOCK = re.compile(r"#ifdef NOAH_SNOW_SERIES_CONDUCTIVITY\n.*?#endif\n", re.S)
 ICE = 15          # the USGS land-ice category the Noah tables name ISICE
 
 
@@ -98,7 +100,7 @@ def test_the_default_kernel_source_is_the_source_before_the_option(name):
     blocks = BLOCK.findall(text)
     assert len(blocks) == 1, name
     assert "runoff1" in blocks[0] and "prcpf" in blocks[0]
-    assert hashlib.sha256(BLOCK.sub("", text).encode()).hexdigest() == BEFORE[name]
+    assert hashlib.sha256(BLOCK.sub("", FQ9_BLOCK.sub("", text)).encode()).hexdigest() == BEFORE[name]
 
 
 # --- the mirror -------------------------------------------------------------

@@ -753,13 +753,14 @@ Notes on the 1.1.7 sync:
     turns every one on / off whatever the mode (the hex door takes
     `--quirk-corrections all|none`); a key set false next to `"all"` is
     refused by name, and a key set next to `"none"` wins. On the WRF route
-    the keys are correct-mode findings FQ1-FQ8, FQ10, FQ11 and FQ12, so the run
-    receipt's `correct_mode` block names them.
+    the keys are correct-mode findings FQ1-FQ12, so the run receipt's
+    `correct_mode` block names them.
     It covers `gf_deep_rain_evaporation_booking`, `ysu_surface_heat_exner`,
     `mynn_sfclay_psih_zolzt`, `noah_smc_floor_booking`,
     `thompson_rain_snow_closure`, `rrtmg_lw_model_top`,
     `thompson_lamc_updated_rc`, `noah_land_ice_rain_runoff`,
-    `mynn_sfclay_q2_land_cap`, `kf_capped_downdraft_rain_floor` and `diff_metrics_seam_slope` (WRF route);
+    `noah_snow_series_conductivity`, `mynn_sfclay_q2_land_cap`,
+    `kf_capped_downdraft_rain_floor` and `diff_metrics_seam_slope` (WRF route);
     `--undriven-species-boundary wrf-flow-dependent` (hex, regional, where its drivers carry it; the only
     flag `--quirk-corrections` sets); `woof_land_ice_isomip_freezing_salinity`,
     `woof_bottom_drag_dry_edges`, `woof_rayleigh_bottom_friction` and
@@ -826,6 +827,19 @@ Notes on the 1.1.7 sync:
     glacier leaves the water budget unbooked. The option adds it to the
     surface runoff (finding FQ8); a WRF-Hydro coupling carries it. Not yet
     scored against observations.
+  - `noah_snow_series_conductivity` (Noah, `sf_surface_physics = 2`, snow-covered
+    land points, WRF route). WRF's `SFLX` computes the series (harmonic)
+    snow-soil conductivity `DF1H` and never reads it; the soil heat flux
+    blends the arithmetic `DF1A`, which overstates the conductivity of a thin
+    pack. The option blends `DF1H` (finding FQ9); a snow-free or fully
+    covered point is unchanged. Not yet scored against observations.
+  - `mynn_sfclay_q2_land_cap` (MYNN surface layer, `sf_sfclay_physics = 5`
+    at `wrf_461`, WRF route). WRF's MYNN caps its 2 m mixing ratio at 1.05
+    times the lowest level at every point, water included, while the
+    surface driver's cap of the same limit runs over land only. The option
+    caps over land only, so Q2 over a warm sea under cooler, drier air keeps
+    its surface-flux value (finding FQ10). Only Q2 moves; not yet scored
+    against observations.
   - `kf_capped_downdraft_rain_floor` (Kain-Fritsch eta, KF-CuP and MSKF,
     `cu_physics = 1, 10, 11`, WRF route). When the scheme caps the
     downdraft (`DDINC = TRPPT/TDER`), binary32 `TDER*DDINC` can round
@@ -839,13 +853,6 @@ Notes on the 1.1.7 sync:
     initial zero while every other column has its slope. The option fills
     the top level too, as the engine always has; off (exact mode) the seam
     is WRF's word for word (finding FQ12). Bounded axes are unchanged.
-  - `mynn_sfclay_q2_land_cap` (MYNN surface layer, `sf_sfclay_physics = 5`
-    at `wrf_461`, WRF route). WRF's MYNN caps its 2 m mixing ratio at 1.05
-    times the lowest level at every point, water included, while the
-    surface driver's cap of the same limit runs over land only. The option
-    caps over land only, so Q2 over a warm sea under cooler, drier air keeps
-    its surface-flux value (finding FQ10). Only Q2 moves; not yet scored
-    against observations.
 - **Observation-driven corrections, each opt-in and off by default** (GF's
   is also a quirk correction, so it is on in correct mode):
   - `gf_deep_rain_evaporation_booking` (Grell-Freitas, `cu_physics = 3`).

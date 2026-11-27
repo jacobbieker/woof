@@ -1709,6 +1709,11 @@ __device__ static void noah_mosaic_tile(MosaicState& s,
         real frcsno = FDIV(snowhk, dtot);
         real frcsoi = FDIV(dsoil, dtot);
         real df1a = FADD(FMUL(frcsno, sncond), FMUL(frcsoi, df1));
+#ifdef NOAH_SNOW_SERIES_CONDUCTIVITY
+        // RunConfig.noah_snow_series_conductivity, as noah.cu: the unused
+        // series DF1H (module_sf_noahlsm.F:649) in place of DF1A (:656).
+        df1a = FDIV(FMUL(sncond, df1), FADD(FMUL(frcsoi, sncond), FMUL(frcsno, df1)));
+#endif
         df1 = FADD(FMUL(df1a, sncovr), FMUL(df1, (FSUB(1.0f, sncovr))));
         ssoil = FDIV(FMUL(df1, (FSUB(t1, stc[0]))), dtot);
     }

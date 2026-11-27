@@ -2753,6 +2753,17 @@ class RunConfig:
     mynn_sfclay_q2_land_cap: bool = _config_field(
         default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
 
+    # Correction of a WRF 4.7.1 quirk (quirk pass 2026-11-26), appended.
+    # Noah's soil heat flux under snow (SFLX, sf_surface_physics = 2) computes
+    # the series (harmonic) snow-soil conductivity DF1H and never reads it
+    # (module_sf_noahlsm.F:649); the flux blends the thickness-weighted
+    # arithmetic DF1A (:656, :663), a parallel-flow mean of layers the heat
+    # crosses in series.  True blends DF1H (WRF's own commented
+    # lines at :654-655 weigh it by snow cover); False is WRF's arithmetic word for word.  Read only by Noah.
+    # Correct-mode finding FQ9: on by default, off in physics.mode = 'exact'.
+    noah_snow_series_conductivity: bool = _config_field(
+        default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
+
 
 def _umbrella_resolved_as_in_toml(init):
     """RunConfig.__init__, wrapped so that a RunConfig built in Python with
@@ -3052,7 +3063,8 @@ CORRECT_MODE_RESTART_BREAK_NOTICE = (
     "mynn_sfclay_psih_zolzt, noah_smc_floor_booking, "
     "thompson_rain_snow_closure, rrtmg_lw_model_top, "
     "thompson_lamc_updated_rc, noah_land_ice_rain_runoff, "
-    "mynn_sfclay_q2_land_cap, kf_capped_downdraft_rain_floor); otherwise "
+    "noah_snow_series_conductivity, mynn_sfclay_q2_land_cap, "
+    "kf_capped_downdraft_rain_floor); otherwise "
     "restart from t = 0.")
 
 #: The same accuracy for the 2.8.9 WRF-folder default (D8): a fixed-step
@@ -10293,9 +10305,11 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
         raise ConfigurationRefused("noah_land_ice_rain_runoff must be true or false")
     if type(cfg.mynn_sfclay_q2_land_cap) is not bool:
         raise ConfigurationRefused("mynn_sfclay_q2_land_cap must be true or false")
+    if type(cfg.noah_snow_series_conductivity) is not bool:
+        raise ConfigurationRefused("noah_snow_series_conductivity must be true or false")
     from woof.quirk_corrections import check_run_config
     check_run_config(cfg)
-    # The quirk-ledger keys (correct-mode findings FQ1-FQ8, FQ10, FQ11 and FQ12)
+    # The quirk-ledger keys (correct-mode findings FQ1-FQ12)
     # are on by default and read only where their scheme runs (correct_mode.KEY_SCOPE,
     # KEY_GENERATIONS, KEY_UNREAD: YSU's not with BEP/BEM, MYNN's only at
     # wrf_461), so an unread one is inert, not refused.

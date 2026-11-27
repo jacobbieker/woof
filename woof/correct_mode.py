@@ -96,7 +96,7 @@ MY1  WRF 4.6.1's MYNN (and every MYNN-EDMF before NCAR/MYNN-EDMF f3c9d9e,
      MY1 as uncorrected; GSD MYNN 4.1 (gsd_41) adds the flux with its sign
      and does not carry it.
 
-FQ1-FQ8, FQ10, FQ11 and FQ12 are the fork's quirk ledger on the WRF route (woof.quirk_corrections,
+FQ1-FQ12 are the fork's quirk ledger on the WRF route (woof.quirk_corrections,
 ``woof_quirk_corrections``): corrections of WRF 4.7.1 arithmetic that
 contradicts itself, each with its own key.  Like the findings above they are
 on in correct mode and off in exact mode (and in a strict WRF process).
@@ -138,6 +138,13 @@ FQ8  Noah (sf_surface_physics = 2) on a land-ice point keeps the liquid rain
      the rain leaves the water budget; the key books it as surface runoff
      (``noah_land_ice_rain_runoff``).  A WRF-Hydro coupling carries it (the
      glacial arm writes SFCRUNOFF, never the routing planes).
+FQ9  Noah (sf_surface_physics = 2) on a snow-covered land point computes the
+     series (harmonic) snow-soil conductivity DF1H and never reads it; the
+     soil heat flux blends the thickness-weighted arithmetic mean DF1A, a
+     parallel-flow mean of layers the heat crosses in series, which
+     overstates the conductivity of a thin snowpack over soil.  The key
+     blends DF1H (``noah_snow_series_conductivity``); a snow-free column and
+     a fully snow-covered one (SNCOVR > 0.97, to rounding) are unchanged.
 FQ10 The wrf_461 MYNN surface layer (sf_sfclay_physics = 5) caps its 2 m
      mixing ratio at 1.05*qv(1) at every point, water included, where the
      surface driver's own cap of that limit runs over land only; the key
@@ -376,6 +383,14 @@ CORRECTIONS: tuple[Correction, ...] = (
         carriers=(("sf_surface_physics", (2,)),),
     ),
     Correction(
+        finding="FQ9",
+        keys=("noah_snow_series_conductivity",),
+        summary=(
+            "Noah blends the series snow-soil conductivity into the soil "
+            "heat flux, where WRF computes it and uses the arithmetic mean"),
+        carriers=(("sf_surface_physics", (2,)),),
+    ),
+    Correction(
         finding="FQ10",
         keys=("mynn_sfclay_q2_land_cap",),
         summary=(
@@ -459,7 +474,7 @@ KEY_SCOPE: Mapping[str, tuple[str, tuple[int, ...]]] = {
     "mynn_boulac_down_sign": ("bl_pbl_physics", (5,)),
     # ML1's second key: the BouLac (8) and k-epsilon (17) length kernels.
     "pbl_boulac_down_sign": ("bl_pbl_physics", (8, 17)),
-    # FQ1-FQ8, FQ10, FQ11 and FQ12, the fork's quirk ledger (woof.quirk_corrections).
+    # FQ1-FQ12, the fork's quirk ledger (woof.quirk_corrections).
     "gf_deep_rain_evaporation_booking": ("cu_physics", (3,)),
     "ysu_surface_heat_exner": ("bl_pbl_physics", (1,)),
     "mynn_sfclay_psih_zolzt": ("sf_sfclay_physics", (5,)),
@@ -472,6 +487,8 @@ KEY_SCOPE: Mapping[str, tuple[str, tuple[int, ...]]] = {
     "thompson_lamc_updated_rc": ("mp_physics", THOMPSON_CLOUD_BALANCE_MP),
     # FQ8: Noah's glacial arm (sf_surface_physics = 2, land-ice points).
     "noah_land_ice_rain_runoff": ("sf_surface_physics", (2,)),
+    # FQ9: Noah's land SFLX under snow (sf_surface_physics = 2).
+    "noah_snow_series_conductivity": ("sf_surface_physics", (2,)),
     # FQ10: the MYNN surface layer, at wrf_461 (KEY_GENERATIONS), as FQ3.
     "mynn_sfclay_q2_land_cap": ("sf_sfclay_physics", (5,)),
     # FQ11: KF-eta (kf.cu), KF-CuP (kfcup.cu) and MSKF (mskf.cu); the old

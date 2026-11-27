@@ -345,6 +345,9 @@ _DOMAIN_RUN_OVERRIDES = (
     # The Noah land-ice rain runoff (FQ8), on the same terms as FQ4: a
     # [shared] value reaches the sf_surface_physics = 2 domains only.
     "noah_land_ice_rain_runoff",
+    # The Noah snow series conductivity (FQ9), on the same terms: a [shared]
+    # value reaches the sf_surface_physics = 2 domains only.
+    "noah_snow_series_conductivity",
     # The Kain-Fritsch capped-downdraft rain floor (FQ11), on the same
     # terms: a [shared] value reaches the cu_physics = 1, 10, 11 domains only.
     "kf_capped_downdraft_rain_floor",
@@ -5156,6 +5159,9 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
         if (tree_runs_noah and kw.get("sf_surface_physics", RunConfig.sf_surface_physics) != 2
                 and "noah_land_ice_rain_runoff" not in dom):
             kw["noah_land_ice_rain_runoff"] = False
+        if (tree_runs_noah and kw.get("sf_surface_physics", RunConfig.sf_surface_physics) != 2
+                and "noah_snow_series_conductivity" not in dom):
+            kw["noah_snow_series_conductivity"] = False
         if (tree_runs_thompson
                 and kw.get("mp_physics", RunConfig.mp_physics) not in THOMPSON_RAIN_SNOW_MP
                 and "thompson_rain_snow_closure" not in dom):
@@ -6599,6 +6605,7 @@ def _public_config_value(value):
                                   ("diff_metrics_seam_slope", False),
                                   ("noah_land_ice_rain_runoff", False),
                                   ("mynn_sfclay_q2_land_cap", False),
+                                  ("noah_snow_series_conductivity", False),
                                   *OBSTACLE_RUN_DEFAULTS.items()):
                 value = run_document.get(name, default)
                 if isinstance(value, list):
