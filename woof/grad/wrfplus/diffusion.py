@@ -507,6 +507,21 @@ def _h2_launch(name, dtype, n, args, geom):
     _kernel(name, dtype)(_blocks(n), (THREADS,), args + geom.args(dtype))
 
 
+def _pieces(geom, n, dtype):
+    """Scratch for the AD's piece adjoints (kernels/diffusion.cu,
+    h2_pstride): ``n`` blocks of (nz + 1) (ny + 1) (nx + 1) words, every
+    word the gather reads written by the first pass."""
+    import cupy as cp
+    return cp.empty(n * (geom.nz + 1) * (geom.ny + 1) * (geom.nx + 1), dtype=dtype)
+
+
+def _slots(geom) -> int:
+    """The defor13 then defor23 slots (w levels at u faces, then at v
+    faces)."""
+    nz, ny, nx = geom.nz, geom.ny, geom.nx
+    return (nz + 1) * ny * (nx + 1) + (nz + 1) * (ny + 1) * nx
+
+
 def _h2_sizes(geom) -> dict:
     return {n: int(np.prod(s)) for n, s in _h2_temp_shapes(geom).items()}
 
@@ -614,11 +629,14 @@ def h2_ad(adj_state, traj, adj, geom: H2Geometry):
         sh = h2_shapes(geom)
         n = (sum(int(np.prod(sh[k])) for k in ("u", "v", "w")) + sz["zx"] + sz["zy"]
              + sz["rdz"] + 2 * m)
+        base = (traj["u"], traj["v"], traj["w"], T["zx"], T["zy"], T["rdz"], T["rho"],
+                traj["xk"], traj["msft"], traj["msfu"], traj["msfv"], traj["fnm"], traj["fnp"])
+        P = _pieces(geom, 14, dtype)
+        _h2_launch("h2_tw_lin", dtype, sz["s1"] + sz["s2"], (A["s1"], A["s2"]) + base + (P,),
+                   geom)
         _h2_launch("h2_tw_ad", dtype, n,
-                   (A["s1"], A["s2"], traj["u"], traj["v"], traj["w"], T["zx"], T["zy"],
-                    T["rdz"], T["rho"], traj["xk"], traj["msft"], traj["msfu"], traj["msfv"],
-                    traj["fnm"], traj["fnp"], adj["u"], adj["v"], adj["w"], A["zx"], A["zy"],
-                    A["rdz"], A["rho"], adj["xk"]), geom)
+                   (P,) + base + (adj["u"], adj["v"], adj["w"], A["zx"], A["zy"], A["rdz"],
+                                  A["rho"], adj["xk"]), geom)
     elif c == 0:
         _h2_launch("h2_hs_ad", dtype, 3 * m + sz["zx"] + sz["zy"] + sz["rdzw"],
                    (A["s1"], A["s2"], traj["field"], traj["xk"], T["rho"], T["zx"], T["zy"],
@@ -943,6 +961,7 @@ def k3_tl(state, pert_state, traj, pert, geom: KCGeometry, *, nl=True):
 def k3_ad(adj_state, traj, adj, geom: KCGeometry):
     """Adjoint of :func:`k3_tl`: add into ``adj`` (:data:`K3_ACTIVE`) and
     consume the four coefficients' adjoints."""
+    import cupy as cp
     _kc_check(geom, _named("adj", K3_STATE, adj_state)
               + _named("traj", K3_ACTIVE + K3_PASSIVE, traj) + _named("adj", K3_ACTIVE, adj))
     dtype = _dtype(tuple(adj_state[n] for n in K3_STATE) + tuple(traj[n] for n in K3_ACTIVE)
@@ -951,15 +970,23 @@ def k3_ad(adj_state, traj, adj, geom: KCGeometry):
     A = _kc_zeros(geom, dtype)
     sh = kc_shapes(geom)
     size = {k: int(np.prod(v.shape)) for k, v in T.items()}
-    n = (5 * int(np.prod(sh["bn2"])) + sum(int(np.prod(sh[k])) for k in ("u", "v", "w"))
+    m = int(np.prod(sh["bn2"]))
+    n = (5 * m + sum(int(np.prod(sh[k])) for k in ("u", "v", "w"))
          + size["zx"] + size["zy"] + size["rdz"])
+    base = (tuple(traj[k] for k in DF_STATE + ("u", "v", "w"))
+            + (T["zx"], T["zy"], T["rdz"], T["rdzw"], traj["bn2"], traj["msft"], traj["msfu"],
+               traj["msfv"]))
+    # the pieces' adjoints (h2_km3_lin, then h2_km3_slot), then the gather
+    P = _pieces(geom, 16, dtype)
+    Dm = cp.empty(2 * m, dtype=dtype)
+    _kernel("h2_km3_lin", dtype)(
+        _blocks(m), (THREADS,),
+        tuple(adj_state[k] for k in K3_STATE) + base + (P, Dm) + geom.args(dtype))
+    _kernel("h2_km3_slot", dtype)(_blocks(_slots(geom)), (THREADS,),
+                                  (Dm,) + base + (P,) + geom.args(dtype))
     _kernel("h2_km3_ad", dtype)(
         _blocks(n), (THREADS,),
-        tuple(adj_state[k] for k in K3_STATE)
-        + tuple(traj[k] for k in DF_STATE + ("u", "v", "w"))
-        + (T["zx"], T["zy"], T["rdz"], T["rdzw"], traj["bn2"], traj["msft"], traj["msfu"],
-           traj["msfv"])
-        + tuple(adj[k] for k in DF_STATE + ("u", "v", "w"))
+        (P,) + base + tuple(adj[k] for k in DF_STATE + ("u", "v", "w"))
         + (A["zx"], A["zy"], A["rdz"], A["rdzw"], adj["bn2"]) + geom.args(dtype))
     _kc_met_ad(traj, adj, A, geom)
     _kc_consume(adj_state, K3_STATE, geom)
