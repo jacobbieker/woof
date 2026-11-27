@@ -45,6 +45,8 @@ ORACLE = REPO / "tests" / "data" / "oracles" / "mynn" / "surface-layer.csv"
 PRE_OPT_IN_SHA256 = "a02979c2ef27ce361f092675cef0d55705be6ff3f298a04b7e969b1c9694bdd9"
 
 _BLOCK = re.compile(r"#ifdef MYNN_SL_PSIH_ZOLZT\n.*?#endif\n", re.S)
+#: the later FQ10 block is not part of the unit pinned before this key
+_Q2_BLOCK = re.compile(r"#ifdef MYNN_SL_Q2_LAND_CAP\n.*?#endif\n", re.S)
 
 #: Outputs psih2/psih10 reach: the 2 m / 10 m diagnostics only.
 MOVED = frozenset({"th2", "t2", "q2", "chs2", "cqs2", "ck", "cka"})
@@ -69,7 +71,7 @@ def test_the_default_program_is_the_pre_opt_in_unit():
     blocks = _BLOCK.findall(source)
     assert len(blocks) == 2
     assert all("zolzt);" in block for block in blocks)
-    stripped = _BLOCK.sub("", source)
+    stripped = _BLOCK.sub("", _Q2_BLOCK.sub("", source))
     assert hashlib.sha256(stripped.encode("utf-8")).hexdigest() == PRE_OPT_IN_SHA256
 
 

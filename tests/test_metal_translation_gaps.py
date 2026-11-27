@@ -255,6 +255,50 @@ def test_strict_compare_and_minmax_keep_subnormals(cp, monkeypatch, name):
     assert got.tobytes() == np.asarray(getattr(np, name)(x, zero)).tobytes()
 
 
+_NAMED_DEVICE_FIELD = r'''
+// GFL's lane pointer (woof.core.gfl_lanes): a class template whose one pointer
+// field names its space, with a value type that has its own operator* in scope.
+struct Word { float v; };
+__device__ Word operator*(Word a, Word b) { return Word{a.v * b.v}; }
+template<class T> struct LanePtr {
+  T* p __attribute__((annotate("woof_space:device")));
+  __device__ LanePtr(T* q) : p(q) {}
+  template<class I> __device__ T& operator[](I i) const { return *(T*)((char*)p + (long long)i * 8); }
+  __device__ T& operator*() const { return *p; }
+  __device__ explicit operator char*() const { return (char*)p; }
+};
+template<class T> __device__ char* raw(LanePtr<T> q) { return (char*)q.p; }
+template<class T> __device__ T& deref(T* q) { T& r = *q; return r; }
+__device__ void scale(LanePtr<Word> a, int n) {
+  for (int i = 1; i < n; i++) a[i] = a[i] * a[0];
+  *a = Word{-1.0f};
+  ((float*)raw(a))[1] += 0.5f;
+  ((float*)(char*)a)[3] += 0.25f;
+  deref(a.p + 5).v += 0.125f;
+}
+extern "C" __global__ void named_device_field(Word* w, int n) { scale(LanePtr<Word>(w), n); }
+'''
+
+
+def test_struct_field_that_names_device_space_returns_device_references(cp):
+    """A device-named pointer field: ``*p``, ``*(T*)...`` and ``*q`` on a parameter (unresolved
+    operator calls while an operator* is in scope), a returned ``(char*)q.p`` and
+    ``operator char*`` stay device."""
+    from woof.backend.translate import translate
+    msl = translate(_NAMED_DEVICE_FIELD, unit="named_device_field").msl
+    assert "device T& operator*()" in msl and "operator device char*()" in msl
+    host = np.array([2, 0, 3, 0, 4, 0, 5, 0], dtype=np.float32)
+    w = cp.asarray(host)
+    cp.RawKernel(_NAMED_DEVICE_FIELD, "named_device_field")((1,), (1,), (w, np.int32(4)))
+    want = host.copy()
+    want[2], want[4], want[6] = 6, 8, 10
+    want[0] = -1
+    want[1] += 0.5
+    want[3] += 0.25
+    want[5] += 0.125
+    assert cp.asnumpy(w).tobytes() == want.tobytes()
+
+
 _TEMPLATE_POINTER_ARRAY = r'''
 template <int N>
 __device__ float sum_at(float* const* p, int at) {

@@ -566,6 +566,30 @@ compiled in by a define, so exact mode runs WRF's program unchanged
 (`tests/test_thompson_rain_snow_closure.py`). The hex MPAS-suite Thompson
 and RCON (`mp_physics = 29`) do not carry it.
 
+**Correction: `thompson_lamc_updated_rc` (on in correct mode, finding FQ7).**
+WRF 4.7.1's Thompson balances the cloud water mass and number after the
+sources (`module_mp_thompson.F:2996-3019`): it forms the updated mass
+`xrc = (qc1d + qcten*dt)*rho` and number `xnc`, and diagnoses the slope
+`lamc` from them to keep the mean size between `D0c` and `2*D0r`. :3003
+divides by the entry mass `rc(k)` rather than `xrc` (a copy of :1833, where
+`rc` is the current mass), while the clamp branches (:3006, :3010) already
+use `xrc`. The clamp decision, and so the rediagnosed cloud number
+`ncten`, then answer a mass the cloud no longer holds. The sources only
+remove cloud water (`qcten` holds sinks), so `xrc <= rc(k)` and the entry mass
+gives a mean size that is too large, never too small: a shrinking cloud is
+clamped to `2*D0r` that the updated mass does not reach, or escapes the
+`D0c` clamp that the updated mass needs. With the correction on, `lamc` divides by
+`xrc`. The number tendency only leaves the call in the aerosol-aware
+schemes, so it is per domain, read only where `mp_physics = 28` or `38`
+(every `thompson_version`); the classic Thompson's fixed droplet number never
+leaves the call. It is compiled in by a define in the two units that hold the
+balance (`thompson_aerosol_warm.cu` and the WRF 3.9 fork's
+`thompson_fork.cu`, WRF 3.9 `module_mp_thompson.F:2839`), so exact mode runs
+WRF's program unchanged (`tests/test_thompson_lamc_updated_rc.py`). The fork
+column itself runs only in a strict `GPUWM_WRF_EXACT=1` process, where the
+correct-mode keys default off, so its block takes effect there only when the
+key is set `true` by hand; a default `wrf_39_noaa` run uses the aerosol units.
+
 ### Ferrier-Aligo with advected rime (`mp_physics = 15`)
 
 Option 15 transports total ice and `QRIMEF`, the ice mass multiplied by
@@ -2169,6 +2193,45 @@ units, and not yet scored against observations. The hex MPAS-suite Noah
 (`woof/hex/mpasphys/noah_v842.py`) does not carry it yet. Off, and in exact
 mode, the arithmetic is WRF's word for word.
 
+**Correction: `noah_land_ice_rain_runoff` (on in correct mode, finding FQ8).** WRF 4.7.1's Noah
+land-ice arm (`module_sf_noahlsm_glacial_only.F`, `SFLX_GLACIAL`) sets
+`PRCPF = PRCP` for liquid rain (:287) and SNOPAC turns it into
+`PRCP1 = PRCPF*0.001` (:912); nothing reads PRCP1 again, and the rain is not
+added to the pack (only snow and freezing rain are, :259-260). The driver
+books `RUNOFF1 = SNOMLT/DT` alone (:404-406), "since there is no soil
+medium", so the rain leaves the water budget unbooked. With the option on,
+`PRCPF*0.001` is added to `RUNOFF1`: all of it, since WRF's own logic
+refreezes none of it into the pack. The pack and energy balance are
+unchanged, and the pack water budget closes
+(`tests/test_noah_land_ice_rain_runoff.py`, float64 mirror and kernel). It is
+per domain, read only where `sf_surface_physics = 2`, carried by the plain,
+mosaic, UA and urban-canopy Noah units and by a WRF-Hydro coupling (the
+glacial arm writes `sfcrunoff` only), and not yet scored against
+observations. The hex MPAS-suite Noah does not carry it. Off, and in exact
+mode, the arithmetic is WRF's word for word.
+
+**Correction: `noah_snow_series_conductivity` (on in correct mode, finding FQ9).** WRF 4.7.1's Noah
+(`module_sf_noahlsm.F`, `SFLX`) gives the first-guess soil heat flux under
+snow from a conductivity for the snowpack (depth `SNOWH`) and the half first
+soil layer (`DSOIL`). Heat crosses the two in series, whose conductivity is the
+thickness-weighted harmonic mean `DF1H = SNCOND*DF1/(FRCSOI*SNCOND +
+FRCSNO*DF1)` (:649). WRF computes it and never reads it: the flux uses
+`DF1A = FRCSNO*SNCOND + FRCSOI*DF1` (:656), the parallel-flow mean, blended
+with the snow-free `DF1` by `SNCOVR` (:663); the commented lines at :654-655
+show `DF1H` was weighed by snow cover as an alternative. Harmonic never exceeds arithmetic, and snow
+conducts far less than soil, so WRF overstates the conductivity of a thin
+pack and the heat the soil draws from the skin. With the option on, `DF1H`
+takes `DF1A`'s place. A snow-free point (`SNEQV = 0`) and a fully covered one
+(`SNCOVR > 0.97`, where `DF1 = SNCOND` and both means equal it, to
+rounding) are unchanged; on a partly covered column the ground heat flux, skin and soil
+temperatures differ, the corrected flux being smaller
+(`tests/test_noah_snow_series_conductivity.py`, float64 mirror and kernel).
+It is per domain, read only where `sf_surface_physics = 2`, carried by the
+plain, mosaic, UA and urban-canopy Noah units, and not yet scored against
+observations. The Noah sea-ice arm (`module_sf_noah_seaice.F:426`) and the hex
+MPAS-suite Noah do not carry it. Off, and in exact mode, the arithmetic is
+WRF's word for word.
+
 ## Radiation (`ra_lw_physics` / `ra_sw_physics`)
 
 | option | selection | maturity | evidence, in one line |
@@ -2691,6 +2754,27 @@ forcing lanes were zero. It has not been re-measured since those lanes
 were connected; these numbers do not describe the expected behaviour
 of the current engine.
 
+**Correction: `kf_capped_downdraft_rain_floor` (on in correct mode, finding FQ11).**
+When the Kain-Fritsch family's downdraft would evaporate more than the
+updraft rains, WRF caps it (`DDINC = TRPPT/TDER`, `TDER = TDER*DDINC`) and
+forms the rain flux as `PPTFLX = TRPPT - TDER` with no floor
+(`module_cu_kfeta.F:1810-1821`, `module_cu_kfcup.F:2711-2721`,
+`module_cu_mskf.F:5840` of WRF 4.7.1; 4.8.1 is the same). The float64
+answer is 0, but in binary32 `TDER*DDINC` can round above `TRPPT`, and the
+flux is then a few ulp negative: `RAINCV` is negative for the whole `NCA`
+window and `RAINC` accumulates below zero. With the option on, `kf.cu`,
+`kfcup.cu` and `mskf.cu` floor the flux at zero
+(`KF_CAPPED_DOWNDRAFT_RAIN_FLOOR`); without it each unit is WRF's bare
+subtraction byte for byte (`tests/test_kf_capped_downdraft_rain_floor.py`
+strips the block and checks the digest). On the 149-level KF-CuP column
+that drove a hex forecast's `RAINC` negative, WRF's own Fortran (built as
+WRF builds it) and the port's strict arithmetic both give `RAINCV = 0`; the
+port's default arithmetic gives -2.3e-10 mm, and the option gives 0
+(`tests/test_kfcup_capped_downdraft_gpu.py`). On the seven WRF-graded
+capped KF-eta columns WRF gives 0 and the floor moves no word. It is per
+domain, read only under `cu_physics = 1, 10, 11`, and not scored against
+observations.
+
 **Correction: `gf_deep_rain_evaporation_booking` (on in correct mode, finding FQ1).** WRF
 4.6.1/4.7.1's `cup_output_ens_3d` (`module_cu_gf_deep.F`, lines 3330-3348)
 counts some deep water twice.
@@ -2751,6 +2835,24 @@ T2, TH2, Q2 and the 2 m exchange coefficients move
 (`tests/test_mynn_sfclay_psih_zolzt.py`). Read only where `sf_sfclay_physics
 = 5` at the `wrf_461` variant, off in exact mode; not yet scored against
 observations.
+
+**Correction: `mynn_sfclay_q2_land_cap` (on in correct mode, finding FQ10).** WRF 4.7.1's MYNN
+surface layer ends its 2 m diagnostics with `Q2 = MIN(Q2, 1.05*QV1D)`
+(`module_sf_mynn.F:1149`), at every point, water included. The surface
+driver applies the same limit after the schemes (`module_surface_driver.F:4452-4456`)
+and only where `XLAND < 1.5`; its comment ties it to the land source terms
+("transition periods and weak winds and vegetation source"). Over water Q2
+is the Monin-Obukhov interpolation between the saturated skin and the lowest
+level, which the cap truncates: a warm sea under cooler, drier air cannot
+show a 2 m mixing ratio more than 5 per cent above the air. With the option
+on the kernel keeps the cap where `xland < 1.5` and leaves the water value,
+which stays between the lowest level and the surface mixing ratio. Only Q2
+(and what is derived from it) moves (`tests/test_mynn_sfclay_q2_land_cap.py`).
+Read only where `sf_sfclay_physics = 5` at the `wrf_461` variant, off in
+exact mode; not yet scored against observations. With `sf_surface_physics = 3`
+and `ruc_2m_diagnostic = "log_profile"` the fork diagnostic set applies its own
+final Q2 bound to water after the surface layer, so the key has no effect on
+water there.
 
 ## Passive tracers (`tracer_opt`)
 
@@ -4087,9 +4189,15 @@ these:
 Vertical weighting, time windows, `obs_ionf` cadence, `obs_idynin` ramps
 and surface-ratio factors are WRF's. Checkpoints carry every observation
 carrier, so a restart continues the straight run bit for bit; WRF instead
-refreshes those carriers when it restarts. Adaptive time steps, LTS,
-partitioned runs, the MPAS suite route and `obs_scl_neg_qv_innov` are each
-refused by name. `woof/hex/obs_nudging.py` documents each adaptation.
+refreshes those carriers when it restarts. The MPAS v8.4.2 suite route runs
+the same forcing at the same seat on one card, reading WRF's PBL and
+surface-layer inputs from the suite's `diag_physics` (`hpbl`, `kpbl`,
+`regime`, `u10`, `v10`, `th2m`); its checkpoints do not carry the report
+book yet, so a suite run with `--obs-nudging` starts cold (no checkpoint
+resume, no native restart) and writes no checkpoint. A suite without a PBL
+scheme and a surface layer is refused, and WRF's STEPBL follows the suite's
+PBL cadence (`config_pbl_interval` under correct mode). Adaptive time steps, LTS, partitioned runs and
+`obs_scl_neg_qv_innov` are each refused by name. `woof/hex/obs_nudging.py` documents each adaptation.
 
 ### WRF selector 31 forcing
 

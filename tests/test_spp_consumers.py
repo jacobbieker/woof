@@ -277,7 +277,9 @@ def test_spp_specializations_leave_default_compiler_sources_frozen():
             # Previously 5b294157.
             # RE-PINNED by the quirk pass: the MYNN_SL_PSIH_ZOLZT block, off
             # in the default string.  Previously a9abd502.
-            "mynn_surface": "179711d725891b0ab4b4431b7e788d0fa372cde253a1a36760c545296c01f6c1"}
+            # RE-PINNED by the quirk pass: the MYNN_SL_Q2_LAND_CAP block (FQ10),
+            # off in the default string.  Previously 179711d7.
+            "mynn_surface": "1f61b4c1a35190151579e0599882f8021498e2bff645e8329fb969356742ae7b"}
     for name, pin in pins.items():
         baseline = module_source(name)
         assert hashlib.sha256(baseline.encode()).hexdigest() == pin

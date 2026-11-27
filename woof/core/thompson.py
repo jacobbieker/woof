@@ -22,6 +22,10 @@ from woof.core.state import DTYPE
 #: bulb), sets the graupel gain to what rain and snow lose after their
 #: limiters.  Without the define each unit's program is the one before it.
 RAIN_SNOW_CLOSURE_DEFINES = (("THOMPSON_RAIN_SNOW_CLOSURE", 1),)
+#: RunConfig.thompson_lamc_updated_rc (finding FQ7): the cloud-balance units
+#: of the aerosol-aware schemes (thompson_aerosol_warm.cu, thompson_fork.cu)
+#: carry one #ifdef block that forms lamc from the updated cloud mass xrc.
+LAMC_UPDATED_RC_DEFINES = (("THOMPSON_LAMC_UPDATED_RC", 1),)
 
 
 def rain_snow_closure_due(cfg) -> bool:
@@ -30,6 +34,15 @@ def rain_snow_closure_due(cfg) -> bool:
     selected microphysics (mp_physics = 8, 28 or 38)."""
     from woof.quirk_corrections import run_reads
     return run_reads(cfg, "thompson_rain_snow_closure")
+
+
+def lamc_updated_rc_due(cfg) -> bool:
+    """Whether RunConfig.thompson_lamc_updated_rc (finding FQ7) reaches
+    ``cfg``'s Thompson: on (correct mode's default) and read by the
+    aerosol-aware microphysics (mp_physics = 28 or 38), the only Thompson
+    whose cloud number leaves the call."""
+    from woof.quirk_corrections import run_reads
+    return run_reads(cfg, "thompson_lamc_updated_rc")
 
 
 def _closure_kernel(func: str, rain_snow_closure: bool):

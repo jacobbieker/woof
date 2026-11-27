@@ -28,6 +28,19 @@ analysis's grid-cell mean snow water (kg m-2) and snow depth (m), averaged
 over the analysis pixels inside the cell's footprint.  Cells it does not
 cover keep the forcing's snow unchanged, with the forcing's own depth rule.
 
+A pixel holding more snow water than the initial state carries at all
+(``woof.ingest.soil.SNOW_WATER_CAP_KG_M2``) is put on that cap before the
+footprint mean, its density kept (:func:`cap_perennial_pixels`).  SNODAS
+runs no glacier model, so its glacier pixels gather snow year on year:
+Mount Rainier and Mount Baker sit at the 2-byte raster's ceiling, 32 767
+mm, and Mount Adams at 25 000 mm, growing 127 mm between the 2026-11-06
+and 2026-11-25 analyses with no melt.  Uncapped, the 3 km footprint over
+Rainier's summit carried 21 125 kg m-2 into SNOW on an open-shrubland,
+silt-loam cell, and the snow plausibility ceiling refused the preparation.
+Every pixel above the cap in the 2026-02-15, 11-06 and 11-25 analyses lies
+on a glaciated summit (Baker, Rainier, Adams, Glacier Peak, one icefield in
+the Canadian Rockies); seasonal snow stayed below it.
+
 ``WOOF_SNOW_ANALYSIS=off`` (or ``source``) is the opt-out: the forcing's
 snow, byte-identical to before this module existed.  An analysis that
 cannot be fetched or read falls back to the forcing's snow for that run and
@@ -204,6 +217,29 @@ def read_nohrsc_member(archive: tarfile.TarFile, stem: str):
     return values, head
 
 
+def cap_perennial_pixels(swe_m: np.ndarray, depth_m: np.ndarray):
+    """Put analysis pixels above the snow water cap on it, density kept.
+
+    The cap is :data:`woof.ingest.soil.SNOW_WATER_CAP_KG_M2`, the most snow
+    water the initial state carries, applied by the same rule as
+    :func:`woof.ingest.soil.cap_snow_water` (depth scaled by cap / SWE) but
+    at the analysis's own pixels, before the footprint mean, so a glacier
+    pixel cannot lift its neighbours' cells either.  Returns ``(swe_m,
+    depth_m, capped)``; ``capped`` is the boolean pixel mask, and both
+    rasters come back unchanged (the same objects) when no pixel is over.
+    """
+
+    from woof.ingest.soil import SNOW_WATER_CAP_KG_M2
+
+    cap_m = SNOW_WATER_CAP_KG_M2 / 1000.0
+    with np.errstate(invalid="ignore"):
+        capped = swe_m > cap_m
+    if not capped.any():
+        return swe_m, depth_m, capped
+    scale = np.where(capped, cap_m / np.where(capped, swe_m, 1.0), 1.0)
+    return np.where(capped, cap_m, swe_m), depth_m * scale, capped
+
+
 def _cell_spacing_m(lat: np.ndarray, lon: np.ndarray) -> float:
     """The target grid spacing, from its own mass points (median neighbour)."""
 
@@ -296,8 +332,15 @@ def apply_snow_analysis(fields, *, context, landmask=None, lake_mask=None):
                                                        "X-axis resolution", "Y-axis resolution")):
                     raise ValueError("snow water and snow depth rasters are on different grids")
                 spacing = _cell_spacing_m(lat, lon)
+                raw_max_m = float(np.nanmax(swe_m)) if np.isfinite(swe_m).any() else 0.0
+                swe_m, depth_m, capped = cap_perennial_pixels(swe_m, depth_m)
                 swe, found = sample_footprint(swe_m, head, lat, lon, spacing)
                 depth, _ = sample_footprint(depth_m, head, lat, lon, spacing)
+                touched = np.zeros(lat.shape, bool)
+                if capped.any():
+                    hit, _ = sample_footprint(np.where(capped, 1.0, 0.0), head,
+                                              lat, lon, spacing)
+                    touched = np.nan_to_num(hit) > 0.0
             except Exception as error:  # try the previous analysis, then the forcing, loudly
                 tried.append(f"{date:%Y-%m-%d %H}Z {type(error).__name__}: {error}")
                 continue
@@ -366,7 +409,18 @@ def apply_snow_analysis(fields, *, context, landmask=None, lake_mask=None):
             "density_median_kg_m3": (round(float(np.median(new_swe[dense] / new_depth[dense])), 1)
                                      if dense.any() else None),
             "depth_rule_cells": int(np.count_nonzero(thin & covered)),
+            "perennial_cap_cells": int(np.count_nonzero(touched & covered)),
         }
+        if receipt["perennial_cap_cells"]:
+            from woof.ingest.soil import SNOW_WATER_CAP_KG_M2
+
+            receipt["perennial_cap_kg_m2"] = SNOW_WATER_CAP_KG_M2
+            receipt["perennial_raw_max_kg_m2"] = round(raw_max_m * 1000.0, 1)
+            _note(f"snow: {row['id']} {date:%Y-%m-%d %H}Z holds pixels above "
+                  f"{SNOW_WATER_CAP_KG_M2:.0f} kg/m2, glacier snow it never melts (largest "
+                  f"on its grid {raw_max_m * 1000.0:.0f}); they enter "
+                  f"{receipt['perennial_cap_cells']} land cell(s) on that cap, "
+                  f"density kept (woof/ingest/snow_analysis.py cap_perennial_pixels)")
         _note(f"snow: {row['id']} {date:%Y-%m-%d %H}Z on {receipt['land_cells_covered']} of "
               f"{int(np.count_nonzero(land))} land cell(s); mean SWE {before:.1f} -> "
               f"{receipt['swe_mean_after_kg_m2']:.1f} kg/m2 (woof/data/snow/snow-analysis.v1.json)")
@@ -374,5 +428,6 @@ def apply_snow_analysis(fields, *, context, landmask=None, lake_mask=None):
     return fields, {"analysis": "none: " + "; ".join(reasons)}
 
 
-__all__ = ["analysis_time", "analysis_times", "apply_snow_analysis", "load_rules",
+__all__ = ["analysis_time", "analysis_times", "apply_snow_analysis", "cap_perennial_pixels",
+           "load_rules",
            "read_nohrsc_member", "sample_footprint"]

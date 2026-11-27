@@ -672,20 +672,50 @@ NOAH_SMC_FLOOR_BOOKING_DEFINES = (("NOAH_SMC_FLOOR_BOOKING", 1),)
 SMC_FLOOR_BOOKING_PREFIX = "#define NOAH_SMC_FLOOR_BOOKING 1\n"
 
 
-def smc_floor_booking_source(name: str) -> str:
-    """The booked unit's source: the define, then ``name``'s default source."""
-    from woof.core.kernels import module_source
-    return SMC_FLOOR_BOOKING_PREFIX + module_source(name)
+#: RunConfig.noah_land_ice_rain_runoff (on in correct mode, FQ8):
+#: module_sf_noahlsm_glacial_only.F:287 and :912.  SFLX_GLACIAL keeps the rain
+#: that falls on land ice in PRCPF/PRCP1 and never reads it again, and books
+#: only SNOMLT/DT as RUNOFF1 (:406).  The define adds the rain to RUNOFF1.
+NOAH_LAND_ICE_RAIN_RUNOFF_DEFINES = (("NOAH_LAND_ICE_RAIN_RUNOFF", 1),)
+LAND_ICE_RAIN_RUNOFF_PREFIX = "#define NOAH_LAND_ICE_RAIN_RUNOFF 1\n"
+
+
+#: RunConfig.noah_snow_series_conductivity (on in correct mode, FQ9):
+#: module_sf_noahlsm.F:649-663.  SFLX computes the series (harmonic) snow-soil
+#: conductivity DF1H and never reads it; the surface soil heat flux blends the
+#: arithmetic DF1A instead.  The define blends DF1H.
+NOAH_SNOW_SERIES_CONDUCTIVITY_DEFINES = (("NOAH_SNOW_SERIES_CONDUCTIVITY", 1),)
+SNOW_SERIES_CONDUCTIVITY_PREFIX = "#define NOAH_SNOW_SERIES_CONDUCTIVITY 1\n"
+
+
+def noah_define_tier(smc_floor_booking: bool = False,
+                     land_ice_rain_runoff: bool = False,
+                     snow_series_conductivity: bool = False) -> tuple:
+    """The integer defines the Noah corrections compose, in one fixed order
+    (FQ4, FQ8, then FQ9): the unit the run launches, ``()`` when all are off."""
+    return ((NOAH_SMC_FLOOR_BOOKING_DEFINES if smc_floor_booking else ())
+            + (NOAH_LAND_ICE_RAIN_RUNOFF_DEFINES if land_ice_rain_runoff else ())
+            + (NOAH_SNOW_SERIES_CONDUCTIVITY_DEFINES if snow_series_conductivity else ()))
+
+
+def noah_define_prefix(smc_floor_booking: bool = False,
+                       land_ice_rain_runoff: bool = False,
+                       snow_series_conductivity: bool = False) -> str:
+    """:func:`noah_define_tier` as the first lines of a unit."""
+    return ((SMC_FLOOR_BOOKING_PREFIX if smc_floor_booking else "")
+            + (LAND_ICE_RAIN_RUNOFF_PREFIX if land_ice_rain_runoff else "")
+            + (SNOW_SERIES_CONDUCTIVITY_PREFIX if snow_series_conductivity else ""))
 
 
 @cuda_cache(maxsize=None)
-def smc_floor_booking_module(name: str):
-    """``name`` (noah_ua or noah_mosaic_ua) with the booking define first,
-    on the default unit's route and options (woof.core.kernels.load_module)."""
+def noah_define_module(name: str, defines: tuple):
+    """``name`` (noah_ua or noah_mosaic_ua) with the Noah correction defines
+    first (:func:`noah_define_tier`), on the default unit's route and options
+    (woof.core.kernels.load_module)."""
     from woof import backend
     from woof.core import kernels as K
-    key = f"{name}[NOAH_SMC_FLOOR_BOOKING=1]"
-    source = smc_floor_booking_source(name)
+    key = f"{name}[" + ",".join(f"{k}={v}" for k, v in defines) + "]"
+    source = "".join(f"#define {k} {v}\n" for k, v in defines) + K.module_source(name)
     if backend.active() != "cuda":
         return K._translated_module(name, source, key=key)
     return K._load_module_preserving_subnormals(name, source, K.module_options(name),
@@ -699,7 +729,9 @@ def launch_noah(dev: dict, params: NoahParams, dt: float, dzs,
                 opt_thcnd: int = 1, itimestep: int = 2,
                 urban: dict | None = None,
                 wrf_hydro: dict | None = None, fasdas: dict | None = None, ua_phys: bool = False, irrigation_channel=None,
-                smc_floor_booking: bool = False) -> None:
+                smc_floor_booking: bool = False,
+                land_ice_rain_runoff: bool = False,
+                snow_series_conductivity: bool = False) -> None:
     """Run the ``noah_column`` kernel on device arrays (in place).
 
     ``dev`` maps field names to CuPy arrays: every name in ``_F2D`` as
@@ -826,12 +858,19 @@ def launch_noah(dev: dict, params: NoahParams, dt: float, dzs,
         name = "noah_column_irrigation"
     # RunConfig.noah_smc_floor_booking (on in correct mode, FQ4): SSTEP books the water
     # its 0.02 soil-moisture floor adds; off, the unit compiled before it.
-    if not smc_floor_booking:
+    # RunConfig.noah_land_ice_rain_runoff (on in correct mode, FQ8) books the
+    # rain on land ice as RUNOFF1; the two defines compose.  A WRF-Hydro coupling
+    # carries it: the glacial arm writes SFCRUNOFF only, never the routing planes.
+    # RunConfig.noah_snow_series_conductivity (on in correct mode, FQ9) blends the
+    # series snow-soil conductivity; the three defines compose.
+    tier = noah_define_tier(smc_floor_booking, land_ice_rain_runoff,
+                            snow_series_conductivity)
+    if not tier:
         kern = get_kernel(module, name)
     elif ua_phys:
-        kern = smc_floor_booking_module(module).get_function(name)
+        kern = noah_define_module(module, tier).get_function(name)
     else:
-        kern = get_kernel_int_defines(module, name, NOAH_SMC_FLOOR_BOOKING_DEFINES)
+        kern = get_kernel_int_defines(module, name, tier)
     blocks = (ny * nx + _TPB - 1) // _TPB
     kern((blocks,), (_TPB,), tuple(args))
 

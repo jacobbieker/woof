@@ -448,7 +448,9 @@ def launch_noah_mosaic(dev: dict, params, dt: float, dzs, *, mosaic_cat: int,
                        opt_thcnd: int, itimestep: int, urban=None,
                        atmosphere=None, solar=None, use_wudapt_lcz: int = 0,
                        urban_water_balance=None, ua_phys: bool = False,
-                       smc_floor_booking: bool = False) -> None:
+                       smc_floor_booking: bool = False,
+                       land_ice_rain_runoff: bool = False,
+                       snow_series_conductivity: bool = False) -> None:
     """Launch one thread per column, tile work in a device function.
 
     WRF sf_urban_physics=0 or 1, four soil layers. Glacial tiles and the mosaic
@@ -487,7 +489,8 @@ def launch_noah_mosaic(dev: dict, params, dt: float, dzs, *, mosaic_cat: int,
         from .noah import _ua_args
         args += _ua_args(dev,params,ny,nx)
     if urban is None:
-        function = _mosaic_kernel(ua_phys, smc_floor_booking)
+        function = _mosaic_kernel(ua_phys, smc_floor_booking, land_ice_rain_runoff,
+                                  snow_series_conductivity)
     else:
         from .urban_ucm import (
             _checked, _pointer_table, _state_arrays, _device_params,
@@ -508,7 +511,8 @@ def launch_noah_mosaic(dev: dict, params, dt: float, dzs, *, mosaic_cat: int,
                  _checked(solar.hrang, (ny, nx), "hrang"), dev["ust"],
                  np.int32(categories.natural), np.int32(use_wudapt_lcz),
                  np.int32(_jmonth(solar)), err]
-        function = _mosaic_ucm_module(ua_phys, smc_floor_booking).get_function("noah_mosaic_ucm_column")
+        function = _mosaic_ucm_module(ua_phys, smc_floor_booking,
+                                      land_ice_rain_runoff, snow_series_conductivity).get_function("noah_mosaic_ucm_column")
     function(((ny*nx + 31)//32,), (32,), tuple(args))
     if urban is not None:
         _raise_on(err)
@@ -525,11 +529,20 @@ MOSAIC_NVRTC_OPTIONS = ("-std=c++17", "--fmad=false")
 
 #: RunConfig.noah_smc_floor_booking (default off), as woof.core.noah's: the
 #: mosaic SSTEP books the water its 0.02 floor adds.
-from .noah import SMC_FLOOR_BOOKING_PREFIX  # noqa: E402
+from .noah import SMC_FLOOR_BOOKING_PREFIX  # noqa: E402,F401
+from .noah import noah_define_prefix  # noqa: E402
+
+
+def _tier_suffix(smc_floor_booking, land_ice_rain_runoff, snow_series_conductivity=False):
+    """The module-key suffix of the Noah correction defines (FQ4, FQ8, FQ9)."""
+    return ((":smc_floor_booking" if smc_floor_booking else "")
+            + (":land_ice_rain_runoff" if land_ice_rain_runoff else "")
+            + (":snow_series_conductivity" if snow_series_conductivity else ""))
 
 
 @lru_cache(maxsize=None)
-def _mosaic_module(ua_phys=False, smc_floor_booking=False):
+def _mosaic_module(ua_phys=False, smc_floor_booking=False, land_ice_rain_runoff=False,
+                   snow_series_conductivity=False):
     """Compile ``noah_mosaic.cu`` once, through the recorded, observed path.
 
     A dedicated loader (as :func:`woof.core.nest_interp._nest_module`)
@@ -543,28 +556,33 @@ def _mosaic_module(ua_phys=False, smc_floor_booking=False):
 
     if ua_phys:
         from woof.core.kernels import load_module
-        if smc_floor_booking:
+        if smc_floor_booking or land_ice_rain_runoff or snow_series_conductivity:
             raise ValueError("the booked UA mosaic unit is per device: _mosaic_kernel loads it")
         return load_module("noah_mosaic_ua")
     name = "noah_mosaic"
-    source = module_source(name)
-    if smc_floor_booking:
-        source = SMC_FLOOR_BOOKING_PREFIX + source
+    source = noah_define_prefix(smc_floor_booking, land_ice_rain_runoff,
+                                snow_series_conductivity) + module_source(name)
     module = cp.RawModule(code=source, options=MOSAIC_NVRTC_OPTIONS,
                           name_expressions=None)
-    key = f"{MODULE_KEY_ROOT}:{name}" + (":smc_floor_booking" if smc_floor_booking else "")
+    key = f"{MODULE_KEY_ROOT}:{name}" + _tier_suffix(smc_floor_booking, land_ice_rain_runoff,
+                                                      snow_series_conductivity)
     _compile_observed(module, key)
     record_module(key, source=source, options=MOSAIC_NVRTC_OPTIONS,
                   module=module)
     return module
 
 
-def _mosaic_kernel(ua_phys=False, smc_floor_booking=False):
-    if ua_phys and smc_floor_booking:
+def _mosaic_kernel(ua_phys=False, smc_floor_booking=False, land_ice_rain_runoff=False,
+                   snow_series_conductivity=False):
+    if ua_phys and (smc_floor_booking or land_ice_rain_runoff or snow_series_conductivity):
         # the per-device cache, not _mosaic_module's process-wide one
-        from .noah import smc_floor_booking_module
-        return smc_floor_booking_module("noah_mosaic_ua").get_function("noah_mosaic_column")
-    return _mosaic_module(ua_phys, smc_floor_booking).get_function("noah_mosaic_column")
+        from .noah import noah_define_module, noah_define_tier
+        return noah_define_module(
+            "noah_mosaic_ua", noah_define_tier(smc_floor_booking, land_ice_rain_runoff,
+                                               snow_series_conductivity)
+        ).get_function("noah_mosaic_column")
+    return _mosaic_module(ua_phys, smc_floor_booking, land_ice_rain_runoff,
+                          snow_series_conductivity).get_function("noah_mosaic_column")
 
 
 def mosaic_ucm_source(ua_phys=False):
@@ -578,23 +596,24 @@ def mosaic_ucm_source(ua_phys=False):
 
 
 @lru_cache(maxsize=None)
-def _mosaic_ucm_module(ua_phys=False, smc_floor_booking=False):
+def _mosaic_ucm_module(ua_phys=False, smc_floor_booking=False, land_ice_rain_runoff=False,
+                       snow_series_conductivity=False):
     import cupy as cp
     from woof.cuda_subnormals import install
     install()
     from woof.certify.kernel_manifest import record_module
     from .kernels import MODULE_KEY_ROOT, _compile_observed
-    source = mosaic_ucm_source(ua_phys)
-    if smc_floor_booking:
-        source = SMC_FLOOR_BOOKING_PREFIX + source
+    source = noah_define_prefix(smc_floor_booking, land_ice_rain_runoff,
+                                snow_series_conductivity) + mosaic_ucm_source(ua_phys)
+    suffix = _tier_suffix(smc_floor_booking, land_ice_rain_runoff, snow_series_conductivity)
     if ua_phys:
         from woof.core.kernels import _load_module_preserving_subnormals, module_options
         return _load_module_preserving_subnormals(
-            "noah_mosaic_ucm_ua" + ("_smc_floor_booking" if smc_floor_booking else ""), source,
+            "noah_mosaic_ucm_ua" + suffix.replace(":", "_"), source,
             module_options("noah_mosaic_ua"))
     module = cp.RawModule(code=source, options=MOSAIC_NVRTC_OPTIONS,
                           name_expressions=None)
-    key = f"{MODULE_KEY_ROOT}:noah_mosaic_ucm:{int(ua_phys)}" + (":smc_floor_booking" if smc_floor_booking else "")
+    key = f"{MODULE_KEY_ROOT}:noah_mosaic_ucm:{int(ua_phys)}" + suffix
     _compile_observed(module, key)
     record_module(key, source=source, options=MOSAIC_NVRTC_OPTIONS, module=module)
     return module

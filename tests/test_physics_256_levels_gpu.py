@@ -354,12 +354,13 @@ def test_kf_is_bit_identical_to_the_128_level_kernel(nz, monkeypatch):
     real = kf._kf_function
     served = []
 
-    def routed(name, trigger=1):
-        # The 128-level image is built at kfeta_trigger = 1, the default.
-        if name == "kf_column" and trigger == 1:
+    def routed(name, trigger=1, rain_floor=False):
+        # The 128-level image is built at kfeta_trigger = 1, the default,
+        # without the FQ11 rain floor (launch_kf's default).
+        if name == "kf_column" and trigger == 1 and not rain_floor:
             served.append(name)
             return old_fn
-        return real(name, trigger)
+        return real(name, trigger, rain_floor)
 
     inputs = _kf_inputs(cp, nz, 96)
     triggered = 0

@@ -9,13 +9,13 @@
     "cupy.ReductionKernel",
     "cupy.cuda.compiler.compile_using_nvrtc"
   ],
-  "site_count": 742,
+  "site_count": 744,
   "site_count_by_kind": {
     "cupy.ElementwiseKernel": 48,
-    "cupy.RawKernel": 124,
+    "cupy.RawKernel": 125,
     "cupy.RawModule": 317,
     "cupy.ReductionKernel": 22,
-    "cupy.cuda.compiler.compile_using_nvrtc": 231
+    "cupy.cuda.compiler.compile_using_nvrtc": 232
   },
   "site_count_by_surface": {
     "other": {
@@ -29,11 +29,11 @@
       "cupy.RawKernel": 42,
       "cupy.RawModule": 114,
       "cupy.ReductionKernel": 9,
-      "cupy.cuda.compiler.compile_using_nvrtc": 155
+      "cupy.cuda.compiler.compile_using_nvrtc": 156
     },
     "tests": {
       "cupy.ElementwiseKernel": 7,
-      "cupy.RawKernel": 50,
+      "cupy.RawKernel": 51,
       "cupy.RawModule": 113,
       "cupy.ReductionKernel": 10,
       "cupy.cuda.compiler.compile_using_nvrtc": 36
@@ -2888,7 +2888,23 @@
     },
     {
       "file": "tests/test_metal_translation_gaps.py",
-      "line": 284,
+      "line": 292,
+      "column": 4,
+      "surface": "tests",
+      "constructor": "cp.RawKernel",
+      "constructor_kind": "cupy.RawKernel",
+      "enclosing": "test_struct_field_that_names_device_space_returns_device_references",
+      "takes_caller_options": true,
+      "options_argument_present": false,
+      "options_expression": null,
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "cp.RawKernel(_NAMED_DEVICE_FIELD, \"named_device_field\")((1,), (1,), (w, np.int32(4)))"
+    },
+    {
+      "file": "tests/test_metal_translation_gaps.py",
+      "line": 328,
       "column": 4,
       "surface": "tests",
       "constructor": "cp.RawKernel",
@@ -2968,7 +2984,7 @@
     },
     {
       "file": "tests/test_mp8_frozen.py",
-      "line": 3373,
+      "line": 3402,
       "column": 8,
       "surface": "tests",
       "constructor": "cp.RawModule",
@@ -3824,7 +3840,7 @@
     },
     {
       "file": "tests/test_physics_256_levels_gpu.py",
-      "line": 450,
+      "line": 451,
       "column": 13,
       "surface": "tests",
       "constructor": "compiler.compile_using_nvrtc",
@@ -5128,7 +5144,7 @@
     },
     {
       "file": "tools/cuda_rounding_check.py",
-      "line": 591,
+      "line": 615,
       "column": 17,
       "surface": "tools",
       "constructor": "cp.ElementwiseKernel",
@@ -7452,7 +7468,7 @@
     },
     {
       "file": "woof/core/gfl.py",
-      "line": 366,
+      "line": 340,
       "column": 17,
       "surface": "package",
       "constructor": "cp.RawModule",
@@ -7468,7 +7484,7 @@
     },
     {
       "file": "woof/core/gfl_873b414.py",
-      "line": 43867,
+      "line": 43925,
       "column": 15,
       "surface": "package",
       "constructor": "cp.RawKernel",
@@ -7882,7 +7898,7 @@
     },
     {
       "file": "woof/core/kf.py",
-      "line": 388,
+      "line": 409,
       "column": 20,
       "surface": "package",
       "constructor": "compiler.compile_using_nvrtc",
@@ -8246,7 +8262,7 @@
     },
     {
       "file": "woof/core/noah_mosaic.py",
-      "line": 553,
+      "line": 565,
       "column": 13,
       "surface": "package",
       "constructor": "cp.RawModule",
@@ -8262,7 +8278,7 @@
     },
     {
       "file": "woof/core/noah_mosaic.py",
-      "line": 595,
+      "line": 614,
       "column": 13,
       "surface": "package",
       "constructor": "cp.RawModule",
@@ -9158,7 +9174,7 @@
     },
     {
       "file": "woof/core/thompson_aerosol_launch.py",
-      "line": 167,
+      "line": 203,
       "column": 19,
       "surface": "package",
       "constructor": "nvrtc_ptx_cache.compile_using_nvrtc",
@@ -9174,7 +9190,7 @@
     },
     {
       "file": "woof/core/thompson_fork.py",
-      "line": 117,
+      "line": 123,
       "column": 20,
       "surface": "package",
       "constructor": "compiler.compile_using_nvrtc",
@@ -9492,7 +9508,7 @@
     },
     {
       "file": "woof/ensemble/batch_physics.py",
-      "line": 551,
+      "line": 557,
       "column": 17,
       "surface": "package",
       "constructor": "array_module.RawModule",
@@ -9512,7 +9528,7 @@
     },
     {
       "file": "woof/ensemble/batch_physics.py",
-      "line": 931,
+      "line": 937,
       "column": 17,
       "surface": "package",
       "constructor": "array_module.RawModule",
@@ -9528,7 +9544,7 @@
     },
     {
       "file": "woof/ensemble/batch_physics.py",
-      "line": 1088,
+      "line": 1094,
       "column": 21,
       "surface": "package",
       "constructor": "array_module.RawModule",
@@ -10893,6 +10909,22 @@
       "text": "image, _ = compile_using_nvrtc(module_source(precision), options, None,"
     },
     {
+      "file": "woof/hex/mpas_ocean/cvmix_v842.py",
+      "line": 113,
+      "column": 15,
+      "surface": "package",
+      "constructor": "compile_using_nvrtc",
+      "constructor_kind": "cupy.cuda.compiler.compile_using_nvrtc",
+      "enclosing": "_module_on",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "options",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "image, _ = compile_using_nvrtc(module_source(precision), options, None, f\"ocn_cvmix_v842_{precision}.cu\")"
+    },
+    {
       "file": "woof/hex/mpas_ocean/diagnostics_v842.py",
       "line": 88,
       "column": 15,
@@ -11022,7 +11054,7 @@
     },
     {
       "file": "woof/hex/mpas_ocean/split_step_v842.py",
-      "line": 95,
+      "line": 96,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
@@ -11118,7 +11150,7 @@
     },
     {
       "file": "woof/hex/mpas_ocean/vmix_v842.py",
-      "line": 76,
+      "line": 82,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
@@ -12032,7 +12064,7 @@
     },
     {
       "file": "woof/hex/obs_nudging.py",
-      "line": 394,
+      "line": 434,
       "column": 17,
       "surface": "package",
       "constructor": "cp.RawModule",
@@ -12048,7 +12080,7 @@
     },
     {
       "file": "woof/hex/obs_nudging.py",
-      "line": 631,
+      "line": 671,
       "column": 28,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
