@@ -389,9 +389,10 @@ CAPPED_SHA256 = {
     "oracle-capped-O0.out":
         "a155dd9933116ffffd911d6fe28a49531ce5f289e9cd89183ade97bdf7cb256f",
 }
-#: kernels/kf.cu's floor on PPTFLX (declared divergence, d547dc8c3): the
-#: one statement where the port leaves WRF's arithmetic on purpose.
-PPTFLX_FLOOR = "pptflx = fmaxf(trppt - tder, 0.0f);"
+#: kernels/kf.cu's floor on PPTFLX (d547dc8c3), since FQ11 the correct-mode
+#: key kf_capped_downdraft_rain_floor: the one statement where the port
+#: leaves WRF's arithmetic on purpose, compiled only with its define.
+PPTFLX_FLOOR = "pptflx = fmaxf(pptflx, 0.0f);"
 
 
 def test_the_capped_downdraft_fixture_is_wrfs_recorded_answer():
@@ -412,7 +413,13 @@ def test_the_rain_flux_floor_is_the_one_declared_statement():
     source = (Path(__file__).resolve().parents[1] / "woof" / "core"
               / "kernels" / "kf.cu").read_text(encoding="utf-8")
     assert source.count(PPTFLX_FLOOR) == 1
-    assert source.count("pptflx = trppt - tder;") == 0
+    # WRF's bare subtraction, then the floor inside its correction block.
+    assert source.count("pptflx = trppt - tder;") == 1
+    block = source[source.index("#ifdef KF_CAPPED_DOWNDRAFT_RAIN_FLOOR"):]
+    block = block[:block.index("#endif")]
+    assert PPTFLX_FLOOR in block
+    assert source.index("pptflx = trppt - tder;") < source.index(
+        "#ifdef KF_CAPPED_DOWNDRAFT_RAIN_FLOOR")
     assert "d547dc8c3" in source
 
 
@@ -426,17 +433,20 @@ def test_kf_rain_is_wrfs_zero_when_the_downdraft_evaporates_it_all():
     negative: a global 60 km forecast was refused at its first history frame
     with "negative accumulated precipitation in rainc".  The port returns
     WRF's own words on every output of all seven, rain exactly zero, and
-    the floor kept on PPTFLX can never make the answer negative.
+    WRF's own subtraction (exact mode's, without FQ11's define) gives 0 on
+    them, and so does the floor (correct mode's).
     """
     from tools.kf_wrf461_oracle import compare_woof
 
-    report = compare_woof.run(str(CAPPED / "columns-capped.bin"),
-                              str(CAPPED / "oracle-capped-O0.out"),
-                              label="capped",
-                              meta_path=str(CAPPED / "columns-capped.json"))
-    assert report["graded"] == 7
-    assert report["mismatched_words"] == 0, report["per_field"]
-    assert report["exact_columns"] == 7
+    for rain_floor in (False, True):
+        report = compare_woof.run(str(CAPPED / "columns-capped.bin"),
+                                  str(CAPPED / "oracle-capped-O0.out"),
+                                  label="capped",
+                                  meta_path=str(CAPPED / "columns-capped.json"),
+                                  rain_floor=rain_floor)
+        assert report["graded"] == 7
+        assert report["mismatched_words"] == 0, (rain_floor, report["per_field"])
+        assert report["exact_columns"] == 7
 
 
 @pytest.mark.gpu

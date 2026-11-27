@@ -43,8 +43,8 @@ MOVED = {
     "wind_int": (dict(wind_int=10), {"wind_int"}),
     # Thompson runs in these rows, so its FQ5 correction (on by default) is
     # bound too.
-    "thompson_version": (dict(mp_physics=28, moist=True, thompson_version="wrf_39_noaa"), {"thompson_version", "thompson_rain_snow_closure"}),
-    "thompson_fork_snow_fall": (dict(mp_physics=28, moist=True, thompson_version="wrf_39_noaa", thompson_fork_snow_fall="wrf_39_noaa"), {"thompson_version", "thompson_fork_snow_fall", "thompson_rain_snow_closure"}),
+    "thompson_version": (dict(mp_physics=28, moist=True, thompson_version="wrf_39_noaa"), {"thompson_version", "thompson_rain_snow_closure", "thompson_lamc_updated_rc"}),
+    "thompson_fork_snow_fall": (dict(mp_physics=28, moist=True, thompson_version="wrf_39_noaa", thompson_fork_snow_fall="wrf_39_noaa"), {"thompson_version", "thompson_fork_snow_fall", "thompson_rain_snow_closure", "thompson_lamc_updated_rc"}),
     "upper_wind_limiter_form": (dict(upper_wind_limiter_form="noaa_wrf39"),
                                 {"upper_wind_limiter_form"}),
     "adaptive_nest_lattice": (dict(adaptive_nest_lattice=True),
@@ -74,7 +74,8 @@ MOVED = {
     "sf_surface_mosaic": (dict(sf_surface_physics=2, sf_surface_mosaic=1,
                                mosaic_cat=2),
                           {"sf_surface_mosaic", "mosaic_cat",
-                           "noah_smc_floor_booking", *_SEAICE_BOUND}),
+                           "noah_smc_floor_booking", "noah_land_ice_rain_runoff",
+                           "noah_snow_series_conductivity", *_SEAICE_BOUND}),
     # The single-layer urban model runs here, so its water-balance
     # generation (default wrf_480, 2.9.0) is bound too.
     "mosaic_urban_canopy": (dict(sf_surface_physics=2, sf_urban_physics=1,
@@ -83,7 +84,8 @@ MOVED = {
                             {"sf_surface_mosaic", "mosaic_cat",
                              "urban_water_balance",
                              "mosaic_urban_canopy", "noah_smc_floor_booking",
-                             *_SEAICE_BOUND}),
+                             "noah_land_ice_rain_runoff",
+                             "noah_snow_series_conductivity", *_SEAICE_BOUND}),
     "diff_opt": (dict(diff_opt=1), {"diff_opt", "mix_full_fields"}),
     "mix_full_fields": (dict(diff_opt=1, mix_full_fields=False),
                         {"diff_opt", "mix_full_fields"}),
@@ -124,20 +126,47 @@ MOVED = {
     "mynn_sfclay_psih_zolzt": (
         dict(sf_sfclay_physics=5, bl_pbl_physics=5, mynn_sfclay_psih_zolzt=True),
         # MYNN PBL also binds upstream 1.1.7's default-on correct-mode keys.
-        {"mynn_sfclay_psih_zolzt", "mynn_fixes_v61", "mynn_boulac_down_sign"}),
+        {"mynn_sfclay_psih_zolzt", "mynn_fixes_v61", "mynn_boulac_down_sign",
+         "mynn_sfclay_q2_land_cap"}),
+    # Correct-mode FQ10 (on by default): echoed where the MYNN surface layer runs.
+    "mynn_sfclay_q2_land_cap": (
+        dict(sf_sfclay_physics=5, bl_pbl_physics=5),
+        {"mynn_sfclay_q2_land_cap", "mynn_sfclay_psih_zolzt", "mynn_fixes_v61",
+         "mynn_boulac_down_sign"}),
     # Noah runs here, so its default-on prognostic sea ice is bound too.
     "noah_smc_floor_booking": (
         dict(sf_surface_physics=2, noah_smc_floor_booking=True),
-        {"noah_smc_floor_booking", *_SEAICE_BOUND}),
+        {"noah_smc_floor_booking", "noah_land_ice_rain_runoff",
+         "noah_snow_series_conductivity", *_SEAICE_BOUND}),
+    # Correct-mode FQ8 (on by default): echoed where Noah runs.
+    "noah_land_ice_rain_runoff": (
+        dict(sf_surface_physics=2, noah_land_ice_rain_runoff=True),
+        {"noah_smc_floor_booking", "noah_land_ice_rain_runoff",
+         "noah_snow_series_conductivity", *_SEAICE_BOUND}),
+    # Correct-mode FQ9 (on by default): echoed where Noah runs.
+    "noah_snow_series_conductivity": (
+        dict(sf_surface_physics=2, noah_snow_series_conductivity=True),
+        {"noah_smc_floor_booking", "noah_land_ice_rain_runoff",
+         "noah_snow_series_conductivity", *_SEAICE_BOUND}),
     # Correct-mode FQ5 (on by default): echoed where Thompson runs.
     "thompson_rain_snow_closure": (
         dict(mp_physics=8),
         {"thompson_rain_snow_closure"}),
+    # Correct-mode FQ7 (on by default): echoed where the aerosol-aware
+    # Thompson runs (mp_physics = 28, 38).
+    "thompson_lamc_updated_rc": (
+        dict(mp_physics=28, moist=True),
+        {"thompson_lamc_updated_rc", "thompson_rain_snow_closure"}),
     # Correct-mode FQ6 (on by default): echoed where the legacy RRTMG
     # longwave runs, whether it is named by ra_lw_physics or the aggregate.
     "rrtmg_lw_model_top": (
         dict(ra_lw_physics=4, ra_sw_physics=4, ra_rrtmg_variant="rrtmg_legacy"),
         {"rrtmg_lw_model_top"}),
+    # Correct-mode FQ11: KF-eta floored unconditionally before the key, so
+    # a header without it ran it on there and the echo carries it off.
+    "kf_capped_downdraft_rain_floor": (
+        dict(cu_physics=1, moist=True, kf_capped_downdraft_rain_floor=False),
+        {"kf_capped_downdraft_rain_floor"}),
     # Correct-mode FQ12 (on by default): echoed where the mixing package
     # runs under diff_opt 1 or 2 on a periodic axis.
     "diff_metrics_seam_slope": (
@@ -147,7 +176,8 @@ MOVED = {
     "urban_param_file": (dict(sf_surface_physics=2, sf_urban_physics=1,
                               urban_param_file="geo_em.d01.nc"),
                          {"urban_param_file", "urban_water_balance",
-                          "noah_smc_floor_booking", *_SEAICE_BOUND}),
+                          "noah_smc_floor_booking", "noah_land_ice_rain_runoff",
+                           "noah_snow_series_conductivity", *_SEAICE_BOUND}),
     "obstacle_opt": (dict(obstacle_opt=1, obstacle_file="city.nc",
                           dx=5.0, dy=5.0),
                      {"obstacle_opt", "obstacle_file"}),
@@ -169,7 +199,7 @@ MOVED = {
     # sign) is read by the same PBL and is echoed with it.
     "mynn_fixes_v61": (dict(bl_pbl_physics=5, sf_sfclay_physics=5),
                        {"mynn_fixes_v61", "mynn_boulac_down_sign",
-                        "mynn_sfclay_psih_zolzt"}),
+                        "mynn_sfclay_psih_zolzt", "mynn_sfclay_q2_land_cap"}),
     # ML1's second key (3.0.3): on by default, echoed only where the BouLac
     # (8) or k-epsilon (17) PBL reads it.
     "pbl_boulac_down_sign": (dict(bl_pbl_physics=8, sf_sfclay_physics=1),
@@ -188,13 +218,14 @@ MOVED = {
     "swint_opt": (dict(swint_opt=1), {"swint_opt"}),
     "aer_opt": (dict(aer_opt=3, mp_physics=28, moist=True,
                      ra_physics=4, ra_rrtmg_variant="rrtmg_legacy"),
-                {"aer_opt", "thompson_rain_snow_closure", "rrtmg_lw_model_top"}),
+                {"aer_opt", "thompson_rain_snow_closure", "thompson_lamc_updated_rc",
+                 "rrtmg_lw_model_top"}),
     "rrtmg_aer3_type_source": (
         dict(aer_opt=3, mp_physics=28, moist=True, ra_physics=4,
              ra_rrtmg_variant="rrtmg_legacy",
              rrtmg_aer3_type_source="landmask"),
         {"aer_opt", "rrtmg_aer3_type_source", "thompson_rain_snow_closure",
-         "rrtmg_lw_model_top"}),
+         "thompson_lamc_updated_rc", "rrtmg_lw_model_top"}),
     "alb_sol": (dict(alb_sol=1), {"alb_sol"}),
 }
 
@@ -294,12 +325,25 @@ DEFAULT_OFF = frozenset({
     "mynn_sfclay_psih_zolzt",
     # The opt-in Noah soil-moisture floor booking, absent while off.
     "noah_smc_floor_booking",
+    # The Noah land-ice rain runoff (FQ8), absent while off.
+    "noah_land_ice_rain_runoff",
+    # The Noah snow series conductivity (FQ9), absent while off.
+    "noah_snow_series_conductivity",
     # The RRTMG longwave model-top correction (FQ6), absent while off or
     # while the legacy RRTMG longwave does not run.
     "rrtmg_lw_model_top",
+    # The Thompson cloud slope from the updated mass (FQ7), absent while the
+    # aerosol-aware Thompson does not run.
+    "thompson_lamc_updated_rc",
+    # The Kain-Fritsch capped-downdraft rain floor (FQ11), absent while off
+    # or while KF-eta, KF-CuP and MSKF do not run.
+    "kf_capped_downdraft_rain_floor",
     # The diffusion-metrics seam correction (FQ12), absent while off or
     # while no mixing package runs on a periodic axis under diff_opt 1, 2.
     "diff_metrics_seam_slope",
+    # The MYNN surface-layer Q2 land cap (FQ10), absent while off or while
+    # the MYNN surface layer does not run.
+    "mynn_sfclay_q2_land_cap",
     # WRF v4.8.0 MYNN-SFC roughness keys, absent at their Registry defaults.
     "sf_mynn_sfcflux_land", "sf_mynn_sfcflux_water", "shalwater_z0",
     # The upstream MYNN v6.1 fixes (correct-mode MY1): default on, echoed
@@ -499,6 +543,11 @@ def _checkpoint_state(cfg, monkeypatch):
     if cfg.sf_surface_physics == 2:
         driver.noah_params = _identity_bound_physics_state(
             cfg, monkeypatch)[1].noah_params
+    if cfg.cu_physics == 1 and getattr(driver, "cumulus_callable", None) is None:
+        # The FQ11 row runs KF-eta; bind its stock adapter as the identity
+        # fixture does (these CPU tests never execute the scheme).
+        from woof.core.kf import KainFritsch
+        driver.cumulus_callable = KainFritsch()
     if cfg.sf_surface_mosaic:
         # The tile identity a mosaic header binds, without the tiles: this
         # file reads the configuration echo, not the tile carriers
@@ -723,6 +772,7 @@ def test_chemistry_off_emitted_config_bytes_match_recovery_staging(
                        "solar_generation": "wrf_461",
                        "hydrometeor_handover_numbers": False,
                        "thompson_rain_snow_closure": False,
+                       "thompson_lamc_updated_rc": False,
                        **row["constructor"]})
     if inactive_nondefaults:
         cfg = dataclasses.replace(cfg, chem_adv_opt=2, kemit=17,

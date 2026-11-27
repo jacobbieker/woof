@@ -231,7 +231,7 @@ def validate_layout(inputs: dict, outputs: dict) -> tuple[int, int]:
 def launch_mskf(inputs: dict, outputs: dict, *, dx: float, dt: float,
                 cudt_minutes: float, phase: MskfPhase, aercu_opt: int = 0,
                 aercu_fct: float = 1.0, kf_edrates: int = 1,
-                aerocu=None) -> int:
+                aerocu=None, rain_floor: bool = False) -> int:
     """One MSKF_CPS call over every column, writing ``outputs`` in place.
 
     ``inputs``: INPUT_3D (nz, ny, nx) and INPUT_2D (ny, nx) float32 device
@@ -241,7 +241,9 @@ def launch_mskf(inputs: dict, outputs: dict, *, dx: float, dt: float,
     ``nca >= 0.5*dt`` is not written at all, an active column has its
     cumulus fields reset and recomputed, and ``nca`` is read and updated in
     place.  Returns the OR of the per-column status bits (0 on success); the
-    caller refuses with :data:`MSKF_STATUS_MESSAGES`.
+    caller refuses with :data:`MSKF_STATUS_MESSAGES`.  ``rain_floor`` is
+    RunConfig.kf_capped_downdraft_rain_floor (FQ11); the default is WRF's
+    arithmetic.
     """
     import cupy as cp
 
@@ -264,6 +266,11 @@ def launch_mskf(inputs: dict, outputs: dict, *, dx: float, dt: float,
     table = load_kf_table()
     ttab, qstab, the0k, alu = _device_table()
     defines = (("GPUWM_MSKF_NO_AEROSOL", 1),) if int(aercu_opt) == 0 else ()
+    if rain_floor:
+        # RunConfig.kf_capped_downdraft_rain_floor (FQ11), after the
+        # aerosol tier (woof.kernel_prewarm warms the same tuple).
+        from woof.core.kf import CAPPED_DOWNDRAFT_RAIN_FLOOR_DEFINES
+        defines += CAPPED_DOWNDRAFT_RAIN_FLOOR_DEFINES
     kernel = get_kernel("mskf", "mskf_column", defines)
     from woof.numerics import is_strict
     constants = ((_aerosol_constants(),)

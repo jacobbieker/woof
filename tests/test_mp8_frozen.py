@@ -317,8 +317,12 @@ CUDA_DEFINES_PIN = {
 #: network launchers take rain_snow_closure and compile the define through
 #: _closure_kernel; rain_snow_closure_due reads the key.  __all__ is
 #: unchanged; without the key no launch moved.  Previously 3f621940.
+#: RE-FROZEN 2026-11-23 (FQ7, thompson_lamc_updated_rc): LAMC_UPDATED_RC_
+#: DEFINES and lamc_updated_rc_due join the module for the aerosol-aware
+#: launch (thompson_aerosol_launch); no mp=8 launcher, __all__ entry or
+#: kernel moved.  Previously 99184329.
 THOMPSON_PY_SHA256 = (
-    '991843297d4a381ba76d49eb4f730e21e72730920066c6af00883f719e0ff947')
+    'eee952dbcd4617fb559ed5ef19589f19c4fea3d83b03784c39a8d4c0d216f15c')
 
 #: ``woof/core/thompson.py::__all__`` verbatim, in declaration order.
 #: mp=28 launchers live in the new ``thompson_aerosol_*.py`` modules; not
@@ -901,8 +905,15 @@ FROZEN_MODULE_DIGESTS = {
         # Previously 9eb33736/5e418a4f; then 78cf5577/0a8949d9 until one
         # word of the header comment changed for the banned-word census
         # (no statement moved).
-        'd5d3e83ef1094a0202b68b297dd1aad357604327ce607a9aad87fc0772fb2db0',
-        '387f2e0d20c9820963853e606a88f71484c3096f3ae0a4a43f29828607ef1b76'),
+        #
+        # RE-PINNED 2026-11-26 (FQ11 kf_capped_downdraft_rain_floor): the
+        # floor moves into an #ifdef KF_CAPPED_DOWNDRAFT_RAIN_FLOOR block;
+        # without the define the unit is the pin above with WRF's bare
+        # pptflx = trppt - tder (tests/test_kf_capped_downdraft_rain_floor.py).
+        # The correct-mode default compiles the define, the pin above's
+        # program.  Previously d5d3e83e/387f2e0d.
+        'b98a64d1c8c8c414cd7100b63f792e8c2504f2719f243f01b6e42d6fa3d78f60',
+        'a48a1a4b3293cc46af03361d5f9877a829c3ef1b11233fe17d35f2e55f20bd13'),
     'lbc_flow': (
         # 4febd041f supplies resolved WDM6/NSSL inflow concentrations.
         # docs/dev/qnn-specified-inflow.md records 4 CPU + 10 GPU
@@ -1214,8 +1225,13 @@ FROZEN_MODULE_DIGESTS = {
         # RE-PINNED by the quirk pass (mynn_sfclay_psih_zolzt): psih2/psih10
         # from zt/L compiled in only under MYNN_SL_PSIH_ZOLZT; without it the
         # preprocessed unit is the previous one.  Previously a02979c2/a9abd502.
-        '2e8b7cb344da2eb74e68893f8921d7140c534d3ed311f471abca8c6580b7a7c0',
-        '179711d725891b0ab4b4431b7e788d0fa372cde253a1a36760c545296c01f6c1'),
+        # RE-PINNED by the quirk pass (mynn_sfclay_q2_land_cap, FQ10): the
+        # Q2 cap over land only, compiled in only under MYNN_SL_Q2_LAND_CAP;
+        # without it the unit is the previous one
+        # (tests/test_mynn_sfclay_q2_land_cap.py strips both blocks and checks
+        # the digest a02979c2).  Previously 2e8b7cb3/179711d7.
+        'c0ae59ecfca4e54c49d7e141168bcc274ac60eddb6d2f4067d9867891cbd7490',
+        '1f61b4c1a35190151579e0599882f8021498e2bff645e8329fb969356742ae7b'),
     'nest': (
         # Re-pinned for a combined four-side boundary launch. The original
         # single-side entry point and SINT expression tree remain unchanged.
@@ -1374,14 +1390,27 @@ FROZEN_MODULE_DIGESTS = {
         # define the preprocessed program is the previous one byte for byte
         # (tests/test_noah_smc_floor_booking.py strips the block and checks the
         # previous digest).  Previously 96e0b62e/908ffc16.
+        # RE-PINNED 2026-11-23 by the correct-mode noah_land_ice_rain_runoff (FQ8): a
+        # NOAH_LAND_ICE_RAIN_RUNOFF #ifdef block in the glacial arm adds the
+        # rain SFLX_GLACIAL drops to RUNOFF1; without the define the program is
+        # the previous one byte for byte (tests/test_noah_land_ice_rain_runoff.py
+        # strips the block and checks the previous digest).  Previously
+        # 3736ba8f/d97d7894.
+        # RE-PINNED 2026-11-26 by the correct-mode noah_snow_series_conductivity (FQ9): a
+        # NOAH_SNOW_SERIES_CONDUCTIVITY #ifdef block in SFLX's snow soil-heat-flux
+        # blend takes the series DF1H WRF computes and never reads in place of
+        # DF1A (module_sf_noahlsm.F:649, :656); without the define the program
+        # is the previous one byte for byte (tests/test_noah_snow_series_conductivity.py
+        # strips the block and checks the previous digest).  Previously
+        # c812c938/140a7f65.
         # Upstream 1.1.7 RE-PINNED by fix/305-f31-private-names (2026-11-15), a COMMENT-ONLY
         # edit: one comment that named a lab host now names the card ("RTX
         # 4090 test host").  No code token changed, so the compiled kernel is
         # the same; only the file and compile-string digests move.
         # Previously ef57884c/42ed557f.
         # RE-PINNED for the upstream WOOF 1.1.7 merge: both edits above.
-        '3736ba8f07a6ff915255159e6fec8b29a617e76465364d99d276c0795470e17d',
-        'd97d7894899756adbae9cfbc6e388c6fedc9e95292ae9515111f7819c3675aa2'),
+        '8c82ad5398c0defabd5c672dc848d1e902416d4cf53dc6c86dcc502b0ab7fdec',
+        '69c41184f86c3b7c73426700a4611239a6401ae710ca9123ef11e15293e2f2cd'),
     # fix/noahmp-small-defects (2026-11-09): correct-mode SN1, the Noah-MP
     # snowmelt reset re-evaluating ESTG at the reset TG, compiled only under
     # GPUWM_NOAHMP_MELT_RESET_ESAT.  Without it the arithmetic is unchanged

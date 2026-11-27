@@ -1538,6 +1538,34 @@ Takes no options of its own.
 | `--renderer` | _(the parser declares no help text for this option)_ |
 | `--valid-time` | _(the parser declares no help text for this option)_ |
 
+## `woof estimate`
+
+| argument | what it does |
+|---|---|
+| `[CONFIG]` | experiment TOML (WRF grid, or [model] engine = "hex") |
+
+| option | what it does |
+|---|---|
+| `--calibrate N` | run N model steps of CONFIG on this box (after --warmup steps) and extrapolate; reports measured against predicted and records a local calibration |
+| `--calibrate-timeout S` | give up calibrating after S seconds |
+| `--card, --gpu NAME` | price on this card from the built-in table instead of detecting this box's (see --list-cards) |
+| `--copies N` | price N identical runs sharing the card (at most what admission allows) |
+| `--da {3dvar,letkf}` | add a data-assimilation phase |
+| `--da-cycles N` | analyses in the run (default 1) |
+| `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
+| `--first-run` | first woof run on this box (adds the measured 31 s) |
+| `--json` | print the woof.runtime-estimate.v1 document |
+| `--list-cards` | print the built-in card table and exit |
+| `--members N` | LETKF ensemble size |
+| `--mps` | the shared card runs CUDA MPS |
+| `--no-calibration` | ignore any stored local calibration |
+| `--no-record` | with --calibrate: do not store the calibration |
+| `--prepared` | the inputs are already prepared: no prepare phase |
+| `--prepared-root DIR` | with --calibrate: run this prepared bundle instead of fetching and preparing |
+| `--runner TOML` | a [runner] table: card, backend, vram_gib, bandwidth_gbs, sm_count, fp32_tflops, pinned_gbps, host_ram_gib, cpu_cores, gpus, slots_per_gpu, mps; its keys override the card row and detection |
+| `--slots N\|auto` | runs sharing one card (the multi-run runs_per_gpu / energy worker --slots-per-gpu grammar); admission by priced peak memory |
+| `--warmup N` | steps discarded before --calibrate measures (default 5: compile, first touch) |
+
 ## `woof estimate-tracks`
 
 | option | what it does |
@@ -2256,7 +2284,7 @@ Takes no options of its own.
 | `--urban-treeoption {0,1}` | _(the parser declares no help text for this option)_ |
 | `--urban-ttscheme {0,1}` | _(the parser declares no help text for this option)_ |
 | `--urban-ucm-generation {wrf_471,wrf_480}` | single-layer urban numerical generation; omitted imports retain wrf_471 |
-| `--wrf-reference {4.8.0,4.7.1}` | the WRF release WOOF-ArWen is pinned against for this import: the release's Registry vocabulary and the scheme generations it runs (the same as --wrf-version with that release; omitted, the newest) |
+| `--wrf-reference {4.8.1,4.8.0,4.7.1}` | the WRF release WOOF-ArWen is pinned against for this import: the release's Registry vocabulary and the scheme generations it runs (the same as --wrf-version with that release; omitted, the newest) |
 | `--wrf-version` | the WRF line or release the namelist was written for (3, 4, or a release such as 4.6.1). The line selects the Registry default an omitted &dynamics/use_theta_m takes (3: 0, dry theta, the line operational HRRR v4 runs; 4, the default: 1, moist theta). A V4 release also pins the scheme generations that release runs (4.6.1: WRF 4.6's YSU, sun, Noah-MP snow aging and urban water balance; a bare 4 keeps the newest). The report names the version and what chose it |
 
 ## `woof ingest`
@@ -4500,6 +4528,7 @@ Takes no options of its own.
 
 | option | what it does |
 |---|---|
+| `--4dvar` | 4D-Var over the --fgat-obs/--fgat-first-guess slots: the first guesses are the nonlinear trajectory (WRFDA's nl_d01 states), --first-guess its start; WRFPLUS's identity TL model (enable_identity), one outer loop |
 | `--alpha-corr-scale` | horizontal localisation, km (WRFDA alpha_corr_scale; default 200) |
 | `--alpha-std-dev` | WRFDA alpha_std_dev (default 1) |
 | `--alpha-vertloc-opt {0,1,2}` | vertical localisation: 0 none, 1 --be-vertloc file, 2 log-p (default) |
@@ -4517,11 +4546,13 @@ Takes no options of its own.
 | `--first-guess` | WRF first guess (wrfinput_d01 or a wrfout), WRFDA's fg |
 | `--grid-id` | the bundle's grid name (default: the first guess's file name) |
 | `--iau-window-s` | record an IAU window in the bundle (seconds); default: insert at once |
+| `--jcdfi-use` | WRFDA jcdfi_use (the digital-filter constraint): not ported, refused |
 | `--je-factor` | WRFDA je_factor (required with an ensemble): Jb is weighted je/(je-1); <= 1 is full-ensemble mode (no static B) |
 | `--landuse-table` | LANDUSE.TBL for the roughness (default: woof's packaged WRF table) |
 | `--log` | also write the minimiser log to this file |
 | `--max-ext-its` | outer loops (WRFDA max_ext_its; default 1) |
 | `--max-vert-var-alpha` | percent of the localisation's variance kept (WRFDA max_vert_var_alpha; default 99) |
+| `--multi-inc {0,1,2}` | WRFDA multi_inc: only 0 (one resolution) is ported; 1 and 2 are refused |
 | `--no-orthonorm-gradient` | turn off WRFDA's orthonorm_gradient (on by default, as in the tutorial) |
 | `--no-varbc` | radiances without bias correction |
 | `--ntmax` | inner iterations per outer loop (WRFDA ntmax; default 50) |
@@ -4532,6 +4563,13 @@ Takes no options of its own.
 | `--radiance-scene` | a cached imager scene directory (woof.obs.imager_scene: SatWeave, GOES ABI, AHI, SEVIRI); repeat for several |
 | `--thinning-km` | GSI thinning mesh (WRFDA thinning_mesh; default 60 km) |
 | `--tier {reference,oracle,production}` | reference: NumPy binary64 (default); oracle: GPU binary64 with WRFDA's serial dot product; production: GPU binary32 |
+| `--time-step` | WRF time_step in seconds (default: the first guess's DT) |
+| `--time-window-max` | WRFDA time_window_max (default: the last --fgat-first-guess's time) |
+| `--time-window-min` | WRFDA time_window_min, YYYY-MM-DD_hh:mm:ss (default: --first-guess's time); 4D-Var's analysis is at the window's start |
+| `--var4d-bin` | WRFDA var4d_bin in seconds (default: the window over the slots); must divide the window and be divisible by the time step |
+| `--var4d-lbc` | WRFDA var4d_lbc (the boundary control): not ported, refused |
+| `--var4d-ph {zero,hydrostatic}` | the TL start's g_ph: zero as WRFDA (default) or the opt-in hydrostatic g_ph |
+| `--var4d-press {wrfda,dnw}` | da_transfer_xatowrftl's g_p integration: WRFDA's (default, word-exact) or the opt-in dnw correction |
 | `--varbc-in` | WRFDA VARBC.in; default: a cold start for every sensor |
 | `--varbc-out` | write the updated coefficients (VARBC.out) |
 | `--window-minutes` | observation window half-width around the first guess's time (default 60; WRFDA's time_window_min/max) |

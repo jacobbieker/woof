@@ -132,7 +132,7 @@ def prepare_mynn_surface_column_batch(inputs, *, mol, ustm, outputs=None,
                                       members, ny, nx, dx, available_bytes,
                                       isfflx=1, isftcflx=0, variant="wrf_461",
                                       array_module=None, reserved_bytes=0,
-                                      psih_zolzt=False):
+                                      psih_zolzt=False, q2_land_cap=False):
     """Bind one ordinary MYNN surface kernel over all resident members.
 
     The first-step seeding is owned by the preceding surface-driver seam.
@@ -167,8 +167,8 @@ def prepare_mynn_surface_column_batch(inputs, *, mol, ustm, outputs=None,
         _resident(array, xp=array_module, device=device, shape=shape, name=name)
     _validate_surface_aliases(inputs, outputs, mol=mol, ustm=ustm)
     # RunConfig.mynn_sfclay_psih_zolzt (FQ3), as the scalar launch.
-    defines = mynn_surface_defines(variant, psih_zolzt)
-    kernel = mynn_surface_kernel(variant, psih_zolzt=psih_zolzt)
+    defines = mynn_surface_defines(variant, psih_zolzt, q2_land_cap)
+    kernel = mynn_surface_kernel(variant, psih_zolzt=psih_zolzt, q2_land_cap=q2_land_cap)
     arrays = tuple(inputs[name] for name in MYNN_SURFACE_INPUTS) + (mol, ustm)
     arrays += tuple(outputs[name] for name in MYNN_SURFACE_OUTPUTS)
     count = members * ny * nx

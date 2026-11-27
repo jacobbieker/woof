@@ -557,10 +557,15 @@ def _h2_row_passive(traj) -> tuple:
 
 
 def h2_tl(state, pert_state, traj, pert, geom: H2Geometry, *, nl=True):
-    """WRF horizontal_diffusion_2's row (horizontal_diffusion_u_2, _v_2,
-    _w_2 or _s) on woof's strict wrf_smag_hd_u / _v / _w or wrf_smag_flux_s
-    + wrf_smag_hd_s: ``tend`` (accumulated) of the row's active inputs
-    (:func:`h2_active`)."""
+    """One diff_opt 2 row: WRF horizontal_diffusion_2's (rows u, v, w, t,
+    s: horizontal_diffusion_u_2, _v_2, _w_2 or _s on woof's strict
+    wrf_smag_hd_u / _v / _w or wrf_smag_flux_s + wrf_smag_hd_s) or
+    vertical_diffusion_2's (rows vu, vv, vw, vt, vs: vertical_diffusion_u_2,
+    _v_2, _w_2 and vertical_diffusion_s with their isfflx surface terms, on
+    woof's strict dycore.launch_wrf_smag2d_vertical: wrf_smag_vd_u / _v /
+    _w / _s then wrf_smag_surface_u / _v (or _cd0),
+    wrf_smag_surface_heat_const and wrf_smag_surface_scalars).  ``tend``
+    (accumulated) of the row's active inputs (:func:`h2_active`)."""
     act, pas = h2_active(geom), h2_passive(geom)
     traj = _h2_traj3(traj, geom)
     _h2_check(geom, _named("state", H2_STATE, state) + _named("pert_state", H2_STATE, pert_state)

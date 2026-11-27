@@ -7,14 +7,19 @@ block, in the Fortran's order and halo extents:
    constant coefficients (``config_use_const_visc``/``_diff``) and the
    Richardson-number ones (``config_use_rich_visc``/``_diff``: density and
    displaced density through :mod:`~woof.hex.mpas_ocean.eos_v842`, then
-   ``ocn_vmix_get_rich_numbers``), then Redi's vertical diffusion
-   (``ocn_vmix_coefs_redi_build``, with ``config_use_standardGM``: GM's
-   ``k33`` added over ``nCellsSolve``);
+   ``ocn_vmix_get_rich_numbers``), then CVMix (``config_use_cvmix``,
+   ``ocn_vmix_coefs_cvmix_build``: :mod:`~woof.hex.mpas_ocean.cvmix_v842`,
+   RKIND 8), then Redi's vertical diffusion (``ocn_vmix_coefs_redi_build``,
+   with ``config_use_standardGM``: GM's ``k33`` added over ``nCellsSolve``);
+   with CVMix, the cell viscosity averaged to the edges;
 2. ``ocn_vel_vmix_tend_implicit``: the edge thicknesses and a tridiagonal
    solve of each edge's column, with the implicit bottom drag
    (``config_use_implicit_bottom_drag``);
 3. ``ocn_tracer_vmix_tend_implicit`` for the active tracers, with their
-   vertical-mixing budget (``config_compute_active_tracer_budgets``).
+   vertical-mixing budget (``config_compute_active_tracer_budgets``) and
+   KPP's non-local flux in the right-hand side
+   (``config_cvmix_kpp_nonlocal_with_implicit_mix``, ``ocn_compute_kpp_rhs``:
+   ``vertNonLocalFlux`` times ``nonLocalSurfaceTracerFlux``).
 
 The kernels (``vmix_v842.cu``) are held word for word to the v8.4.2
 routines, compiled verbatim with gfortran ``-O0 -ffp-contract=off`` at RKIND
@@ -35,8 +40,9 @@ word for word; ``woof_redi_k33 = 'kappa'`` adds ``config_Redi_kappa * k33``
 instead (:func:`redi_k33_kappa_scaled`).
 
 Refused by name, as not ported: the tanh coefficients
-(``config_use_tanh_visc``/``_diff``) and CVMix (``config_use_cvmix``).
-One-level meshes raise (the bottom drag reads level 2).
+(``config_use_tanh_visc``/``_diff``), and CVMix's own refusals
+(:func:`woof.hex.mpas_ocean.cvmix_v842.check_config`: CVMix at RKIND 4 among
+them). One-level meshes raise (the bottom drag reads level 2).
 """
 from __future__ import annotations
 
@@ -47,11 +53,11 @@ import numpy as np
 
 from woof.hex.errors import ConfigurationRefusal
 
-from . import eos_v842
+from . import cvmix_v842, eos_v842
 from .tend_v842 import COMPILE_OPTIONS, PRECISIONS, _precision_of, launch_options
 
 SOURCE_FILES = (
-    "src/core_ocean/shared/mpas_ocn_vmix.F:88-631,646-813",
+    "src/core_ocean/shared/mpas_ocn_vmix.F:88-631,646-858",
     "src/core_ocean/shared/mpas_ocn_vmix_coefs_const.F",
     "src/core_ocean/shared/mpas_ocn_vmix_coefs_rich.F",
     "src/core_ocean/shared/mpas_ocn_vmix_coefs_redi.F",
@@ -88,13 +94,14 @@ def _launch(precision: str, name: str, n: int, args: tuple) -> None:
             ((n + _BLOCK - 1) // _BLOCK,), (_BLOCK,), args)
 
 
-def check_config(configs: dict) -> None:
-    """Refuse, by name, the coefficient schemes this port does not carry."""
+def check_config(configs: dict, precision: str | None = None) -> None:
+    """Refuse, by name, the coefficient schemes this port does not carry (CVMix
+    at ``precision``'s RKIND among them)."""
     for knob, reason in (("config_use_tanh_visc", "the tanh coefficients are not ported"),
-                         ("config_use_tanh_diff", "the tanh coefficients are not ported"),
-                         ("config_use_cvmix", "CVMix (an external library in MPAS-Ocean) is not ported")):
+                         ("config_use_tanh_diff", "the tanh coefficients are not ported")):
         if configs.get(knob, False):
             raise ConfigurationRefusal(knob=knob, value=True, reason=reason, declaration=f"{knob} = .false.")
+    cvmix_v842.check_config(configs, precision)
     eos_v842.eos_type(configs)
     redi_k33_kappa_scaled(configs)
 
@@ -121,14 +128,28 @@ def redi_k33_kappa_scaled(configs: dict) -> bool:
     return value == "kappa"
 
 
-def vmix_implicit(*, dt: float, mesh: dict, state: dict, tracers: dict, diagnostics: dict, configs: dict) -> None:
+def vmix_implicit(*, dt: float, mesh: dict, state: dict, tracers: dict, diagnostics: dict, configs: dict,
+                  forcing: dict | None = None, tracers_surface_flux: dict | None = None) -> None:
     """``ocn_vmix_implicit`` for one block, in place on the state's velocity and
-    tracers and the diagnostics' coefficients, edge thicknesses and budget."""
+    tracers and the diagnostics' coefficients, edge thicknesses and budget.
+
+    ``forcing`` (``iceFraction``) is read with CVMix's KPP and
+    ``tracers_surface_flux`` (``nonLocalSurfaceTracerFlux``) with
+    ``config_cvmix_kpp_nonlocal_with_implicit_mix``."""
     import cupy as cp
-    check_config(configs)
     h = state["layerThickness"]
     u = state["normalVelocity"]
     precision = _precision_of(h)
+    check_config(configs, precision)
+    for knob, on, missing in (
+            ("config_use_cvmix_kpp", configs.get("config_use_cvmix", False)
+             and configs.get("config_use_cvmix_kpp", False), forcing is None),
+            ("config_cvmix_kpp_nonlocal_with_implicit_mix",
+             configs.get("config_cvmix_kpp_nonlocal_with_implicit_mix", False), tracers_surface_flux is None)):
+        if on and missing:
+            raise ConfigurationRefusal(
+                knob=knob, value=True, reason="this caller does not pass the forcing (sea-ice fraction) or the "
+                "tracers' surface flux (nonLocalSurfaceTracerFlux) it reads", declaration=f"{knob} = .false.")
     real = PRECISIONS[precision]
     i32 = np.int32
     m, d = mesh, diagnostics
@@ -191,10 +212,16 @@ def vmix_implicit(*, dt: float, mesh: dict, state: dict, tracers: dict, diagnost
                 diff, d["RiTopOfCell"], m["maxLevelCell"], i32(n_cells_solve), i32(nl),
                 real(configs["config_rich_mix"]), real(configs["config_bkrd_vert_diff"]),
                 real(configs["config_bkrd_vert_visc"]), real(configs["config_convective_diff"])))
+    cvmix = bool(configs.get("config_use_cvmix", False))
+    if cvmix:
+        cvmix_v842.coefs_build(mesh=m, state=state, diagnostics=d, forcing=forcing, configs=configs)
     if configs.get("config_use_standardGM", False):
         _launch(precision, "ocn_vmix_add_redi_k33_v842", n_cells_solve * (nl + 1), (
             diff, d["k33"], i32(n_cells_solve), i32(nl + 1), real(configs.get("config_Redi_kappa", 0.0)),
             i32(redi_k33_kappa_scaled(configs))))
+
+    if cvmix:
+        cvmix_v842.visc_to_edges(mesh=m, diagnostics=d)
 
     # the implicit velocity and tracer steps
     if not configs.get("config_disable_vel_vmix", False):
@@ -211,8 +238,12 @@ def vmix_implicit(*, dt: float, mesh: dict, state: dict, tracers: dict, diagnost
         d["activeTracerVertMixTendency"][: cells[0]] = group[: cells[0]]
     if not configs.get("config_disable_tr_vmix", False):
         work = cp.zeros((max(cells[0], 1), (4 + 2 * nt) * nl), dtype=real)
+        kpp = bool(configs.get("config_cvmix_kpp_nonlocal_with_implicit_mix", False))
+        nonlocal_flux = d["vertNonLocalFlux"] if kpp else group
+        surface_flux = tracers_surface_flux["nonLocalSurfaceTracerFlux"] if kpp else group
         _launch(precision, "ocn_vmix_tracer_implicit_v842", cells[0], (
-            group, work, h, diff, m["maxLevelCell"], i32(cells[0]), i32(nl), i32(nt), rdt))
+            group, work, h, diff, m["maxLevelCell"], i32(cells[0]), i32(nl), i32(nt), rdt, nonlocal_flux,
+            i32(nonlocal_flux.shape[-1] if kpp else 0), surface_flux, i32(kpp)))
     if budgets:
         _launch(precision, "ocn_vmix_budget_v842", cells[0] * nl * nt, (
             d["activeTracerVertMixTendency"], group, i32(cells[0] * nl * nt), rdt))

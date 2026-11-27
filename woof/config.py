@@ -78,15 +78,21 @@ def validate_surface_radiation_policy(policy: str) -> str:
 class RunConfig:
     def __post_init__(self):
         # woof_quirk_corrections = 'all' / 'none' (woof.quirk_corrections):
-        # every RunConfig correction on / off, however the RunConfig was
-        # built.  A key is read only where its scheme runs
-        # (correct_mode.KEY_SCOPE).  The TOML readers refuse an explicit
-        # conflicting key before this point (apply_run_corrections).
+        # every RunConfig correction on / off.  A RunConfig built from
+        # named keywords has already been resolved as on the TOML route
+        # (_umbrella_resolved_as_in_toml: under 'none' a named key wins and
+        # the umbrella arrives as None); what reaches this point is a full
+        # restatement (replace(), asdict) or a subclass.  A key is read only
+        # where its scheme runs (correct_mode.KEY_SCOPE).
         if self.woof_quirk_corrections in ("all", "none"):
             from woof.quirk_corrections import run_corrections_under
             for key, value in run_corrections_under(
                     self.woof_quirk_corrections).items():
                 object.__setattr__(self, key, value)
+            # resolved under either umbrella: every key explicit, so a
+            # later replace() of one key keeps it, under 'all' as under
+            # 'none' (the umbrella is a meta key, inert in the identity)
+            object.__setattr__(self, "woof_quirk_corrections", None)
         if self._legacy_h_sca is None:
             object.__setattr__(self, "_legacy_h_sca", self.h_sca_adv_order is None)
         if self.h_sca_adv_order is None:
@@ -2637,10 +2643,13 @@ class RunConfig:
     # The umbrella over the quirk corrections (woof.quirk_corrections).
     # Unset (None, the default), each correction key keeps its own value,
     # whose default follows the physics mode (correct: on; exact or a
-    # strict WRF process: off).  'all' turns every RunConfig correction on
-    # and 'none' turns every one off (__post_init__); the TOML readers
-    # (load_config, build_experiment) refuse a key set the other way next
-    # to it, by name.
+    # strict WRF process: off).  'all' turns every RunConfig correction on;
+    # a key set false next to it is refused by name.  'none' turns off
+    # every correction not named, and a named key wins.  Under either, the
+    # RunConfig then holds it resolved (None, every key explicit), so a
+    # replace() of one key keeps that key.  The same rule on every
+    # route: the TOML readers and RunConfig(...) both resolve through
+    # woof.quirk_corrections.apply_run_corrections.
     woof_quirk_corrections: str | None = _config_field(default=None, kw_only=True)
     # Opt-in correction of a WRF 4.7.1 quirk (quirk pass 2026-11-21),
     # appended off.  The MYNN surface layer (sf_sfclay_physics = 5)
@@ -2686,6 +2695,18 @@ class RunConfig:
     # Correct-mode finding FQ6: on by default, off in physics.mode = 'exact'.
     rrtmg_lw_model_top: bool = _config_field(
         default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
+    # Correction of a WRF 4.7.1 quirk (quirk pass 2026-11-23), appended.
+    # Thompson's cloud-water mass/number balance forms the cloud slope lamc
+    # from the entry cloud mass rc(k) (module_mp_thompson.F:3003, a copy of
+    # :1833) although the balance's mass is the updated xrc; the clamp
+    # branches then rediagnose the number from xrc.  True forms lamc from
+    # xrc; False is WRF's arithmetic word for word.  It changes the cloud
+    # number tendency, which only the aerosol-aware schemes carry out of the
+    # call (mp_physics = 28, 38).  Correct-mode finding FQ7: on by default,
+    # off in physics.mode = 'exact'.
+    thompson_lamc_updated_rc: bool = _config_field(
+        default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
+
     # Correction of a WRF 4.7.1 quirk (P3a item 5 follow-up), appended.
     # compute_diff_metrics (module_diffusion_em.F:7037-7067, 7087-7117)
     # fills a periodic axis's seam slope (zx at ids and ide, zy at jds and
@@ -2698,6 +2719,84 @@ class RunConfig:
     # finding FQ12: on by default, off in physics.mode = 'exact'.
     diff_metrics_seam_slope: bool = _config_field(
         default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
+
+    # Noah's land-ice arm (SFLX_GLACIAL, sf_surface_physics = 2) keeps liquid
+    # rain in PRCPF/PRCP1 (module_sf_noahlsm_glacial_only.F:287, :912) and
+    # books only the snowmelt as RUNOFF1 (:406), so rain on a glacier point
+    # leaves the water budget unbooked.  True books it as surface runoff;
+    # False is WRF's arithmetic word for word.  Read only by Noah.
+    # Correct-mode finding FQ8: on by default, off in physics.mode = 'exact'.
+    noah_land_ice_rain_runoff: bool = _config_field(
+        default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
+    # Correction of a WRF 4.7.1 quirk (quirk pass 2026-11-26), appended.
+    # The Kain-Fritsch family (cu_physics = 1, 10, 11) caps the downdraft
+    # with DDINC = TRPPT/TDER and forms PPTFLX = TRPPT - TDER with no floor
+    # (module_cu_kfeta.F:1810-1821, module_cu_kfcup.F:2711-2721,
+    # module_cu_mskf.F:5840); in binary32 TDER*DDINC can round above TRPPT,
+    # so the flux, RAINCV and RAINC go a few ulp negative.  True floors
+    # the flux at zero (the float64 answer); False is WRF's arithmetic word
+    # for word.  Read only where KF, KF-CuP or MSKF runs.  Correct-mode
+    # finding FQ11: on by default, off in physics.mode = 'exact'.
+    kf_capped_downdraft_rain_floor: bool = _config_field(
+        default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
+
+    # Correction of a WRF 4.7.1 quirk (quirk pass 2026-11-26), appended.  The
+    # MYNN surface layer (sf_sfclay_physics = 5) caps the 2 m mixing ratio
+    # at 1.05 * QV1D at every point (module_sf_mynn.F:1149), water included;
+    # the surface driver's cap of the same limit
+    # (module_surface_driver.F:4452-4456) runs over land (XLAND < 1.5) only.
+    # True keeps the cap over land and leaves the surface-flux Q2 over water
+    # (kernels/mynn_surface.cu MYNN_SL_Q2_LAND_CAP), which moves only Q2 and
+    # what is derived from it; False is WRF's arithmetic word for word.
+    # wrf_461 variant only.  Correct-mode finding FQ10: on by default, off in
+    # physics.mode = 'exact'.
+    mynn_sfclay_q2_land_cap: bool = _config_field(
+        default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
+
+    # Correction of a WRF 4.7.1 quirk (quirk pass 2026-11-26), appended.
+    # Noah's soil heat flux under snow (SFLX, sf_surface_physics = 2) computes
+    # the series (harmonic) snow-soil conductivity DF1H and never reads it
+    # (module_sf_noahlsm.F:649); the flux blends the thickness-weighted
+    # arithmetic DF1A (:656, :663), a parallel-flow mean of layers the heat
+    # crosses in series.  True blends DF1H (WRF's own commented
+    # lines at :654-655 weigh it by snow cover); False is WRF's arithmetic word for word.  Read only by Noah.
+    # Correct-mode finding FQ9: on by default, off in physics.mode = 'exact'.
+    noah_snow_series_conductivity: bool = _config_field(
+        default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
+
+
+def _umbrella_resolved_as_in_toml(init):
+    """RunConfig.__init__, wrapped so that a RunConfig built in Python with
+    an explicit ``woof_quirk_corrections`` resolves it as the TOML readers
+    do (woof.quirk_corrections.apply_run_corrections): under 'none' a
+    correction key passed by name wins, under 'all' one passed false where
+    its scheme runs is refused by name.  __post_init__ cannot tell a key
+    passed True from its default (True in correct mode), so the names are
+    read here.  A call that passes every field (``dataclasses.replace``,
+    ``RunConfig(**asdict(cfg), ...)``) restates a resolved configuration:
+    __post_init__ applies the umbrella to all of it, with no refusal, since
+    a restatement cannot tell a key named in the call from one carried in
+    (``replace(cfg, woof_quirk_corrections='all', key=False)`` gives
+    key=True; in exact mode every key arrives False and 'all' must still
+    turn them on).  A dataclass subclass
+    (_DfiBackwardRunConfig, built from an admitted configuration) has its
+    own __init__ and takes __post_init__'s rule only."""
+    import functools
+
+    @functools.wraps(init)
+    def __init__(self, *args, **kwargs):
+        if (kwargs.get("woof_quirk_corrections") is not None
+                and not kwargs.keys() >= _RUN_CONFIG_INIT_FIELDS):
+            from woof.quirk_corrections import apply_run_corrections
+            kwargs = apply_run_corrections(kwargs)
+        init(self, *args, **kwargs)
+    return __init__
+
+
+_RUN_CONFIG_INIT_FIELDS = frozenset(f.name for f in fields(RunConfig) if f.init)
+
+
+RunConfig.__init__ = _umbrella_resolved_as_in_toml(RunConfig.__init__)
 
 
 def _validate_solar_tsi(cfg) -> None:
@@ -2962,7 +3061,10 @@ CORRECT_MODE_RESTART_BREAK_NOTICE = (
     "mynn_boulac_down_sign, pbl_boulac_down_sign, "
     "gf_deep_rain_evaporation_booking, ysu_surface_heat_exner, "
     "mynn_sfclay_psih_zolzt, noah_smc_floor_booking, "
-    "thompson_rain_snow_closure, rrtmg_lw_model_top); otherwise "
+    "thompson_rain_snow_closure, rrtmg_lw_model_top, "
+    "thompson_lamc_updated_rc, noah_land_ice_rain_runoff, "
+    "noah_snow_series_conductivity, mynn_sfclay_q2_land_cap, "
+    "kf_capped_downdraft_rain_floor); otherwise "
     "restart from t = 0.")
 
 #: The same accuracy for the 2.8.9 WRF-folder default (D8): a fixed-step
@@ -4176,6 +4278,10 @@ def validate_selector_couplings(cfg):
 # the physics family but owns an independent registry-backed adapter.
 KF_ETA_CU_SCHEMES = frozenset({1, 99})
 KF_FAMILY_CU_SCHEMES = KF_ETA_CU_SCHEMES | {11}
+#: The cumulus schemes whose capped-downdraft rain flux
+#: RunConfig.kf_capped_downdraft_rain_floor floors: KF-eta (1), KF-CuP (10)
+#: and MSKF (11).  The old KF (99) forms no capped TRPPT - TDER.
+KF_CAPPED_DOWNDRAFT_CU = frozenset({1, 10, 11})
 #
 # 5 IS WRF'S OWN NUMBER for G3SCHEME, the Grell 3D ensemble scheme
 # (phys/module_cu_g3.F), transcribed in woof/core/kernels/g3.cu and held
@@ -5154,6 +5260,10 @@ THOMPSON_AEROSOL_FAMILY: dict[int, ThompsonAerosolMember] = {
 #: RunConfig.thompson_rain_snow_closure corrects: classic (8), aerosol-aware
 #: (28, either generation) and hail-aware (38).  RCON (29) is not carried.
 THOMPSON_RAIN_SNOW_MP = frozenset({8, 28, 38})
+#: The Thompson schemes RunConfig.thompson_lamc_updated_rc corrects: the
+#: aerosol-aware ones, whose cloud number leaves the call (not RCON, 29, which
+#: is in THOMPSON_AEROSOL_FAMILY).
+THOMPSON_CLOUD_BALANCE_MP = frozenset(_correct_mode.THOMPSON_CLOUD_BALANCE_MP)
 
 
 def thompson_aerosol_aware(mp_physics) -> bool:
@@ -10184,12 +10294,23 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
         raise ConfigurationRefused("thompson_rain_snow_closure must be true or false")
     if type(cfg.rrtmg_lw_model_top) is not bool:
         raise ConfigurationRefused("rrtmg_lw_model_top must be true or false")
+    if type(cfg.thompson_lamc_updated_rc) is not bool:
+        raise ConfigurationRefused("thompson_lamc_updated_rc must be true or false")
+    if type(cfg.kf_capped_downdraft_rain_floor) is not bool:
+        raise ConfigurationRefused(
+            "kf_capped_downdraft_rain_floor must be true or false")
     if type(cfg.diff_metrics_seam_slope) is not bool:
         raise ConfigurationRefused("diff_metrics_seam_slope must be true or false")
+    if type(cfg.noah_land_ice_rain_runoff) is not bool:
+        raise ConfigurationRefused("noah_land_ice_rain_runoff must be true or false")
+    if type(cfg.mynn_sfclay_q2_land_cap) is not bool:
+        raise ConfigurationRefused("mynn_sfclay_q2_land_cap must be true or false")
+    if type(cfg.noah_snow_series_conductivity) is not bool:
+        raise ConfigurationRefused("noah_snow_series_conductivity must be true or false")
     from woof.quirk_corrections import check_run_config
     check_run_config(cfg)
-    # The quirk-ledger keys (correct-mode findings FQ1-FQ6) are on by
-    # default and read only where their scheme runs (correct_mode.KEY_SCOPE,
+    # The quirk-ledger keys (correct-mode findings FQ1-FQ12)
+    # are on by default and read only where their scheme runs (correct_mode.KEY_SCOPE,
     # KEY_GENERATIONS, KEY_UNREAD: YSU's not with BEP/BEM, MYNN's only at
     # wrf_461), so an unread one is inert, not refused.
     if type(cfg.mynn_sfclay_psih_zolzt) is not bool:

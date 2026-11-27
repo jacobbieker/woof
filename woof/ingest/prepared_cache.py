@@ -574,9 +574,24 @@ DEFAULT_TOLERANT_IDENTITY_FIELDS = frozenset({
     # The RRTMG longwave model-top correction (FQ6, the legacy RRTMG longwave
     # only, on in correct mode): step-time; preparation never reads it.
     "run.rrtmg_lw_model_top",
+    # The Thompson cloud slope from the updated mass (FQ7, mp_physics = 28,
+    # 38 only, on in correct mode): step-time; preparation never reads it.
+    "run.thompson_lamc_updated_rc",
+    # The Noah land-ice rain runoff (FQ8, sf_surface_physics = 2 only, on in
+    # correct mode): step-time; preparation never reads it.
+    "run.noah_land_ice_rain_runoff",
+    # The Noah snow series conductivity (FQ9, sf_surface_physics = 2 only, on
+    # in correct mode): step-time; preparation never reads it.
+    "run.noah_snow_series_conductivity",
+    # The Kain-Fritsch capped-downdraft rain floor (FQ11, cu_physics = 1,
+    # 10, 11 only, on in correct mode): step-time; preparation never reads it.
+    "run.kf_capped_downdraft_rain_floor",
     # The diffusion-metrics periodic seam correction (FQ12, diff_opt = 1 or
     # 2, on in correct mode): step-time; preparation never reads it.
     "run.diff_metrics_seam_slope",
+    # The MYNN surface-layer Q2 land cap (FQ10, sf_sfclay_physics = 5 at
+    # wrf_461 only, on in correct mode): step-time; preparation never reads it.
+    "run.mynn_sfclay_q2_land_cap",
     # The opt-in TSI forcing (woof.spacewx), appended off.
     "run.solar_tsi_opt", "run.solar_tsi_source", "run.solar_tsi_mode",
     # The opt-in solar band shares (woof.spacewx), appended off.

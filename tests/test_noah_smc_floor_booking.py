@@ -41,6 +41,10 @@ BEFORE = {
     "noah_mosaic.cu": "d8739ffa18b0f3f594871cd88a7be274697ba3fb583bf788b4ed49209bdc7e19",
 }
 BLOCK = re.compile(r"#ifdef NOAH_SMC_FLOOR_BOOKING\n.*?#endif\n", re.S)
+#: noah_land_ice_rain_runoff's block (FQ8), stripped too: it came after this option
+FQ8_BLOCK = re.compile(r"#ifdef NOAH_LAND_ICE_RAIN_RUNOFF\n.*?#endif\n", re.S)
+#: noah_snow_series_conductivity's block (FQ9), stripped too
+FQ9_BLOCK = re.compile(r"#ifdef NOAH_SNOW_SERIES_CONDUCTIVITY\n.*?#endif\n", re.S)
 
 
 # --- the option -----------------------------------------------------------
@@ -94,7 +98,7 @@ def test_the_default_kernel_source_is_the_source_before_the_option(name):
     blocks = BLOCK.findall(text)
     assert len(blocks) == 1, name
     assert "wplus" in blocks[0] and "0.02f" in blocks[0]
-    assert hashlib.sha256(BLOCK.sub("", text).encode()).hexdigest() == BEFORE[name]
+    assert hashlib.sha256(FQ9_BLOCK.sub("", FQ8_BLOCK.sub("", BLOCK.sub("", text))).encode()).hexdigest() == BEFORE[name]
 
 
 # --- the mirror -------------------------------------------------------------

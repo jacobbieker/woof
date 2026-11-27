@@ -327,9 +327,84 @@ for n, (key, over) in enumerate({GEOMS!r}):
     st, _ = run_tl(g, tr, {{m: cp.zeros_like(tr[m]) for m in X}}, True)
     out[key] = diff(st["tend"], primal(g, tr))
     out[key + "/moves"] = int(diff(st["tend"], tr["tend"]) == 0)
+# near-calm surface words (|u|, |v| ~ 1e-15 at k = 0, a quarter exactly 0):
+# the stress there is set by the primal's 1e-15 speed offset, which the
+# TL's base (and so its calm-word tangent, test_calm_surface_wind) shares
+for n, (row, sfc) in enumerate([(r, s) for r in ("vu", "vv") for s in ("ustm", "cd0")]):
+    g = C.h2_geometry(row=row, surface=sfc, cd0=2e-3 if sfc == "cd0" else 0.0,
+                      rdx=float(f32(1 / dx)), rdy=float(f32(1 / dy)), nz=4, ny=3, nx=4)
+    X = D.h2_active(g)
+    tr = C.h2_trajectory(g, 61 + n, f32, hybrid=True)
+    rng = np.random.default_rng(70 + n)
+    for m in ("u", "v"):
+        tiny = 1e-15 * rng.standard_normal(tr[m][0].shape)
+        tiny[rng.random(tiny.shape) < 0.25] = 0.0
+        tr[m][0] = tiny.astype(f32)
+    tr = dev(tr)
+    st, _ = run_tl(g, tr, {{m: cp.zeros_like(tr[m]) for m in X}}, True)
+    out[f"calm/{{row}}/{{sfc}}"] = diff(st["tend"], primal(g, tr))
+    out[f"calm/{{row}}/{{sfc}}/moves"] = int(diff(st["tend"], tr["tend"]) == 0)
 """, tmp_path, extra_env=STRICT_ENV)
-    assert len(out) == 2 * len(GEOMS)
+    assert len(out) == 2 * len(GEOMS) + 8
     bad = {k: v for k, v in out.items() if v}
+    assert not bad, bad
+
+
+@pytest.mark.parametrize("backend", [b for b in BACKENDS if b.values[0] != "mlx"])
+def test_calm_surface_wind(backend, tmp_path):
+    """At a calm surface word (u = v = 0) the speed sqrt(u^2 + v^2) has no
+    derivative; the TL takes its tangent as zero, so the stress is linear
+    in u (v) over the primal's 1e-15 offset.  Pinned against the base
+    forward itself: with K and the tendency zero, only the surface stress
+    moves the k = 0 words, and a step of 1e-22 (far below the offset)
+    gives the TL's tangent to 1e-6 (the step's own share of the speed is
+    1e-7 of it), for USTM and cd0, periodic and bounded.  The TL and AD
+    stay finite and the dot product holds."""
+    out = _run(backend, f"""
+dt = np.dtype("float64")
+h = 1e-22
+for n, (row, var, over) in enumerate([(r, v, o) for r in ("vu", "vv")
+                                      for v in (dict(surface="ustm"),
+                                                dict(surface="cd0", cd0=2e-3))
+                                      for o in (dict(nz=4, ny=3, nx=4),
+                                                dict(nz=4, ny=4, nx=5, boundary_x=1,
+                                                     boundary_y=1))]):
+    g = C.h2_geometry(row=row, **var, **over)
+    X = D.h2_active(g)
+    tr = C.h2_trajectory(g, 81 + n, dt)
+    tr["u"][0] = 0.0
+    tr["v"][0] = 0.0
+    tr["xk"][...] = 0.0
+    tr["tend"][...] = 0.0
+    tr = dev(tr)
+    rng = np.random.default_rng(90 + n)
+    pe = {{m: cp.zeros_like(tr[m]) for m in X}}
+    for m in ("u", "v"):
+        d = np.zeros(tr[m].shape)
+        d[0] = rng.standard_normal(d[0].shape)
+        pe[m] = cp.asarray(d)
+    base, d = run_tl(g, tr, pe, True)
+    moved = dict(tr, u=tr["u"] + h * pe["u"], v=tr["v"] + h * pe["v"])
+    zero = {{m: cp.zeros_like(tr[m]) for m in X}}
+    nl, _ = run_tl(g, moved, zero, True)
+    fd = (cp.asnumpy(nl["tend"])[0] - cp.asnumpy(base["tend"])[0]) / h
+    tl = cp.asnumpy(d["tend"])[0]
+    key = f"{{row}}/{{var['surface']}}/{{n % 2}}"
+    out[key + "/finite"] = int(np.isfinite(tl).all())
+    out[key + "/moves"] = int(np.abs(tl).max() > 0)
+    out[key + "/fd"] = float(np.abs(fd - tl).max() / np.abs(tl).max())
+    dy = seed(tr, 300 + n, dt)
+    _, adj = run_ad(g, tr, dy)
+    out[key + "/finite_ad"] = int(all(np.isfinite(cp.asnumpy(adj[m])).all() for m in X))
+    out[key + "/dot"] = K.dot_product(
+        lambda dx: [run_tl(g, tr, dict(zip(X, dx)), False)[1]["tend"]],
+        lambda dys: [run_ad(g, tr, {{"tend": dys[0]}})[1][m] for m in X],
+        [pe[m] for m in X], [dy["tend"]])
+""", tmp_path)
+    assert len(out) == 8 * 5
+    bad = {k: v for k, v in out.items()
+           if (v != 1 if k.endswith(("finite", "finite_ad", "moves"))
+               else not v < (1e-6 if k.endswith("/fd") else 1e-12))}
     assert not bad, bad
 
 

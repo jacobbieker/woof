@@ -964,8 +964,9 @@ BASELINE_PINNED: dict[str, str] = {
     # Conditional number/volume, density bins, fallout and diagnostics;
     # 25 oracle CSVs and both-mode state/tendency hashes reproduced at 2f349b417.
     # RE-PINNED 2026-11-23 (FQ5 thompson_rain_snow_closure): #ifdef THOMPSON_RAIN_SNOW_CLOSURE blocks only; without the define the unit's program is unchanged (tests/test_thompson_rain_snow_closure.py).
+    # RE-PINNED 2026-11-23 (FQ7 thompson_lamc_updated_rc): #ifdef THOMPSON_LAMC_UPDATED_RC block only; without the define the unit's program is unchanged (tests/test_thompson_lamc_updated_rc.py).
     "thompson_aerosol_warm":
-        '900e26aa8314c8687173078353ef413052c2f888c2638234600bb9c10e70e765',
+        '6339fdd602cdf97b86ac2219e90c7d8ef7880872bf11d69c672633ff8767b467',
     # 02cfd5301 feat(les): km_opt=2 restart carrier, lateral-boundary arm, TKE budget
     "tke_budget":
         "c7f6dc37f15b25fccbea50deef0c6d595c08b2ee4762f14eef169b654d54fccb",
@@ -1315,7 +1316,18 @@ BASELINE_PINNED: dict[str, str] = {
         # define the preprocessed program is the previous one byte for byte
         # (tests/test_noah_smc_floor_booking.py strips the block and checks the
         # previous digest).  Previously d8739ffa.
-        '5c09214c29f2c9f6b01bec651281778b8d759facfc6c755cbb9cd02bd7237b00',
+        # RE-PINNED 2026-11-23 by the correct-mode noah_land_ice_rain_runoff (FQ8): a
+        # NOAH_LAND_ICE_RAIN_RUNOFF #ifdef block in the glacial tile adds the
+        # rain SFLX_GLACIAL drops to RUNOFF1; without the define the program is
+        # the previous one byte for byte (tests/test_noah_land_ice_rain_runoff.py
+        # strips the block and checks the previous digest).  Previously 5c09214c.
+        # RE-PINNED 2026-11-26 by the correct-mode noah_snow_series_conductivity (FQ9): a
+        # NOAH_SNOW_SERIES_CONDUCTIVITY #ifdef block in the snow soil-heat-flux
+        # blend swaps DF1A for the series DF1H WRF computes and never reads
+        # (module_sf_noahlsm.F:649, :656); without the define the program is
+        # the previous one byte for byte (tests/test_noah_snow_series_conductivity.py
+        # strips the block and checks the previous digest).  Previously 6c208d40.
+        'aeb8c2de7a04c73f2c828c0bf6581e8d414f9c2f75cd398d6e59bda2f87e381c',
     # development branch (smoke, aerosol and air-quality program).  chem_bdy:
     # WRF-Chem's outer-domain flow_dep_bdy_chem, bit-identical to the
     # Fortran on 24 oracle cases (tests/test_chem_bdy_wrf471_parity.py).
@@ -1506,7 +1518,8 @@ BASELINE_PINNED: dict[str, str] = {
     "rrtmgp_rte_default": "731bd84717398320a1710b2c151a466b9e5bf1a30b633d858fd31d7162dbd173",
     # RE-PINNED 2026-11-23 (FQ5 thompson_rain_snow_closure): #ifdef THOMPSON_RAIN_SNOW_CLOSURE blocks only; without the define the unit's program is unchanged (tests/test_thompson_rain_snow_closure.py).
     "thompson_classic": '060b73dd839faf37a330bc180dcc2acc429bbd22bd0018a18179512cf7107426',
-    "thompson_fork": "a916ede73fd7cf39ff585b6889e7e90f04338f6c2b097b638d63a09a11cd9ef4",
+    # RE-PINNED 2026-11-23 (FQ7 thompson_lamc_updated_rc): #ifdef THOMPSON_LAMC_UPDATED_RC block only; without the define the unit's program is unchanged (tests/test_thompson_lamc_updated_rc.py).
+    "thompson_fork": "3f3c7f12faa3f42d125b442c6ee72906c70baf642e55c66ca9a7c1f3f2fed4be",
     # RE-PINNED at the 1.1.0 upstream merge: YSU_KMAX 256 (the fork's ceiling, via the rename of ysu.cu).
     # Previously f56e3ec7.
     "ysu_default": "7192b5b10c683718a9395682bde12a7145c2ca20318047d5a7998b1e87b1fbf2",
@@ -1593,7 +1606,8 @@ PINNED_HEADERS = {
         "a43cc63a6ae846be573e4f550c9a9c40512ced02b8140def12fac08d27dbc9ef",
     # Existing fork radar transcription, reused unchanged by the initial helper.
     # RE-PINNED 2026-11-23 (FQ5 thompson_rain_snow_closure): #ifdef THOMPSON_RAIN_SNOW_CLOSURE blocks only; without the define the unit's program is unchanged (tests/test_thompson_rain_snow_closure.py).
-    "thompson_fork.cu": "a916ede73fd7cf39ff585b6889e7e90f04338f6c2b097b638d63a09a11cd9ef4",
+    # RE-PINNED 2026-11-23 (FQ7 thompson_lamc_updated_rc): #ifdef THOMPSON_LAMC_UPDATED_RC block only; without the define the unit's program is unchanged (tests/test_thompson_lamc_updated_rc.py).
+    "thompson_fork.cu": "3f3c7f12faa3f42d125b442c6ee72906c70baf642e55c66ca9a7c1f3f2fed4be",
 
     # New Goddard band and sounding tables (lane ra5-goddard), prepended to
     # the goddard unit only (kernels._EXTRA_HEADERS).
@@ -1837,7 +1851,7 @@ PINNED_HEADERS = {
     'mskf_aerosol.cuh': '91fefcce94ec7bc775ba526b2d4a95eb4d4c7946ffd95da11f53474a2811bfa9',
     'mynn_scalar_mix.cu': 'abc61827d645ce7af664a7294ecfd289834de5cc57b485bff20e20d27ed17c1f',
     # noah_smc_floor_booking's #ifdef block (default program unchanged).
-    'noah_mosaic.cu': '5c09214c29f2c9f6b01bec651281778b8d759facfc6c755cbb9cd02bd7237b00',
+    'noah_mosaic.cu': 'aeb8c2de7a04c73f2c828c0bf6581e8d414f9c2f75cd398d6e59bda2f87e381c',
     'noah_seaice_options.cuh': '033fec7afc7129e3455aba955f748e6eb49213aeab12e1ad82801b8c2dfd4b7b',
     'noah_ua.cuh': '6ffe8841f48994d15eb1e6dfeb1d2c0667e1ea0ad4b56a2f50c45ca24d07dba1',
     'noah_ua_plain.cuh': '40746bf3560c1922b28a6341a50753c4ec4946842bfa613c5c1f8b8b826f1108',
@@ -2050,4 +2064,8 @@ def test_mosaic_ucm_composed_source_is_pinned():
     assert hashlib.sha256(mosaic_ucm_source().encode()).hexdigest() == (
         # noah_smc_floor_booking's #ifdef block in noah_mosaic.cu, unread
         # without the define.  Previously ebf5a3d1.
-        '5138ec7814e19a0680e9cfd6ff29aba5fc18c3aaa894d3e3b09a3295ccc6c807')
+        # RE-PINNED 2026-11-23 by noah_land_ice_rain_runoff's #ifdef block in
+        # the same file (FQ8), likewise unread.  Previously 5138ec78.
+        # RE-PINNED 2026-11-26 by noah_snow_series_conductivity's #ifdef block in
+        # the same file (FQ9), likewise unread.  Previously 48f6b2fb.
+        '9dd67a4488f07e934d12ba56b31994bf807bdfbeb0d39d069836d80e207ec008')
