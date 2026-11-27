@@ -530,6 +530,92 @@ def test_wddm_preflight_permits_graphics_and_prices_large_pure_cuda(
         allow_shared_gpu=True)["verdict"] == "admitted"
 
 
+LINUX_MPS_PMON = (
+    "# gpu         pid   type     sm    mem    enc    dec    jpg    ofa     fb   ccpm    command \n"
+    "# Idx           #    C/G      %      %      %      %      %      %     MB     MB    name \n"
+    "    0    1861874     G      -      -      -      -      -      -     12      0    Xorg           \n"
+    "    0    3108601   M+C      -      -      -      -      -      -   2410      0    python         \n"
+    "    0    3108653   M+C      -      -      -      -      -      -      -      0    python         \n"
+    "    0    3108700   M+G      -      -      -      -      -      -     30      0    viewer         \n"
+    "    0    3108701 M+C+G      -      -      -      -      -      -     31      0    viewer2        \n"
+    "    0    3108702     M      -      -      -      -      -      -     32      0    idle-client    \n"
+    "    0    3108800     C      -      -      -      -      -      -    300      0    nvidia-cuda-mps-server\n"
+    "    0    3999999     C      -      -      -      -      -      -   9000      0    foreign-python \n"
+)
+
+
+def test_pmon_parses_every_mps_type_and_dash_columns():
+    modes = _parse_pmon_output(LINUX_MPS_PMON)
+    assert modes[3108601] == ("M+C", 2410)
+    assert modes[3108653] == ("M+C", None)
+    assert modes[3108700] == ("M+G", 30)
+    assert modes[3108701] == ("M+C+G", 31)
+    assert modes[3108702] == ("M", 32)
+    assert modes[3999999] == ("C", 9000)
+
+
+@pytest.mark.parametrize("bad", ["X", "M+X", "C+C", "M++C", "", "MC", "m+c"])
+def test_pmon_rejects_unknown_type_strings(bad):
+    row = f"0 41004 {bad or '-'} - - - - - - 5 0 p\n"
+    with pytest.raises(GPUPreflightError, match="unknown pmon type"):
+        _parse_pmon_output(row)
+
+
+def test_pmon_malformed_pid_with_mps_type_still_fails_closed():
+    with pytest.raises(GPUPreflightError, match="malformed pmon PID"):
+        _parse_pmon_output("0 - M+C - - - - - - 5 0 python\n")
+
+
+def test_mps_preflight_tolerates_own_daemon_and_still_prices_foreign_compute(
+        monkeypatch, tmp_path):
+    import woof.supervisor as supervisor
+
+    gpu = GPUIdentity("GPU-test", "610.74", "RTX A6000", 0)
+    modes = _parse_pmon_output(LINUX_MPS_PMON)
+    names = {3108800: "nvidia-cuda-mps-server"}
+    processes = tuple(
+        GPUProcess(gpu.uuid, pid, names.get(pid, "python"), memory, mode)
+        for pid, (mode, memory) in modes.items())
+    own = tmp_path / "pipe"
+    own.mkdir()
+    other = tmp_path / "other-pipe"
+    pipe_of = {3108601: str(own), 3108653: str(own), 3108800: str(own),
+               3108700: str(other), 3108701: None}
+    monkeypatch.setattr(supervisor, "_process_mps_pipe_directory",
+                        lambda pid: pipe_of.get(pid))
+    monkeypatch.setattr(supervisor, "select_gpu", lambda uuid: gpu)
+    monkeypatch.setattr(
+        supervisor, "query_compute_processes", lambda uuid: processes)
+    monkeypatch.setattr(supervisor, "_ADMISSION_WARNED", set())
+    _priced_device(monkeypatch)
+
+    # Under our MPS daemon: siblings and the MPS server are tolerated, the
+    # foreign plain-C process is still the (only) priced co-tenant.
+    monkeypatch.setenv("CUDA_MPS_PIPE_DIRECTORY", str(own))
+    receipt = preflight_exclusive_gpu(gpu.uuid, reservation_bytes=2 ** 30)
+    assert "pid=3999999" in receipt["cotenants"]
+    for pid in (3108601, 3108653, 3108800):
+        assert f"pid={pid} " not in receipt["cotenants"]
+    with pytest.raises(GPUPreflightError, match="pid=3999999"):
+        preflight_exclusive_gpu(gpu.uuid, reservation_bytes=30 * 2 ** 30)
+
+    # Without our daemon nothing is a sibling: the M+C clients and the MPS
+    # server are compute co-tenants like any other.
+    monkeypatch.delenv("CUDA_MPS_PIPE_DIRECTORY")
+    receipt = preflight_exclusive_gpu(gpu.uuid, reservation_bytes=2 ** 30)
+    for pid in (3108601, 3108653, 3108800, 3999999):
+        assert f"pid={pid} " in receipt["cotenants"]
+
+    # A client of ANOTHER daemon (different pipe dir) is foreign even with
+    # ours set; M+G and M (no compute) are never co-tenants.
+    monkeypatch.setenv("CUDA_MPS_PIPE_DIRECTORY", str(own))
+    pipe_of[3108601] = str(other)
+    receipt = preflight_exclusive_gpu(gpu.uuid, reservation_bytes=2 ** 30)
+    assert "pid=3108601 " in receipt["cotenants"]
+    for pid in (3108700, 3108701, 3108702):
+        assert f"pid={pid} " not in receipt["cotenants"]
+
+
 def test_stale_threshold_is_three_p99_with_120_second_floor():
     assert stale_threshold_seconds([1.0, 2.0, 40.0]) == 120.0
     assert stale_threshold_seconds([1.0, 2.0, 50.0]) == 150.0

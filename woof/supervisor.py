@@ -1278,8 +1278,74 @@ def parse_compute_apps_output(output: str) -> tuple[GPUProcess, ...]:
     return tuple(processes)
 
 
+#: nvidia-smi's process-type letters: C compute, G graphics, M MPS client.
+#: pmon/compute-apps join them with ``+`` (C, G, C+G, M, M+C, M+G, M+C+G).
+_PMON_TYPE_LETTERS = frozenset("CGM")
+
+
+def _valid_pmon_type(process_type: str) -> bool:
+    letters = process_type.split("+")
+    return (all(len(letter) == 1 and letter in _PMON_TYPE_LETTERS
+                for letter in letters)
+            and len(set(letters)) == len(letters))
+
+
+def _pmon_is_pure_compute(process_type: str | None) -> bool:
+    """True for a compute context with no graphics part: ``C`` or ``M+C``.
+
+    ``C+G`` rows are WDDM desktop contexts and are permitted; ``M+C`` is a
+    compute process running as an MPS client, which is exactly as much a
+    CUDA co-tenant as a plain ``C``.
+    """
+    if process_type is None or not _valid_pmon_type(process_type):
+        return False
+    letters = set(process_type.split("+"))
+    return "C" in letters and "G" not in letters
+
+
+MPS_SERVER_NAME = "nvidia-cuda-mps-server"
+
+
+def _process_mps_pipe_directory(pid: int) -> str | None:
+    """The ``CUDA_MPS_PIPE_DIRECTORY`` a process was started with, if readable."""
+    try:
+        raw = Path(f"/proc/{pid}/environ").read_bytes()
+    except OSError:
+        return None
+    prefix = b"CUDA_MPS_PIPE_DIRECTORY="
+    for entry in raw.split(b"\0"):
+        if entry.startswith(prefix):
+            return os.fsdecode(entry[len(prefix):])
+    return None
+
+
+def _own_mps_sibling(process: "GPUProcess") -> bool:
+    """True for a process of this run's own MPS daemon.
+
+    That is this run's sibling MPS clients (``M+C`` rows) and the
+    ``nvidia-cuda-mps-server`` that multiplexes them: both are started
+    under the pipe directory this process was given, and a packed
+    multi-run's admission has already priced them.  Anything that cannot be
+    shown to share the pipe directory (another daemon, no MPS here, an
+    unreadable /proc entry) is NOT ours and stays a co-tenant.
+    """
+    own = os.environ.get("CUDA_MPS_PIPE_DIRECTORY")
+    if not own:
+        return False
+    is_client = (process.process_type is not None
+                 and "M" in process.process_type.split("+"))
+    is_server = MPS_SERVER_NAME in (process.process_name or "")
+    if not (is_client or is_server):
+        return False
+    theirs = _process_mps_pipe_directory(process.pid)
+    return theirs is not None and os.path.realpath(theirs) == os.path.realpath(own)
+
+
 def _parse_pmon_output(output: str) -> dict[int, tuple[str, int | None]]:
-    """Return PID -> (C/C+G type, framebuffer MiB) from one pmon sample."""
+    """Return PID -> (type, framebuffer MiB) from one pmon sample.
+
+    Types are any ``+``-joined combination of C, G and M.
+    """
     result: dict[int, tuple[str, int | None]] = {}
     for line in output.splitlines():
         stripped = line.strip()
@@ -1300,7 +1366,7 @@ def _parse_pmon_output(output: str) -> dict[int, tuple[str, int | None]]:
             raise GPUPreflightError(
                 f"GPU preflight failed closed: malformed pmon PID {line!r}") from exc
         process_type = parts[2]
-        if process_type not in {"C", "G", "C+G"}:
+        if not _valid_pmon_type(process_type):
             raise GPUPreflightError(
                 f"GPU preflight failed closed: unknown pmon type {process_type!r}")
         result[pid] = process_type, _memory_mib(parts[9])
@@ -1525,7 +1591,8 @@ def preflight_exclusive_gpu(gpu_uuid: str, *,
     conflicts = [
         process for process in query_compute_processes(gpu_uuid)
         if (process.pid not in approved
-            and process.process_type == "C"
+            and _pmon_is_pure_compute(process.process_type)
+            and not _own_mps_sibling(process)
             and (process.used_gpu_memory_mib in (None, 0)
                  or process.used_gpu_memory_mib > memory_threshold_mib))
     ]
