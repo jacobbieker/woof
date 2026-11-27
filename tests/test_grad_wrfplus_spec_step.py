@@ -239,7 +239,7 @@ for part in ("fold", "final", "sph", "rows", "halo", "qv_final", "qv_capture", "
     assert len(drops) == 8 and all(drops.values()), drops
     # the step inputs (the 11 periodic ones and the halo) and 4 scratch,
     # and on a moist state the species and two sumflux accumulators
-    assert len(out) == len(CASES) * (11 + 1 + 4) + sum(c[5] for c in CASES) * (3 + 2)
+    assert len(out) == len(CASES) * (11 + 1 + 4) + sum(bool(c[5]) for c in CASES) * (3 + 2)
     bad = {k: v for k, v in out.items() if v}
     assert not bad, bad
 
@@ -327,7 +327,12 @@ for dtn in {dtypes!r}:
 @pytest.mark.parametrize("backend", NO_MLX)
 def test_specified_step_tl_matches_finite_differences(backend, tmp_path):
     """||NL(x + a dx) - NL(x)|| / ||a TL dx|| -> 1 in binary64, dx over
-    the inputs and the boundary tables."""
+    the inputs and the boundary tables.  With moist_adv_opt 1 the species
+    are perturbed relative to themselves: the seeded qr is zero on about
+    half the cells, where the limiter's scale sits on max(0, ratio)'s
+    kink, and an absolute perturbation crosses it at every a (the TL
+    takes the base's branch, and qr's TL then misses its finite difference
+    by about 20% at every a)."""
     out = _run(backend, f'''
 for i, (warm, nstep, msf, shift, times, moist) in enumerate({CASES!r}):
     cfg, state = build(warm, msf, shift, times=times, moist=moist)
@@ -336,6 +341,10 @@ for i, (warm, nstep, msf, shift, times, moist) in enumerate({CASES!r}):
     ALL = IN + M.step_parameters(geoms[0])
     x0 = M.run_state(state, cfg, np.float64)
     p = pert(x0, ALL, 30 + i)
+    if moist == 2:
+        rng = np.random.default_rng(90 + i)
+        p = [1e-3 * x0[n] * cp.asarray(rng.standard_normal(x0[n].shape)) if n in M.SPECIES
+             else a for n, a in zip(ALL, p)]
     def model(xs):
         t = copy(x0)
         for n, a in zip(ALL, xs):

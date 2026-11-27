@@ -13,8 +13,9 @@ the three mass fluxes.  ``rdz`` is ``rdnw`` for scalar, u and v and
 There is no ``has_msf=False``: pass ``msf`` of ones, which gives the
 same words (1.0 * rdx is exact).
 
-Not covered: h_*_adv_order 2 (the legacy idealized path), WENO and
-monotonic/positive-definite limiters.
+Not covered: h_*_adv_order 2 (the legacy idealized path), WENO and the
+monotonic limiter; the positive-definite one is
+:mod:`woof.grad.wrfplus.pdadv`.
 """
 
 from __future__ import annotations
