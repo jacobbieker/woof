@@ -50,7 +50,7 @@ permissions:
   contents: read
 
 env:
-  PIXI_VERSION: v0.81.0
+  PIXI_VERSION: v0.85.0
   PYTHONUNBUFFERED: "1"
 
 jobs:

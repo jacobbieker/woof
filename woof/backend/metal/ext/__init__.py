@@ -142,9 +142,21 @@ def _build_into(directory: Path) -> Path:
     return built
 
 
-@lru_cache(maxsize=1)
+_LOAD_LOCK = threading.RLock()
+
+
 def load():
-    """The ``_woof_metal_launch`` module, building it on first use."""
+    """The ``_woof_metal_launch`` module, building it on first use.
+
+    One loader at a time: ``lru_cache`` alone lets two threads (the kernel
+    prewarm pool, or rank threads on a free-threaded interpreter) both run
+    the first load, executing the module twice."""
+    with _LOAD_LOCK:
+        return _load()
+
+
+@lru_cache(maxsize=1)
+def _load():
     if sys.platform != "darwin":
         raise RuntimeError("woof's Metal launcher runs on macOS only")
     import mlx.core  # noqa: F401  -- registers mx.array before our module loads

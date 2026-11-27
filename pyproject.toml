@@ -66,6 +66,7 @@ gpu-mlx = ["mlx>=0.29; sys_platform == 'darwin' and platform_machine == 'arm64'"
            "libclang>=18.1",
            "nanobind>=3.0,<3.2; sys_platform == 'darwin' and platform_machine == 'arm64'"]
 # The wrf-rust Python bindings, for the renderer's Python-side helpers.
+# <0.3: a pre-1.0 minor release may change the bindings' API (0.2.50 is the newest; nothing held back).
 render = ["wrf-rust>=0.2.39,<0.3"]
 # The legacy Python warp path of the high-resolution static builder; the
 # default path is the Rust static-fields library in the bundle.
@@ -74,6 +75,7 @@ geog = ["rasterio>=1.3", "pyproj>=3.6"]
 # which scores forecasts against surface reports outside the IEM front door.
 obs = ["pyarrow>=15"]
 dealias = []
+# ruff==0.13.3: the lint job (tests/test_no_undefined_names.py) is held to one ruff release so new rules cannot redden it.
 dev = ["pytest>=8.0", "pytest-xdist>=3.5", "pyyaml>=6.0", "setuptools>=77", "ruff==0.13.3"]
 publish = ["huggingface_hub>=0.23", "h5py>=3.10"]
 # Opt-in neural-network column physics on CUDA (woof.nn, docs/nn-physics.md):
@@ -268,7 +270,17 @@ name = "woof"
 channels = ["conda-forge"]
 platforms = ["linux-64", { platform = "osx-arm64", macos = "14.0" }]
 
+# prefix.dev's conda-to-PyPI hash mapping holds empty records for conda-forge's
+# free-threaded (cp314t) builds of these packages, so without an overlay the
+# free-threaded environments would install the PyPI copy over the conda one (an sdist
+# build of rasterio and netCDF4 on macOS).  Overlay mode: every other package,
+# and every GIL build, keeps the default mapping.
+[tool.pixi.workspace.conda-pypi-map.conda-forge]
+mapping-mode = "overlay"
+mapping = { cftime = "cftime", google-crc32c = "google-crc32c", msgpack-python = "msgpack", msgspec = "msgspec", netcdf4 = "netcdf4", numcodecs = "numcodecs", numpy = "numpy", pandas = "pandas", pyproj = "pyproj", pyyaml = "pyyaml", rasterio = "rasterio" }
+
 [tool.pixi.feature.base.dependencies]
+# 3.14: CuPy publishes no cp315t (or cp315) wheels yet; the installers and docs target 3.14t.
 python = "3.14.*"
 pip = "*"
 rust = "*"
@@ -361,11 +373,34 @@ ninja = "*"
 make = "*"
 git = "*"
 
+# Free-threaded CPython 3.14t (PEP 703): the model environments (default,
+# cuda12, mlx, cpu) run on it.  conda-forge's python-freethreading metapackage
+# pins python_abi to cp314t, so every conda package resolves to its
+# free-threaded build and pixi's PyPI resolution takes cp314t wheels (or
+# builds the sdist: wrf-rust).  PYTHON_GIL=0 keeps the GIL off when a module
+# that has not declared free-threading support is imported (netCDF4, cftime,
+# numcodecs, icechunk, rapidgzip, google-crc32c), as the woof command line's
+# own re-exec does; activation variables from the other features (mlx's
+# WOOF_BACKEND and PYTHONPATH) are merged with it.
+[tool.pixi.feature.freethreaded.dependencies]
+python-freethreading = "3.14.*"
+
+[tool.pixi.feature.freethreaded.activation.env]
+PYTHON_GIL = "0"
+
+# The GIL twins (*-gil): the standard CPython 3.14 build, held explicitly.
+[tool.pixi.feature.gil.dependencies]
+python_abi = { version = "3.14.*", build = "*_cp314" }
+
 [tool.pixi.environments]
-default = { features = ["base", "cu13"], no-default-feature = true }
-cuda12 = { features = ["base", "cu12"], no-default-feature = true }
-mlx = { features = ["base", "mlx"], no-default-feature = true }
-cpu = { features = ["base", "cpu"], no-default-feature = true }
+default = { features = ["base", "cu13", "freethreaded"], no-default-feature = true }
+cuda12 = { features = ["base", "cu12", "freethreaded"], no-default-feature = true }
+mlx = { features = ["base", "mlx", "freethreaded"], no-default-feature = true }
+cpu = { features = ["base", "cpu", "freethreaded"], no-default-feature = true }
+default-gil = { features = ["base", "cu13", "gil"], no-default-feature = true }
+cuda12-gil = { features = ["base", "cu12", "gil"], no-default-feature = true }
+mlx-gil = { features = ["base", "mlx", "gil"], no-default-feature = true }
+cpu-gil = { features = ["base", "cpu", "gil"], no-default-feature = true }
 libradtran = { features = ["libradtran"], no-default-feature = true }
 mpas-oracle = { features = ["mpas-oracle"], no-default-feature = true }
 
