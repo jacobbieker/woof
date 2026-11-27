@@ -1176,6 +1176,66 @@ Each step is one small PR, taken to merged before the next widens.
        1.1-1.3 ms of AD each (5x their TL); vu and vv take 12 and 10 ms,
        almost all in the tau13/tau23 stage's gather (the deformation
        recomputed per reading word). Same follow-up as 10a.
+   - 10c. The coefficients (2b-3): `k2_tl/k2_ad` (WRF `smag2d_km` at
+     diff_opt 2, km_opt 4: the 10 * mlen cap, the def_limit switch and
+     the terrain-slope limiter alpha from zx, zy and rdzw), `n2_tl/n2_ad`
+     (`calculate_N2`, dry) and `k3_tl/k3_ad` (`smag_km`, km_opt 3:
+     sqrt(max(0, D^2 - N^2/Pr)) with cal_deform_and_div's
+     defor13/23/33 recomputed from u, v, w and the metrics, the
+     mix_isotropic branches, the floor 1e-6 l^2 and the
+     mix_upper_bound caps, the four coefficients), on woof's strict
+     `wrf_smag2d_km`, `wrf_calc_n2` and `wrf_smag3d_km` +
+     `wrf_smag_km_bc`.
+     - Active: the deformation, php (the metrics), u, v and w (km_opt
+       3's vertical deformation), BN2 (km_opt 3) and thp (calc_n2).
+       Passive: phb, thb and the map factors. The coefficients are
+       overwritten, so their adjoints are consumed.
+     - Kink conventions are woof's (the oracle is FD of WRF's nonlinear
+       routines, graded off the kinks): no derivative at a cap or floor,
+       sqrt' and |.|' = 0 at 0 (a rest base state has a zero TL), the
+       def_limit switch is a branch.
+     - Oracle: `diffusion2.F90` row 7 (WRF 4.7.1's `smag2d_km`,
+       `calculate_N2` and `smag_km` from `libwrflib.a`; FD for the TL
+       and AD), `tests/data/wrfplus/kcoef2.npz`. `module_diffusion_em.F`
+       is unchanged in these routines in 4.8.1.
+     - Tests (`tests/test_grad_wrfplus_kc2.py`, 7 configurations:
+       periodic, bounded, channel, length-2 axes, the cold seam,
+       isotropic): dot product (binary64 to 1e-12) flat, steep (alpha
+       off its floor) and, for smag_km, a strongly stable BN2 on half
+       the points (the max(0, .) clamp and the floor); overwrite and
+       consume; TL against FD; the WRF oracle; the strict primal's words
+       (and that the seam, isotropic and alpha switches move them); a
+       1-D base theta; geometry refusals.
+     - Cost (A6000, 40 x 120 x 120, binary32, periodic, steep, median of
+       20, 2026-11-27; primal = the strict kernel):
+
+       | op | primal | TL | AD |
+       |---|---|---|---|
+       | k2 (smag2d_km) | 0.139 ms | 0.243 ms (1.7x) | 1.83 ms (13x) |
+       | n2 (calculate_N2) | 0.103 ms | 0.200 ms (1.9x) | 0.81 ms (7.9x) |
+       | k3 (smag_km) | 0.898 ms | 1.18 ms (1.3x) | 122 ms (136x) |
+
+       k3's AD re-evaluates the whole dual `h2_km3` (with its
+       defor13/23 recomputation) for every output word in each input's
+       window: 36 outputs for a w word. It is the first target of the
+       diff_opt 2 AD perf pass.
+   - 10d. The step binding (2b-3, `woof/grad/wrfplus/model.py`):
+     diff_opt 2 with km_opt 3 or 4, dry, bl_pbl_physics 0, in
+     `dycore._compute_wrf_smag_tendencies`' order: the deformation, the
+     coefficients, the u and v rows (each into its zeroed held slot,
+     then `_zero_open_strips`), w and theta, `launch_wrf_smag2d_vertical`'s
+     rows with the isfflx 0-2 surface terms (km_opt 4's theta row is the
+     prescribed heat flux alone, since smag2d_km leaves xkhv = 0), the
+     strips of every slot again, then the coupling as diff_opt 1.
+     `_restore_open_ring_surface_fluxes` is a no-op: open boundaries are
+     refused.
+     - Refused by name: diff_opt 2 with km_opt 1, 2 or 5, moist
+       diff_opt 2, a PBL scheme, a surface layer (USTM, HFX, QFX),
+       isfflx outside 0-2, `GPUWM_WRF_EXACT_DIFFUSION=0`, diff_opt 2
+       outside strict mode, `tc_horizontal_length_m` and `m_opt`.
+     - Tests (`tests/test_grad_wrfplus_mix2_step.py`): the forward
+       against `dycore.step` word for word, dot product, base-only step
+       = the joint base, TL against FD, and the refusals.
 
 Cost is measured from item 2 on. Kernel-level AD/forward ratios are
 reported at every merge, so a G3 cost miss shows up before item 8.

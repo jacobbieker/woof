@@ -1575,6 +1575,12 @@ Notes on the 1.1.7 sync:
   (`hd_tl/hd_ad`: WRF `horizontal_diffusion` for u, v, w and scalars,
   `horizontal_diffusion_3dmp` for theta) reproduce woof's strict
   `wrf_diff_opt1_horizontal` and match WRFPLUS to about 1e-16.
+  diff_opt 2 with km_opt 3 or 4 (dry, no PBL or surface layer) is bound
+  too: `horizontal_diffusion_2` and `vertical_diffusion_2` with its
+  isfflx 0-2 surface terms, and the coefficients (`smag2d_km` with its
+  terrain-slope limiter, `calculate_N2` and `smag_km`), each reproducing
+  woof's strict kernels word for word and checked against FD of WRF
+  4.7.1's own routines.
 - **LETKF host solve on every core by default (Linux).** An analysis on host
   arrays (no `solve_namespace`, the dense reference route) now runs its
   chunks on forked worker processes once the work is large (2x10^8
