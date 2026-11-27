@@ -730,6 +730,21 @@ Everything is listed with the help text the tool itself prints.  A door's positi
 | `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
 | `--out-report REPORT` | write the comparison document here |
 
+## `woof ducting`
+
+| argument | what it does |
+|---|---|
+| `PATH [PATH ...]` | run folders (searched recursively) or wrfout files |
+
+| option | what it does |
+|---|---|
+| `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
+| `--glob` | file-name pattern searched under folders |
+| `--max-height` | search ducts up to this height above ground in metres |
+| `--out` | directory for the per-frame NetCDF files and ducting_summary.csv |
+| `--region` | GeoJSON Polygon/MultiPolygon (lon/lat) limiting the summary region |
+| `--sea-only` | summarise sea columns only (LANDMASK < 0.5) |
+
 ## `woof earth2`
 
 | option | what it does |

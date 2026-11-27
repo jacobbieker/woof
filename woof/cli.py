@@ -809,6 +809,7 @@ def build_parser(*, render_only: bool = False, preset_only: bool = False,
     _lazy_register("woof.compose_source")(sub)
     _lazy_register("woof.source_intermediate")(sub)
     _lazy_register("woof.storm_diagnostics")(sub)
+    _lazy_register("woof.ducting")(sub)
     _lazy_register("woof.tc.cli")(sub)
     go_register_cli(sub)
     # `go` as a batch job: one job document (config URL, companions,
