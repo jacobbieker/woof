@@ -92,6 +92,13 @@ static __device__ __forceinline__ Dl operator/(wreal a, Dl b)
 }
 
 static __device__ __forceinline__ int df_per(int i, int n) { return ((i % n) + n) % n; }
+// df_per for the AD gathers' near-range indices (one image away; the
+// modulo only past that, e.g. on one- and two-cell axes)
+static __device__ __forceinline__ int df_near(int i, int n)
+{
+    int y = i < 0 ? i + n : (i >= n ? i - n : i);
+    return (y >= 0 && y < n) ? y : df_per(i, n);
+}
 
 // The candidate output coordinate c + off on an axis of n points: the
 // periodic image, or -1 when it lies off a bounded axis or repeats the
@@ -1099,6 +1106,23 @@ static __device__ __forceinline__ int h2_jv(const H2Src& s, int j)
 {
     return s.by ? max(0, min(j, s.ny)) : df_per(j, s.ny);
 }
+// the AD gathers' index maps: h2_ix .. h2_jv with df_near
+static __device__ __forceinline__ int h2_cix(const H2Src& s, int i)
+{
+    return s.bx ? max(0, min(i, s.nx - 1)) : df_near(i, s.nx);
+}
+static __device__ __forceinline__ int h2_ciy(const H2Src& s, int j)
+{
+    return s.by ? max(0, min(j, s.ny - 1)) : df_near(j, s.ny);
+}
+static __device__ __forceinline__ int h2_ciu(const H2Src& s, int i)
+{
+    return s.bx ? max(0, min(i, s.nx)) : df_near(i, s.nx);
+}
+static __device__ __forceinline__ int h2_cjv(const H2Src& s, int j)
+{
+    return s.by ? max(0, min(j, s.ny)) : df_near(j, s.ny);
+}
 
 // ---- metrics (wrf_phi, wrf_exact_z_at_w, wrf_rdzw, wrf_rdz, wrf_zx, wrf_zy)
 
@@ -1464,14 +1488,14 @@ static __device__ __forceinline__ wreal h2_face_w(const H2Src& s, int kw, int lw
 static __device__ wreal h2_hscoef(const H2Src& s, int id, int y, int q, int k, int j, int i,
                                   int lw, int jw, int iw)
 {
-    int ja = h2_iy(s, j), ia = h2_ix(s, i), jb = h2_iy(s, j - y), ib = h2_ix(s, i - 1 + y);
+    int ja = h2_ciy(s, j), ia = h2_cix(s, i), jb = h2_ciy(s, j - y), ib = h2_cix(s, i - 1 + y);
     wreal ca = (jw == ja && iw == ia) ? (wreal)1 : (wreal)0;
     wreal cb = (jw == jb && iw == ib) ? (wreal)1 : (wreal)0;
     switch (q) {
     case 0: return lw == k ? (wreal)0.5 * (cb + ca) : (wreal)0;
     case 1: {
-        int hit = y ? (jw == (s.by ? max(0, min(j, s.ny)) : df_per(j, s.ny)) && iw == ia)
-                    : (jw == ja && iw == (s.bx ? max(0, min(i, s.nx)) : df_per(i, s.nx)));
+        int hit = y ? (jw == (s.by ? max(0, min(j, s.ny)) : df_near(j, s.ny)) && iw == ia)
+                    : (jw == ja && iw == (s.bx ? max(0, min(i, s.nx)) : df_near(i, s.nx)));
         if (!hit) return (wreal)0;
         return (wreal)0.5 * (wreal)((lw == k) + (lw == min(k + 1, s.nz)));
     }
@@ -2197,7 +2221,7 @@ static __device__ Dl h2_eval(const H2Src& s, int o, int k, int j, int i)
 // arithmetic (the wrapper keeps every array below 2^31 words).
 static __device__ __forceinline__ unsigned h2_col(const H2Src& s, int j, int i)
 {
-    return (unsigned)(h2_iy(s, j) * s.nx + h2_ix(s, i));
+    return (unsigned)(h2_ciy(s, j) * s.nx + h2_cix(s, i));
 }
 // 1 / msft at column c when c is the seeded column cw, else 0 (what's
 // tangent)
@@ -2207,10 +2231,9 @@ static __device__ __forceinline__ wreal h2_wt(const H2Src& s, unsigned c, unsign
 }
 
 static __device__ __forceinline__ wreal h2_pcoef(const H2Src& s, int o, int k, int j, int i,
-                                                 unsigned w)
+                                                 unsigned w, unsigned lw, unsigned cw)
 {
-    const unsigned m2 = (unsigned)(s.ny * s.nx);
-    const unsigned lw = w / m2, cw = w - lw * m2;   // a mass or w-level word's level, column
+    // lw, cw: a mass or w-level word's level and column (h2_pgather)
     if (o >= H2O_TWP && o < H2O_TWP + 14) {
         int y = (o - H2O_TWP) / 7, q = (o - H2O_TWP) % 7;
         const unsigned kw = (unsigned)k;
@@ -2232,10 +2255,10 @@ static __device__ __forceinline__ wreal h2_pcoef(const H2Src& s, int o, int k, i
             return lw == kw + 1 ? (wreal)0.25 * t : (wreal)0.25 * (-t);
         }
         case 2: {             // zx or zy
-            unsigned at = y ? (unsigned)R3(k, s.by ? max(0, min(j, s.ny)) : df_per(j, s.ny),
-                                           h2_ix(s, i), s.ny + 1, s.nx)
-                            : (unsigned)R3(k, h2_iy(s, j),
-                                           s.bx ? max(0, min(i, s.nx)) : df_per(i, s.nx),
+            unsigned at = y ? (unsigned)R3(k, s.by ? max(0, min(j, s.ny)) : df_near(j, s.ny),
+                                           h2_cix(s, i), s.ny + 1, s.nx)
+                            : (unsigned)R3(k, h2_ciy(s, j),
+                                           s.bx ? max(0, min(i, s.nx)) : df_near(i, s.nx),
                                            s.ny, s.nx + 1);
             return at == w ? (wreal)1 : (wreal)0;
         }
@@ -2244,8 +2267,8 @@ static __device__ __forceinline__ wreal h2_pcoef(const H2Src& s, int o, int k, i
             return (y ? s.rdy : s.rdx) * (h2_wt(s, h2_col(s, j, i), cw)
                                           - h2_wt(s, h2_col(s, jn, in), cw));
         default: {            // DU: u (v) at kw less at kw - 1
-            unsigned c = y ? (unsigned)R3(k, h2_jv(s, j), h2_ix(s, i), s.ny + 1, s.nx)
-                           : (unsigned)R3(k, h2_iy(s, j), h2_iu(s, i), s.ny, s.nx + 1);
+            unsigned c = y ? (unsigned)R3(k, h2_cjv(s, j), h2_cix(s, i), s.ny + 1, s.nx)
+                           : (unsigned)R3(k, h2_ciy(s, j), h2_ciu(s, i), s.ny, s.nx + 1);
             unsigned lvl = y ? (unsigned)((s.ny + 1) * s.nx) : (unsigned)(s.ny * (s.nx + 1));
             return w == c ? (wreal)1 : (w == c - lvl ? (wreal)-1 : (wreal)0);
         }
@@ -2680,6 +2703,9 @@ static __device__ wreal h2_pgather(const H2Src& s, int stage, int id, int k, int
     int slot[8], win[48];
     int np = h2_pairs(s, stage, id, slot, win);
     size_t pst = h2_pstride(s);
+    // the word's level and column (pcoef reads them for the mass and
+    // w-level inputs only, where they are w / (ny nx) and its remainder)
+    unsigned lw = (unsigned)k, cw = (unsigned)(j * s.nx + i);
     wreal acc = (wreal)0;
     for (int p = 0; p < np; ++p) {
         int o = h2_pout(stage, slot[p]);
@@ -2701,7 +2727,8 @@ static __device__ wreal h2_pgather(const H2Src& s, int stage, int id, int k, int
                         for (int bi = 0; bi < ni; ++bi) {
                             int ii = bi ? i1 : i0;
                             wreal a = P[base + R3(kk, jj, ii, s.ny + sy, s.nx + sx)];
-                            if (a != (wreal)0) acc = acc + a * h2_pcoef(s, o, kk, jj, ii, w);
+                            if (a != (wreal)0)
+                                acc = acc + a * h2_pcoef(s, o, kk, jj, ii, w, lw, cw);
                         }
                     }
                 }
@@ -2735,10 +2762,10 @@ static __device__ wreal h2_rcoef(const H2Src& s, int id, int q, int k, int j, in
                                  int jw, int iw, wreal r)
 {
     // zx and zy faces as h2_zx / h2_zy read them
-#define H2_FX(x) (s.bx ? max(0, min((x), s.nx)) : df_per((x), s.nx))
-#define H2_FY(y) (s.by ? max(0, min((y), s.ny)) : df_per((y), s.ny))
+#define H2_FX(x) (s.bx ? max(0, min((x), s.nx)) : df_near((x), s.nx))
+#define H2_FY(y) (s.by ? max(0, min((y), s.ny)) : df_near((y), s.ny))
     if (s.row == 1) {
-        int ic = h2_ix(s, i), im = h2_ix(s, i - 1), jc = h2_iy(s, j);
+        int ic = h2_cix(s, i), im = h2_cix(s, i - 1), jc = h2_ciy(s, j);
         wreal nk = h2_hit(lw, k) + h2_hit(lw, min(k + 1, s.nz));
         switch (q) {
         case 0: {
@@ -2762,7 +2789,7 @@ static __device__ wreal h2_rcoef(const H2Src& s, int id, int q, int k, int j, in
         }
     }
     if (s.row == 2) {
-        int jc = h2_iy(s, j), jm = h2_iy(s, j - 1), ic = h2_ix(s, i);
+        int jc = h2_ciy(s, j), jm = h2_ciy(s, j - 1), ic = h2_cix(s, i);
         wreal nk = h2_hit(lw, k) + h2_hit(lw, min(k + 1, s.nz));
         switch (q) {
         case 0: {
