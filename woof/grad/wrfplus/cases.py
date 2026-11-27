@@ -1156,12 +1156,14 @@ def pd_geometry(nz=7, ny=8, nx=9, **overrides):
 
 
 def pd_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False,
-                  dry: float = 0.4) -> dict:
+                  dry: float = 0.4, wind: float = 1.0) -> dict:
     """Host base state of the PD stage: :func:`su_trajectory`'s, with a
     fraction ``dry`` of near-empty time-t cells (q0 ~ 1e-5, where the
     correction fluxes overdraw the upwind budget, so the limiter acts),
     the stage's species a noisy copy of q0, and the carried acoustic
-    mass ``muts`` near mub + mup."""
+    mass ``muts`` near mub + mup.  ``wind`` scales the mass fluxes: at
+    40 a share of the faces has a Courant number past 0.5, where
+    flux_upwind's clamp holds (and the flux depends on the face mass)."""
     from .pdadv import pd_shapes
     from .scalar import ScalarGeometry
     sg = ScalarGeometry(geom.nz, geom.ny, geom.nx, 1.0 / geom.dx, 1.0 / geom.dy, geom.dt,
@@ -1178,6 +1180,8 @@ def pd_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False,
     if geom.held:
         out["held"] = 1e-3 * rng.standard_normal(sh["held"])
     out["muts"] = out["mub2d"] + out["mup"] + rng.standard_normal(sh["muts"])
+    for n in ("ru_m", "rv_m", "ww_m"):
+        out[n] = wind * out[n]
     return {k: np.ascontiguousarray(v, dtype=dtype) for k, v in out.items()}
 
 
@@ -1196,10 +1200,11 @@ def pd_perturbation(geom, seed: int, dtype=np.float64, traj=None) -> dict:
     return {n: np.ascontiguousarray(v, dtype=dtype) for n, v in out.items()}
 
 
-def pa_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False) -> dict:
+def pa_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False,
+                  wind: float = 1.0) -> dict:
     """The advection alone: :func:`pd_trajectory` with ``q0e`` the
     time-t species (no source) and a zero tendency."""
-    tr = pd_trajectory(geom, seed, np.float64, hybrid=hybrid)
+    tr = pd_trajectory(geom, seed, np.float64, hybrid=hybrid, wind=wind)
     tr["q0e"] = tr.pop("q0")
     tr["tend"] = np.zeros_like(tr["q"])
     for n in ("mup", "held"):

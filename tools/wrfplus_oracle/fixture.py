@@ -2512,6 +2512,10 @@ PD_CASES = {
     "spec": dict(spec=1),
     "spec_msf_h3_v2": dict(spec=1, has_msf=1, horder=3, vorder=2),
     "spec_h6_v4": dict(spec=1, horder=6, vorder=4),
+    # Courant numbers past 0.5 on a share of the faces (flux_upwind's
+    # clamp, where the upwind flux depends on the face mass)
+    "periodic_fast": dict(wind=40.0),
+    "spec_fast_msf": dict(spec=1, has_msf=1, wind=40.0),
 }
 PD_DIMS = dict(nz=7, ny=9, nx=10)
 PD_STEP = 1e-5
@@ -2560,14 +2564,17 @@ def pdadv(exe: str, runner: list[str], seed: int = 20261127) -> dict:
     from woof.grad.wrfplus.pdadv import pd_shapes
     out = {}
     for n, (name, over) in enumerate(PD_CASES.items()):
+        over = dict(over)
+        wind = over.pop("wind", 1.0)
         geom = cases.pd_geometry(**PD_DIMS, **over)
         geom.validate()
         sh = pd_shapes(geom)
         rng = np.random.default_rng(seed + 10 * n + 2)
         prefix = f"{name}/"
         out[prefix + "geometry"] = np.array(json.dumps(dataclasses.asdict(geom)))
+        out[prefix + "wind"] = np.array(wind)
         for hybrid, label in ((False, "plain"), (True, "hybrid")):
-            tr = cases.pa_trajectory(geom, seed + 10 * n, hybrid=hybrid)
+            tr = cases.pa_trajectory(geom, seed + 10 * n, hybrid=hybrid, wind=wind)
             pe = cases.pa_perturbation(geom, seed + 10 * n + 1, traj=tr)
             if not hybrid:   # WRFPLUS's routine has no c1/c2
                 tr["c1h"][...] = 1.0
@@ -2615,8 +2622,6 @@ def pdadv(exe: str, runner: list[str], seed: int = 20261127) -> dict:
             w = f"{prefix}{label}/wrf/"
             out[w + "nl_tend"] = nl[0]
             out[w + "fd_tend"] = (8.0 * (nl[1] - nl[-1]) - (nl[2] - nl[-2])) / (12.0 * PD_STEP)
-            for s in (1, -1, 2, -2):
-                out[w + f"nl_tend_{s:+d}"] = nl[s]
             out[w + "step"] = np.array(PD_STEP)
     return out
 
