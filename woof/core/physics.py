@@ -7734,7 +7734,7 @@ class PhysicsDriver:
         # but only radiation consumes it or publishes ECOBSC/ECMASK/track
         # (module_radiation_driver.F:2940-2950). Skip the unused evaluations.
         if eclipse is not None and radiation_due:
-            eclipse.update(state,cfg)
+            eclipse.update(state,cfg,self.radiation_callable)
         if eclipse is not None and not eclipse.ready():
             radiation_due = True  # Cold cache needs its first undimmed producer.
         if radiation_due:
