@@ -1113,9 +1113,15 @@ Each step is one small PR, taken to merged before the next widens.
        recomputed), the coefficient, alt and php (the metrics zx, zy,
        rdz and rdzw and the density rho = 1/alt, times 1 + qv when
        moist, are recomputed in the TL/AD), the field and qv.
-     - The AD is a seeded forward: each thread seeds one input word and
-       gathers the output words that read it, one writer per word, so
-       the AD is the exact transpose of the TL with no atomics.
+     - The AD is a gather: each thread owns one input word and sums the
+       output words that read it, one writer per word, so the AD is the
+       exact transpose of the TL with no atomics. Since the diff_opt 2
+       AD perf pass, each stage's forward is a function of a few pieces
+       (its statements' factors, in the primal's order, so the forward's
+       words are unchanged): a first pass per output point takes the
+       output's adjoint onto its pieces (seeded partials), then each
+       input word gathers the pieces that read it with coefficients
+       matched by index, without re-running any forward stencil.
      - Finding: `compute_diff_metrics` leaves zx and zy on the end faces
        of the top w level unset (its face loops stop at kde-2). The
        driver sets them by the interior formula (periodic) or to zero
@@ -1126,15 +1132,14 @@ Each step is one small PR, taken to merged before the next widens.
        `GPUWM_WRF_EXACT=1` `dycore` words on every row) and the WRF
        oracle (17 cases: each row periodic, specified, channel and
        moist, plus theta; `tests/data/wrfplus/diffusion2.npz`).
-     - Cost (A6000, 40 x 120 x 120, binary32, periodic, median of 20,
-       2026-11-26; primal = the strict row kernels): TL 1.2x (u), 1.3x
-       (v), 0.4x (w, whose primal recomputes the deformation) and 1.4x
-       (scalar); AD 35x, 25x, 21x and 31x. The AD is far over G3's ~5x:
-       each input word's thread recomputes every reading output word's
-       whole stencil (the deformation, rho and the metrics at every
-       stage), as `df_ad` did before PR #820. Narrowing the gathers to
-       the reading terms is left to a perf pass, as #820 did for
-       `df_ad`.
+     - Cost (A6000, 40 x 120 x 120, binary32, periodic, median of 20;
+       primal = the strict row kernels): TL 1.3x (u), 1.3x (v), 0.4x
+       (w, whose primal recomputes the deformation) and 1.4x (scalar).
+       AD before the perf pass (2026-11-26) 35x, 25x, 21x and 31x;
+       after it (2026-11-27) 1.56 ms (5.1x), 1.47 ms (4.7x), 2.29 ms
+       (2.1x) and 2.17 ms (6.2x). The scalar row is still a little over
+       G3's ~5x: its flux and row gathers (h2_hsp_ad, h2_rowp_ad) and
+       the two first passes are about equal shares.
    - 10b. `vertical_diffusion_2` (2b-2): rows vu, vv, vw, vt and vs of
      `h2_tl/h2_ad` (row codes 4-7, stage VROW), on woof's strict
      `dycore.launch_wrf_smag2d_vertical` (`wrf_smag_vd_u/_v/_w/_s` and
@@ -1172,10 +1177,14 @@ Each step is one small PR, taken to merged before the next widens.
      - Cost (A6000, 40 x 120 x 120, binary32, periodic, moist, USTM,
        HFX and QFX, median of 20, 2026-11-26): the primal
        `launch_wrf_smag2d_vertical` for all rows 0.70 ms; the five rows'
-       TL 1.64 ms (2.4x) and AD 25.8 ms (37x). vw, vt and vs cost about
-       1.1-1.3 ms of AD each (5x their TL); vu and vv take 12 and 10 ms,
-       almost all in the tau13/tau23 stage's gather (the deformation
-       recomputed per reading word). Same follow-up as 10a.
+       TL 1.68 ms (2.4x). AD before the perf pass (2026-11-26) 25.8 ms
+       (37x; vu and vv 12 and 10 ms in the tau13/tau23 gather); after it
+       (2026-11-27) 5.26 ms (7.5x): vu 1.74 ms and vv 1.69 ms (3.6x
+       their TL, half of it the tau13/tau23 piece gather), vw 0.57 ms,
+       vt 0.68 ms and vs 0.57 ms (2.3-2.7x their TL). Each AD call
+       repeats the base forward and the metrics, which the primal's one
+       launch for all rows shares, so the sum over five separate calls
+       stays over 5x the fused primal.
    - 10c. The coefficients (2b-3): `k2_tl/k2_ad` (WRF `smag2d_km` at
      diff_opt 2, km_opt 4: the 10 * mlen cap, the def_limit switch and
      the terrain-slope limiter alpha from zx, zy and rdzw), `n2_tl/n2_ad`
@@ -1207,18 +1216,20 @@ Each step is one small PR, taken to merged before the next widens.
        (and that the seam, isotropic and alpha switches move them); a
        1-D base theta; geometry refusals.
      - Cost (A6000, 40 x 120 x 120, binary32, periodic, steep, median of
-       20, 2026-11-27; primal = the strict kernel):
+       20, 2026-11-27; primal = the strict kernel; AD before and after
+       the diff_opt 2 AD perf pass):
 
-       | op | primal | TL | AD |
-       |---|---|---|---|
-       | k2 (smag2d_km) | 0.139 ms | 0.243 ms (1.7x) | 1.83 ms (13x) |
-       | n2 (calculate_N2) | 0.103 ms | 0.200 ms (1.9x) | 0.81 ms (7.9x) |
-       | k3 (smag_km) | 0.898 ms | 1.18 ms (1.3x) | 122 ms (136x) |
+       | op | primal | TL | AD before | AD after |
+       |---|---|---|---|---|
+       | k2 (smag2d_km) | 0.131 ms | 0.234 ms (1.8x) | 1.83 ms (13x) | 0.551 ms (4.2x) |
+       | n2 (calculate_N2) | 0.102 ms | 0.186 ms (1.8x) | 0.81 ms (7.9x) | 0.398 ms (3.9x) |
+       | k3 (smag_km) | 0.881 ms | 1.21 ms (1.4x) | 122 ms (136x) | 3.09 ms (3.5x) |
 
-       k3's AD re-evaluates the whole dual `h2_km3` (with its
+       Before, k3's AD re-evaluated the whole dual `h2_km3` (with its
        defor13/23 recomputation) for every output word in each input's
-       window: 36 outputs for a w word. It is the first target of the
-       diff_opt 2 AD perf pass.
+       window (36 outputs for a w word). It now takes each point's
+       adjoint onto smag_km's pieces (the mass-point factors and
+       defor13/23's per-slot pieces) and gathers those by index.
    - 10d. The step binding (2b-3, `woof/grad/wrfplus/model.py`):
      diff_opt 2 with km_opt 3 or 4, dry, bl_pbl_physics 0, in
      `dycore._compute_wrf_smag_tendencies`' order: the deformation, the
