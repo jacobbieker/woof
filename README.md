@@ -1808,8 +1808,8 @@ Notes on the 1.1.7 sync:
   it never recommends a packing admission would refuse. Contention comes
   from measured rows: on an RTX A6000, two to eight runs sharing the card
   without MPS each ran 2.2-9.1x slower, so packing gains only start-up
-  overlap there. MPS is priced but not recommended while the GPU preflight
-  refuses MPS clients ([docs/public/HARDWARE.md](docs/public/HARDWARE.md#packing-runs-onto-cards-woof-pack-plan)).
+  overlap there. MPS options compete on their measured makespan like the
+  others ([docs/public/HARDWARE.md](docs/public/HARDWARE.md#packing-runs-onto-cards-woof-pack-plan)).
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`

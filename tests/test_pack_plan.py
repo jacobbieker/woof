@@ -254,30 +254,17 @@ def test_a_measured_option_wins_when_the_prediction_cannot_separate(
     assert best.slots == 1
 
 
-@pytest.mark.parametrize("launchable", [True, False])
-def test_mps_is_recommended_only_when_the_preflight_admits_mps_clients(
-        monkeypatch, launchable):
+@pytest.mark.parametrize("gain,mps_wins", [(0.5, True), (0.97, False)])
+def test_mps_is_recommended_when_its_measured_row_wins_beyond_the_band(
+        monkeypatch, gain, mps_wins):
     def bracket(copies, *, columns, mps, card=None):
-        s = (1.0 + 0.5 * (copies - 1)) * (0.5 if mps else 1.0)
+        s = (1.0 + 0.5 * (copies - 1)) * (gain if mps else 1.0)
         return {"copies": copies, "per_run_slowdown": (s, s),
                 "measured": True, "basis": "test"}
     monkeypatch.setattr(rte, "sharing_bracket", bracket)
-    monkeypatch.setattr(pp, "mps_launchable", lambda: launchable)
     jobs = [_job(n, fixed=0.0) for n in "ab"]
     best, _ = pp.choose(pp.options(jobs, _runner(), max_slots=2))
-    assert best.mps is launchable
-
-
-def test_mps_launchable_reads_the_supervisors_pmon_parser(monkeypatch):
-    import woof.supervisor as supervisor
-
-    monkeypatch.setattr(supervisor, "_parse_pmon_output", lambda text: {})
-    assert pp.mps_launchable() is True
-
-    def refuse(text):
-        raise supervisor.GPUPreflightError("unknown pmon type 'M+C'")
-    monkeypatch.setattr(supervisor, "_parse_pmon_output", refuse)
-    assert pp.mps_launchable() is False
+    assert best.mps is mps_wins
 
 
 def test_one_per_card_with_more_runs_than_cards_is_not_a_multi_run_plan(

@@ -408,34 +408,9 @@ def serial_s(jobs: Sequence[Job]) -> tuple[float, float]:
     return (sum(j.alone_s[0] for j in jobs), sum(j.alone_s[1] for j in jobs))
 
 
-#: Why an MPS option is not recommended while :func:`mps_launchable` is
-#: False.
-MPS_PREFLIGHT_NOTE = (
-    "not recommended: the GPU preflight (woof.supervisor) fails closed on "
-    "the pmon type an MPS client reports, 'M+C'; in the A6000 sweep 1 of 4 "
-    "and 3 of 8 runs launched with --mps exited before their first step")
-
-
-def mps_launchable() -> bool:
-    """Whether this tree's GPU preflight accepts a sibling that is an MPS
-    client.  It reads ``nvidia-smi pmon``, where an MPS client's type is
-    ``M+C``; a preflight that refuses it refuses runs started beside one,
-    so MPS is not recommended until it does."""
-    from woof.supervisor import GPUPreflightError, _parse_pmon_output
-
-    try:
-        _parse_pmon_output("    0    4242   M+C    10     2     -     -     "
-                           "-     -   3000     0   python")
-    except GPUPreflightError:
-        return False
-    return True
-
-
 def choose(opts: Sequence[Option], *, objective: str = "makespan",
            deadline_s: float | None = None) -> tuple[Option | None, str]:
     admitted = [o for o in opts if o.admitted]
-    if any(o.mps for o in admitted) and not mps_launchable():
-        admitted = [o for o in admitted if not o.mps]
     if not admitted:
         return None, "admission refuses every option"
     pool = admitted
@@ -547,7 +522,6 @@ def render_text(jobs: Sequence[Job], runner: Runner, opts: Sequence[Option],
     lines.append(f"  {'per card':>8}  {'MPS':>3}  {'order':<13} "
                  f"{'makespan':>17}  contention")
     seen = set()
-    mps_ok = mps_launchable()
     for o in sorted(opts, key=lambda o: (o.slots, o.mps, o.order)):
         if (o.slots, o.mps) in seen and o.order == "as-given" \
                 and not o.admitted:
@@ -564,11 +538,7 @@ def render_text(jobs: Sequence[Job], runner: Runner, opts: Sequence[Option],
                      + ("measured" if not (o.low.unmeasured
                                            or o.high.unmeasured)
                         else "UNMEASURED beyond the rows")
-                     + ("  <- recommended" if o is best else "")
-                     + ("  (MPS not recommended, below)" if o.mps
-                        and not mps_ok else ""))
-    if any(o.mps for o in opts) and not mps_ok:
-        lines.append(f"  MPS {MPS_PREFLIGHT_NOTE}")
+                     + ("  <- recommended" if o is best else ""))
     if best is None:
         lines.append(f"  no recommendation: {note}")
         return "\n".join(lines)
@@ -642,8 +612,6 @@ def main(args) -> int:
                 best, jobs=jobs, gpus=runner.gpus),
             "plan_written": args.emit_plan if plan_written else None,
             "admission_rule": PACKED_ADMISSION_RULE,
-            "mps_recommendable": mps_launchable(),
-            "mps_note": None if mps_launchable() else MPS_PREFLIGHT_NOTE,
         }
         print(json.dumps(doc, indent=2, default=str))
     else:
@@ -702,8 +670,8 @@ def register_cli(subparsers):
 
 
 __all__ = [
-    "GPU_PHASES", "Job", "MPS_PREFLIGHT_NOTE", "OBJECTIVES", "ORDERS",
-    "Option", "SCHEMA", "SEPARATION", "mps_launchable",
+    "GPU_PHASES", "Job", "OBJECTIVES", "ORDERS",
+    "Option", "SCHEMA", "SEPARATION",
     "Schedule", "admit", "assign_devices", "choose", "foreign_used_bytes",
     "invocations", "job_from_estimate", "jobs_for", "multi_run_plan_text",
     "SERIAL_NOTE", "multi_run_queues", "options", "order_jobs",

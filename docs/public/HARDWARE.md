@@ -1145,11 +1145,11 @@ woof pack-plan member.toml --copies 8 --deadline-hours 2 --emit-plan plan.toml
   an optional `--deadline-hours` every run must meet. Options within 5 % of
   the best are not separated by the prediction. Among them, measured
   contention wins, then fewer runs per card, then MPS off.
-- **MPS is not recommended on this tree.** The GPU preflight fails closed
-  on the `nvidia-smi pmon` type an MPS client reports (`M+C`). In the
-  sweep, 1 of 4 and 3 of 8 runs launched with `--mps` exited before their
-  first step. MPS options are still priced, and are recommended again once
-  the preflight accepts that type.
+- **MPS** options compete on predicted makespan like the others, and win
+  only by more than the 5 % band. This relies on the GPU preflight
+  accepting every `nvidia-smi pmon` type and exempting the run's own MPS
+  siblings (PR #876); before that, 1 of 4 and 3 of 8 runs launched with
+  `--mps` exited before their first step.
 - `--emit-plan FILE` writes a `gpuwm.multi-run-plan/v1` plan in the
   recommended order. The output also names the matching `woof energy
   worker --slots-per-gpu N` for a hindcast queue.
