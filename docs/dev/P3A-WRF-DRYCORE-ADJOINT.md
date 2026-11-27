@@ -1176,7 +1176,7 @@ Each step is one small PR, taken to merged before the next widens.
        1.1-1.3 ms of AD each (5x their TL); vu and vv take 12 and 10 ms,
        almost all in the tau13/tau23 stage's gather (the deformation
        recomputed per reading word). Same follow-up as 10a.
-11. External-mode filter, `emdiv > 0` (P3a window request 1; WRF's
+12. External-mode filter, `emdiv > 0` (P3a window request 1; WRF's
     default 0.01, which the 4D-Var L0/L1 lanes run).
    - NL: WRF 4.7.1 `dyn_em/module_small_step_em.F:809,868` (u) and
      `:880,942` (v): `MUDF_XY = -emdiv*dx*(MUDF(i)-MUDF(i-1))/msfuy`
