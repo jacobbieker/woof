@@ -1,6 +1,6 @@
 """Make a WRFPLUS 4.7.1 oracle fixture for one TL/AD routine.
 
-    python tools/wrfplus_oracle/fixture.py advance_uv|advance_w|calc_coef_w|advance_mu_t|small_step|rk_stage|advect|bigstep|rhsph|coriolis|w_damp|lbc|lbc_final|diffusion|hdiff|diffusion2|vdiffusion2 \
+    python tools/wrfplus_oracle/fixture.py advance_uv|advance_w|calc_coef_w|advance_mu_t|small_step|rk_stage|advect|bigstep|rhsph|coriolis|w_damp|lbc|lbc_final|diffusion|hdiff|diffusion2|vdiffusion2|emdiv_chain \
         --exe /mnt/NVME2/.../wrfplus_advance_uv \
         --runner "docker run --rm -v /mnt/NVME2/woof-work:/mnt/NVME2/woof-work wrf-oracle:u2404" \
         --out tests/data/wrfplus/advance_uv.npz
@@ -586,6 +586,128 @@ def advance_mu_t(exe: str, runner: list[str], seed: int = 20261122) -> dict:
             out[prefix + "wrfplus/" + k] = v
     return out
 
+
+
+#: emdiv_chain cases: the uv geometry's overrides (its mt twin shares
+#: spec_zone, the spacing and dtau, without map factors), emdiv and nsub.
+CHAIN_CASES = {
+    "wrf": (dict(spec_zone=1), 0.01, 3),
+    "strong_lid_moist": (dict(spec_zone=2, top_lid=1, moist_cq=1, nz=9, ny=9, nx=10),
+                         0.1, 4),
+}
+#: The names advance_uv and advance_mu_t share on the chain: advance_uv's
+#: draws (its rdnw then advance_mu_t's, so dnw = 1/rdnw for both).
+CHAIN_SHARED = ("u_pp", "v_pp", "mu_pp", "mudf", "mup", "mub2d", "c1h", "c2h", "fnm",
+                "fnp")
+
+
+def chain_inputs(name, seed=20261127):
+    """One emdiv_chain case's geometries and host arrays: (uvg, mtg, emdiv,
+    nsub, traj, pert, seeds), the trajectory and perturbation keyed by the
+    strict primal's names (advance_uv's and advance_mu_t's together)."""
+    over, emdiv, nsub = CHAIN_CASES[name]
+    g0 = cases.uv_geometry(**over)
+    uvg = cases.uv_geometry(**over, use_emdiv=1, xscale=-emdiv / g0.rdx,
+                            yscale=-emdiv / g0.rdy)
+    mtg = cases.mt_geometry(nz=uvg.nz, ny=uvg.ny, nx=uvg.nx, rdx=uvg.rdx, rdy=uvg.rdy,
+                            dtau=uvg.dtau, spec_zone=uvg.spec_zone, open_x=1, open_y=1)
+    tu, tm = cases.uv_trajectory(uvg, seed), cases.mt_trajectory(mtg, seed + 3)
+    pu, pm = cases.uv_perturbation(uvg, seed + 1), cases.mt_perturbation(mtg, seed + 4)
+    for n in CHAIN_SHARED:
+        tm[n] = tu[n]
+        if n in pu:
+            pm[n] = pu[n]
+    tu["rdnw"] = tm["rdnw"]
+    frame = _mt_frame(mtg)
+    for d in (tm, pm):
+        d["mudf"] = np.where(frame, 0.0, d["mudf"])    # rk_step 1's zeros on the frame
+        for n in ("ww_pp", "ww_ref"):                  # WRF's Omega surface and top
+            d[n][0] = 0.0
+            d[n][-1] = 0.0
+    traj, pert = {**tu, **tm}, {**pu, **pm}
+    rng = np.random.default_rng(seed + 5)
+    mu_m, mv_m = _uv_masks(uvg)
+    sh = cases.mt_shapes(mtg)
+    seeds = {n: np.zeros(sh[n]) for n in MT_STATE}
+    seeds["u_pp"] = np.where(mu_m, rng.standard_normal(mu_m.shape), 0.0)
+    seeds["v_pp"] = np.where(mv_m, rng.standard_normal(mv_m.shape), 0.0)
+    seeds["mu_pp"] = 20.0 * rng.standard_normal(sh["mu_pp"])
+    seeds["th_pp"] = 100.0 * rng.standard_normal(sh["th_pp"])
+    seeds["mudf"] = np.where(frame, 0.0, rng.standard_normal(sh["mudf"]))
+    return uvg, mtg, emdiv, nsub, traj, pert, seeds
+
+
+def _chain_expected(uvg, mtg, out, L):
+    nz, ny, nx = uvg.nz, uvg.ny, uvg.nx
+    n3, n2 = int(np.prod(L.s3)), int(np.prod(L.s2))
+    vals = np.frombuffer(out, dtype="<f8")
+    off = [0]
+
+    def take(n, s):
+        x = vals[off[0]:off[0] + n].reshape(s, order="F")
+        off[0] += n
+        return x
+
+    su, sv, mass, col = (nz, ny, nx + 1), (nz, ny + 1, nx), (nz, ny, nx), (ny, nx)
+    t3 = lambda shape: L.from3(take(n3, L.s3), shape)  # noqa: E731
+    t2 = lambda shape: L.from2(take(n2, L.s2), shape)  # noqa: E731
+    e = {}
+    e["tl_u_pp"], e["tl_d_u_pp"], e["tl_v_pp"], e["tl_d_v_pp"] = t3(su), t3(su), t3(sv), t3(sv)
+    e["tl_mu_pp"], e["tl_d_mu_pp"], e["tl_mudf"], e["tl_d_mudf"] = t2(col), t2(col), t2(col), t2(col)
+    e["tl_th_pp"], e["tl_d_th_pp"] = t3(mass), t3(mass)
+    e["ad_u_pp"], e["ad_v_pp"], e["ad_th_pp"] = t3(su), t3(sv), t3(mass)
+    e["ad_ru_t"], e["ad_rv_t"], e["ad_rth_t"] = t3(su), t3(sv), t3(mass)
+    e["ad_mu_pp"], e["ad_mudf"] = t2(col), t2(col)
+    a_muu, a_muv = t2((ny, nx + 1)), t2((ny + 1, nx))
+    a_mut, m_muu, m_muv = t2(col), t2((ny, nx + 1)), t2((ny + 1, nx))
+    e["ad_rmu_t"] = t2(col)
+    assert off[0] == vals.size, (off[0], vals.size)
+    mup_a = (a_mut + 0.5 * (m_muu[:, 1:] + m_muu[:, :-1])       # advance_mu_t's faces
+             + 0.5 * (m_muv[1:] + m_muv[:-1]))
+    for fi in range(nx + 1):                    # advance_uv's: face fi reads fi%nx, fi-1
+        mup_a[:, fi % nx] += 0.5 * a_muu[:, fi]
+        mup_a[:, (fi - 1) % nx] += 0.5 * a_muu[:, fi]
+    for fj in range(ny + 1):
+        mup_a[fj % ny] += 0.5 * a_muv[fj]
+        mup_a[(fj - 1) % ny] += 0.5 * a_muv[fj]
+    e["ad_mup"] = mup_a
+    return e
+
+
+def emdiv_chain(exe: str, runner: list[str]) -> dict:
+    out = {}
+    for name in CHAIN_CASES:
+        uvg, mtg, emdiv, nsub, tr, pe, seeds = chain_inputs(name)
+        uv_blob, L = _uv_record(uvg, tr, pe, seeds["u_pp"], seeds["v_pp"], emdiv)
+        mt_blob, _ = _mt_record(mtg, tr, pe, seeds)
+        blob = uv_blob + mt_blob + np.array([nsub], dtype=np.int32).tobytes()
+        with tempfile.TemporaryDirectory(dir=Path(exe).parent) as tmp:
+            fin, fout = Path(tmp) / "in.bin", Path(tmp) / "out.bin"
+            fin.write_bytes(blob)
+            subprocess.run(runner + [exe, str(fin), str(fout)], check=True)
+            result = fout.read_bytes()
+        exp = _chain_expected(uvg, mtg, result, L)
+        mu_m, mv_m = _uv_masks(uvg)
+        interior = ~_mt_frame(mtg)
+        prefix = f"{name}/"
+        out[prefix + "uv_geometry"] = np.array(json.dumps(dataclasses.asdict(uvg)))
+        out[prefix + "mt_geometry"] = np.array(json.dumps(dataclasses.asdict(mtg)))
+        out[prefix + "nsub"] = np.array(nsub)
+        for k, v in tr.items():
+            out[prefix + "traj/" + k] = v
+        for k, v in pe.items():
+            out[prefix + "pert/" + k] = v
+        for k, v in seeds.items():
+            out[prefix + "seed/" + k] = v
+        for k in ("tl_u_pp", "tl_d_u_pp", "ad_u_pp", "ad_ru_t"):
+            out[prefix + "mask/" + k] = mu_m
+        for k in ("tl_v_pp", "tl_d_v_pp", "ad_v_pp", "ad_rv_t"):
+            out[prefix + "mask/" + k] = mv_m
+        for k in ("tl_mudf", "tl_d_mudf", "ad_mudf"):
+            out[prefix + "mask/" + k] = interior
+        for k, v in exp.items():
+            out[prefix + "wrfplus/" + k] = v
+    return out
 
 #: small_step cases.  WRFPLUS has c1 = 1, c2 = 0; small_step_finish drops
 #: h_diabatic on the last RK stage only, so remove_hdiab iff rk_step 3.
@@ -2504,7 +2626,8 @@ ROUTINES = {"advance_uv": advance_uv, "advance_w": advance_w,
             "advect": advect, "bigstep": bigstep, "rhsph": rhsph,
             "coriolis": coriolis, "w_damp": w_damp,
             "lbc": lbc, "lbc_final": lbc_final, "diffusion": diffusion,
-            "hdiff": hdiff, "diffusion2": diffusion2, "vdiffusion2": vdiffusion2}
+            "hdiff": hdiff, "diffusion2": diffusion2, "vdiffusion2": vdiffusion2,
+            "emdiv_chain": emdiv_chain}
 
 
 def main(argv=None) -> int:

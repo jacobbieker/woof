@@ -326,11 +326,16 @@ def ss_perturbation(geom: SSGeometry, seed: int, dtype=np.float64) -> dict:
 
 # One acoustic substep (advance_uv -> advance_mu_t -> advance_w) on the
 # strict primal's names: periodic (spec_zone 0), msf 1, shared dtau and
-# off-centring, so the three operators see one consistent state.
+# off-centring, so the three operators see one consistent state.  With
+# ``emdiv`` advance_uv adds the external-mode filter of the mudf the
+# previous substep's advance_mu_t wrote.
 def substep_geometries(nz=7, ny=8, nx=9, *, base3d=1, top_lid=0,
-                       smdiv=0.1) -> tuple:
-    return (uv_geometry(nz, ny, nx, base3d=base3d, top_lid=top_lid,
-                        smdiv=smdiv),
+                       smdiv=0.1, emdiv=0.0) -> tuple:
+    uvg = uv_geometry(nz, ny, nx, base3d=base3d, top_lid=top_lid, smdiv=smdiv)
+    if emdiv:
+        uvg = uv_geometry(nz, ny, nx, base3d=base3d, top_lid=top_lid, smdiv=smdiv,
+                          use_emdiv=1, xscale=-emdiv / uvg.rdx, yscale=-emdiv / uvg.rdy)
+    return (uvg,
             mt_geometry(nz, ny, nx),
             w_geometry(nz, ny, nx, base3d=base3d, top_lid=top_lid))
 
