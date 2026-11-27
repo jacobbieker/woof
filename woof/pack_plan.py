@@ -21,8 +21,12 @@ makes its option unavailable; the plan never recommends one.
 How much a run slows when others share its card is
 :func:`woof.runtime_estimate.sharing_bracket`: MEASURED rows where a
 row exists (``SHARING_ROWS``, each naming its card, grid, copies, MPS
-and receipt), and outside them an UNMEASURED bracket between the
-measured trend and pure time-slicing.  Each run's alone time is
+and receipt), interpolated between measured counts, and past them an
+UNMEASURED bracket from the measured trend to the worst measured
+slowdown per copy.  On the RTX A6000 a 162,000-column run packed two to
+four to a card ran 2.24-4.50x slower each, slower than time-slicing: a
+card a large domain already fills gains nothing from packing but the
+overlap of the runs' start-up.  Each run's alone time is
 ``woof estimate``'s.  A run streamed through host memory is bus-bound:
 it is planned alone on its card.
 
@@ -49,6 +53,11 @@ from woof.runner_cards import CUDA, GIB, Runner, RunnerSpecError
 SCHEMA = "woof.pack-plan.v1"
 OBJECTIVES = ("makespan", "throughput")
 ORDERS = ("as-given", "longest-first")
+#: Two options whose predicted makespans (or throughputs) differ by less
+#: than this are not separated by the prediction: the session-to-session
+#: variance measured on one box is up to 1.30x (SESSION_VARIANCE), so 5 %
+#: is well inside the noise.
+SEPARATION = 0.05
 
 
 # --------------------------------------------------------------------------
@@ -205,7 +214,8 @@ def order_jobs(jobs: Sequence[Job], order: str) -> list[Job]:
     raise ValueError(f"order is one of {ORDERS}, not {order!r}")
 
 
-def _slowdown(n: int, job: Job, mps: bool, end: str) -> tuple[float, bool]:
+def _slowdown(n: int, job: Job, mps: bool, end: str,
+              card: str | None = None) -> tuple[float, bool]:
     """(per-run slowdown with ``n`` on the card, measured?)."""
     from woof.runtime_estimate import sharing_bracket
 
@@ -215,7 +225,7 @@ def _slowdown(n: int, job: Job, mps: bool, end: str) -> tuple[float, bool]:
         # Bus-bound: a second streamed forecast on a 4090 took each to
         # 22.6/11.66 = 1.94x (woof/core/pace.py) -- no throughput gained.
         return float(n), False
-    s = sharing_bracket(n, columns=job.columns, mps=mps)
+    s = sharing_bracket(n, columns=job.columns, mps=mps, card=card)
     lo, hi = s["per_run_slowdown"]
     return (lo if end == "low" else hi), bool(s["measured"])
 
@@ -282,7 +292,8 @@ def simulate(jobs: Sequence[Job], *, runner: Runner, slots: int, mps: bool,
                 if fixed_left[job.name] > 0:
                     rates[job.name] = ("fixed", 1.0)
                 else:
-                    s, measured = _slowdown(max(1, on_card), job, mps, end)
+                    s, measured = _slowdown(max(1, on_card), job, mps, end,
+                                            runner.card_key)
                     unmeasured |= not measured
                     rates[job.name] = ("gpu", 1.0 / s)
         if not rates:
@@ -384,6 +395,10 @@ def options(jobs: Sequence[Job], runner: Runner, *,
                               order=order, end="low", margin_gib=margin_gib)
                 hi = simulate(jobs, runner=runner, slots=slots, mps=mps,
                               order=order, end="high", margin_gib=margin_gib)
+                if any(o.slots == slots and o.mps == mps
+                       and o.low.start_s == lo.start_s
+                       and o.high.start_s == hi.start_s for o in out):
+                    continue  # this order schedules as an earlier one did
                 out.append(Option(slots, mps, order, lo, hi))
     return out
 
@@ -393,9 +408,34 @@ def serial_s(jobs: Sequence[Job]) -> tuple[float, float]:
     return (sum(j.alone_s[0] for j in jobs), sum(j.alone_s[1] for j in jobs))
 
 
+#: Why an MPS option is not recommended while :func:`mps_launchable` is
+#: False.
+MPS_PREFLIGHT_NOTE = (
+    "not recommended: the GPU preflight (woof.supervisor) fails closed on "
+    "the pmon type an MPS client reports, 'M+C'; in the A6000 sweep 1 of 4 "
+    "and 3 of 8 runs launched with --mps exited before their first step")
+
+
+def mps_launchable() -> bool:
+    """Whether this tree's GPU preflight accepts a sibling that is an MPS
+    client.  It reads ``nvidia-smi pmon``, where an MPS client's type is
+    ``M+C``; a preflight that refuses it refuses runs started beside one,
+    so MPS is not recommended until it does."""
+    from woof.supervisor import GPUPreflightError, _parse_pmon_output
+
+    try:
+        _parse_pmon_output("    0    4242   M+C    10     2     -     -     "
+                           "-     -   3000     0   python")
+    except GPUPreflightError:
+        return False
+    return True
+
+
 def choose(opts: Sequence[Option], *, objective: str = "makespan",
            deadline_s: float | None = None) -> tuple[Option | None, str]:
     admitted = [o for o in opts if o.admitted]
+    if any(o.mps for o in admitted) and not mps_launchable():
+        admitted = [o for o in admitted if not o.mps]
     if not admitted:
         return None, "admission refuses every option"
     pool = admitted
@@ -407,17 +447,23 @@ def choose(opts: Sequence[Option], *, objective: str = "makespan",
         else:
             note = ("no option finishes every run by the deadline at the "
                     "high end; the fastest is shown")
-    # Fewer runs per card, then no MPS, then the given order break ties:
-    # the simpler plan wins when the prediction does not separate them.
-    def key(o: Option):
-        return (o.central_s, o.slots, o.mps, ORDERS.index(o.order))
-    if objective == "throughput":
-        best = max(pool, key=lambda o: (o.throughput_per_hour(
-            len(o.high.finish_s))[0], -o.slots, not o.mps))
-    elif objective == "makespan":
-        best = min(pool, key=key)
-    else:
+    if objective not in OBJECTIVES:
         raise ValueError(f"objective is one of {OBJECTIVES}")
+
+    def score(o: Option) -> float:  # lower is better
+        if objective == "throughput":
+            return 1.0 / max(o.throughput_per_hour(len(o.high.finish_s))[0],
+                             1e-12)
+        return o.central_s
+
+    # Options within SEPARATION of the best are ones the prediction does
+    # not separate: among them a measured contention model, then fewer
+    # runs per card, then no MPS, then the given order win.
+    top = min(score(o) for o in pool)
+    close = [o for o in pool if score(o) <= top * (1.0 + SEPARATION)]
+    best = min(close, key=lambda o: (
+        o.low.unmeasured or o.high.unmeasured, o.slots, o.mps,
+        ORDERS.index(o.order), score(o)))
     return best, note
 
 
@@ -482,6 +528,7 @@ def render_text(jobs: Sequence[Job], runner: Runner, opts: Sequence[Option],
     lines.append(f"  {'per card':>8}  {'MPS':>3}  {'order':<13} "
                  f"{'makespan':>17}  contention")
     seen = set()
+    mps_ok = mps_launchable()
     for o in sorted(opts, key=lambda o: (o.slots, o.mps, o.order)):
         if (o.slots, o.mps) in seen and o.order == "as-given" \
                 and not o.admitted:
@@ -498,7 +545,11 @@ def render_text(jobs: Sequence[Job], runner: Runner, opts: Sequence[Option],
                      + ("measured" if not (o.low.unmeasured
                                            or o.high.unmeasured)
                         else "UNMEASURED beyond the rows")
-                     + ("  <- recommended" if o is best else ""))
+                     + ("  <- recommended" if o is best else "")
+                     + ("  (MPS not recommended, below)" if o.mps
+                        and not mps_ok else ""))
+    if any(o.mps for o in opts) and not mps_ok:
+        lines.append(f"  MPS {MPS_PREFLIGHT_NOTE}")
     if best is None:
         lines.append(f"  no recommendation: {note}")
         return "\n".join(lines)
@@ -568,6 +619,8 @@ def main(args) -> int:
             "note": note or None,
             "invocations": [] if best is None else invocations(best),
             "admission_rule": PACKED_ADMISSION_RULE,
+            "mps_recommendable": mps_launchable(),
+            "mps_note": None if mps_launchable() else MPS_PREFLIGHT_NOTE,
         }
         print(json.dumps(doc, indent=2, default=str))
     else:
@@ -624,7 +677,8 @@ def register_cli(subparsers):
 
 
 __all__ = [
-    "GPU_PHASES", "Job", "OBJECTIVES", "ORDERS", "Option", "SCHEMA",
+    "GPU_PHASES", "Job", "MPS_PREFLIGHT_NOTE", "OBJECTIVES", "ORDERS",
+    "Option", "SCHEMA", "SEPARATION", "mps_launchable",
     "Schedule", "admit", "assign_devices", "choose", "foreign_used_bytes",
     "invocations", "job_from_estimate", "jobs_for", "multi_run_plan_text",
     "options", "order_jobs", "register_cli", "render_text", "serial_s",

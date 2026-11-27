@@ -36,7 +36,7 @@ def _job(name, gpu=100.0, fixed=10.0, peak=8 * GIB, columns=162_000,
 def linear(monkeypatch):
     """Each run slows by 0.5 per extra sibling: two together take 1.5x
     each, so packing two gains 2/1.5."""
-    def bracket(copies, *, columns, mps):
+    def bracket(copies, *, columns, mps, card=None):
         s = 1.0 + 0.5 * (copies - 1)
         return {"copies": copies, "per_run_slowdown": (s, s),
                 "measured": True, "basis": "test"}
@@ -234,3 +234,47 @@ def test_cli_text_and_emit_plan(tmp_path, capsys, monkeypatch):
     out = capsys.readouterr().out
     assert "recommended:" in out and "one at a time" in out
     assert plan.read_text().startswith('schema = "gpuwm.multi-run-plan/v1"')
+
+
+def test_a_measured_option_wins_when_the_prediction_cannot_separate(
+        monkeypatch):
+    def bracket(copies, *, columns, mps, card=None):
+        s = copies * (0.99 if copies == 3 else 1.0)  # time-slicing
+        return {"copies": copies, "per_run_slowdown": (s, s),
+                "measured": copies < 3, "basis": "test"}
+    monkeypatch.setattr(rte, "sharing_bracket", bracket)
+    jobs = [_job(n, fixed=0.0) for n in "abc"]
+    opts = pp.options(jobs, _runner(), max_slots=3, allow_mps=False)
+    # Three together is 1 % faster but unmeasured; one and two are
+    # measured and as fast as each other.
+    assert len({o.slots for o in opts}) == 3
+    assert len(opts) == 3  # identical runs: one order per setting
+    best, _ = pp.choose(opts)
+    assert not (best.low.unmeasured or best.high.unmeasured)
+    assert best.slots == 1
+
+
+@pytest.mark.parametrize("launchable", [True, False])
+def test_mps_is_recommended_only_when_the_preflight_admits_mps_clients(
+        monkeypatch, launchable):
+    def bracket(copies, *, columns, mps, card=None):
+        s = (1.0 + 0.5 * (copies - 1)) * (0.5 if mps else 1.0)
+        return {"copies": copies, "per_run_slowdown": (s, s),
+                "measured": True, "basis": "test"}
+    monkeypatch.setattr(rte, "sharing_bracket", bracket)
+    monkeypatch.setattr(pp, "mps_launchable", lambda: launchable)
+    jobs = [_job(n, fixed=0.0) for n in "ab"]
+    best, _ = pp.choose(pp.options(jobs, _runner(), max_slots=2))
+    assert best.mps is launchable
+
+
+def test_mps_launchable_reads_the_supervisors_pmon_parser(monkeypatch):
+    import woof.supervisor as supervisor
+
+    monkeypatch.setattr(supervisor, "_parse_pmon_output", lambda text: {})
+    assert pp.mps_launchable() is True
+
+    def refuse(text):
+        raise supervisor.GPUPreflightError("unknown pmon type 'M+C'")
+    monkeypatch.setattr(supervisor, "_parse_pmon_output", refuse)
+    assert pp.mps_launchable() is False

@@ -2910,6 +2910,28 @@ Takes no options of its own.
 
 Takes no options of its own.
 
+## `woof pack-plan`
+
+| argument | what it does |
+|---|---|
+| `CONFIG [CONFIG ...]` | experiment TOML(s) to run |
+
+| option | what it does |
+|---|---|
+| `--card, --gpu NAME` | plan for this card from woof estimate's table instead of this box's |
+| `--copies N` | N runs of each CONFIG (ensemble members, a hindcast batch) |
+| `--deadline-hours H` | every run must finish within H hours of the start (judged at the high end) |
+| `--emit-plan PLAN` | write the recommended multi-run plan here |
+| `--explain` | print the full reasoning, alternate routes and per-item evidence behind this command's output, instead of the default one-line-per-item summary |
+| `--gpus N` | cards on the runner (default: detected, else 1) |
+| `--json` | print the woof.pack-plan.v1 document |
+| `--max-slots N` | consider at most N runs per card (default: multi-run's auto cap and the host's cores) |
+| `--mem-margin-gib GiB` | card memory kept free beside the priced peaks (multi-run --mem-margin-gib; default 1) |
+| `--no-mps` | do not consider CUDA MPS |
+| `--objective {makespan,throughput}` | makespan: finish the set soonest (default); throughput: most runs per hour |
+| `--prepared` | the runs' inputs are already prepared |
+| `--runner TOML` | a [runner] table (woof estimate --runner) |
+
 ## `woof physics-catalog`
 
 | option | what it does |
