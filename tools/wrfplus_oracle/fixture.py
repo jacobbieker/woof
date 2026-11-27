@@ -219,7 +219,9 @@ def advance_uv(exe: str, runner: list[str], seed: int = 20261119) -> dict:
 
 
 #: advance_w's fixture configurations (spec_zone >= 1, as above; c1 = 1,
-#: c2 = 0; no damper).  The mapped cases pass msft as msftx and msfty.
+#: c2 = 0).  The mapped cases pass msft as msftx and msfty.  The damped
+#: cases run damp_opt 3 (dampcoef = dampmag/dtau) over the top third, and
+#: over a layer deeper than the column.
 W_CASES = {
     "plain": dict(spec_zone=1),
     "lid_moist": dict(spec_zone=1, top_lid=1, moist_cq=1, base3d=0),
@@ -227,6 +229,12 @@ W_CASES = {
     "mapped": dict(spec_zone=1, has_msf=1),
     "mapped_lid_moist": dict(nz=10, ny=7, nx=6, spec_zone=1, top_lid=1, moist_cq=1,
                              base3d=0, epssm=0.3, has_msf=1),
+    "damped": dict(spec_zone=1, dampmag=0.6, zdamp=5000.0),
+    "damped_mapped_lid_moist": dict(nz=10, ny=7, nx=6, spec_zone=1, top_lid=1,
+                                    moist_cq=1, epssm=0.3, has_msf=1, dampmag=0.6,
+                                    zdamp=8000.0),
+    "damped_deep": dict(nz=12, ny=7, nx=6, spec_zone=1, base3d=0, dampmag=0.9,
+                        zdamp=16000.0),
 }
 
 #: The driver's 3-D adjoint outputs after the state's four, in order.
@@ -269,6 +277,9 @@ def _w_record(geom, tr, pe, seeds):
         blob += L.w2(a).astype("<f8").tobytes(order="F")
     for a in (tr["fnm"], tr["fnp"], k1(tr["rdnw"]), k1(tr["rdn"])):
         blob += np.asarray(a, dtype="<f8").tobytes()
+    blob += np.array([geom.dampmag / geom.dtau, geom.zdamp], dtype="<f8").tobytes()
+    for a in pair("w"):
+        blob += L.w3(a).astype("<f8").tobytes(order="F")
     return blob, L
 
 
@@ -295,6 +306,7 @@ def _w_expected(geom, out, L):
     for n in W_AD3:
         e["ad_" + n] = t3(n)
     a_mut, a_muts, a_muave, a_mu, _ = t2(), t2(), t2(), t2(), t2()
+    e["ad_w"] = t3("w")
     assert off[0] == vals.size, (off[0], vals.size)
     ep = geom.epssm
     e["ad_mup"] = a_mut + a_muts

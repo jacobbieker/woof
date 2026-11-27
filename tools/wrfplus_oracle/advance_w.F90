@@ -6,7 +6,9 @@
 !
 ! Input  (stream, native binary64/int32): see fixture.py _w_record.
 ! Output (stream): TL w, wd, ph, phd, p, pd, al, ald; then the AD
-! adjoints in fixture.py W_AD3 / W_AD2 order.
+! adjoints in fixture.py W_AD3 / W_AD2 order, then w_save's adjoint.
+! damp_opt = 3 (WRF's implicit w damper) when the record's dampcoef > 0,
+! with w_save (and its perturbation) from the record.
 program wrfplus_advance_w
   use module_configure, only : grid_config_rec_type
   use g_module_small_step_em, only : g_advance_w, g_calc_p_rho
@@ -14,7 +16,7 @@ program wrfplus_advance_w
   implicit none
   integer :: nx, ny, nz, itop, iu
   integer :: ids, ide, jds, jde, kds, kde, ims, ime, jms, jme, kms, kme
-  real :: rdx, rdy, dts, cf1, cf2, cf3, epssm
+  real :: rdx, rdy, dts, cf1, cf2, cf3, epssm, dampcoef, zdamp
   real, parameter :: t0 = 300.
   type(grid_config_rec_type) :: cf
   logical :: top_lid
@@ -49,6 +51,8 @@ program wrfplus_advance_w
   call a2(muaved); call a2(mu); call a2(mud); call a2(ht); call a2(msft)
   allocate(fnm(kms:kme), fnp(kms:kme), rdnw(kms:kme), rdn(kms:kme))
   read(iu) fnm, fnp, rdnw, rdn
+  read(iu) dampcoef, zdamp
+  call a3(wsave); call a3(wsaved)
   close(iu)
   allocate(dnw(kms:kme), znu(kms:kme))
   dnw = 0; where (rdnw /= 0) dnw = 1. / rdnw
@@ -58,12 +62,13 @@ program wrfplus_advance_w
   cf%open_xs = .false.;    cf%open_xe = .false.;  cf%open_ys = .false.
   cf%open_ye = .false.;    cf%symmetric_xs = .false.; cf%symmetric_xe = .false.
   cf%symmetric_ys = .false.; cf%symmetric_ye = .false.; cf%polar = .false.
-  cf%damp_opt = 0; cf%dampcoef = 0.; cf%zdamp = 5000.
+  cf%damp_opt = 0; cf%dampcoef = dampcoef; cf%zdamp = zdamp
+  if (dampcoef > 0.) cf%damp_opt = 3
 
   ! msftx = msfty = msft: woof carries one mass-point factor (ones
   ! without map factors).
-  allocate(p, pd, al, ald, pm1, pm1d, wsave, wsaved, alb, mold=w)
-  p = 0; pd = 0; al = 0; ald = 0; pm1 = 0; pm1d = 0; wsave = 0; wsaved = 0; alb = 0
+  allocate(p, pd, al, ald, pm1, pm1d, alb, mold=w)
+  p = 0; pd = 0; al = 0; ald = 0; pm1 = 0; pm1d = 0; alb = 0
   allocate(w0, source=w); allocate(ph0, source=ph); allocate(thold0, source=thold)
 
   call g_advance_w(w, wd, rw, rwd, ww, wwd, wsave, wsaved, u, ud, v, vd, mu, mut, &
@@ -103,6 +108,7 @@ program wrfplus_advance_w
   write(iu) sw, sph, sp, sal, a_rw, a_ww, a_th, a_thold, a_thp, a_php, a_rph, a_c2a, &
        a_cqw, a_alt, a_a, a_alpha, a_gam, a_u, a_v
   write(iu) a_mut, a_muts, a_muave, a_mu, a_mu1
+  write(iu) a_wsave
   close(iu)
 
 contains

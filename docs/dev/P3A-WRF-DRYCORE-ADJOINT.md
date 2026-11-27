@@ -1318,6 +1318,79 @@ Each step is one small PR, taken to merged before the next widens.
      `advance_uv`, a store in `advance_mu_t`); a first run on a busier
      card gave -1% and +4%.
 
+11. `damp_opt = 3`, the implicit Rayleigh w damper (P3a window option 2,
+   asked for by the 4D-Var lane: WRF 4.7.1's default and the tutorial's).
+   - Where: WRF `advance_w` (`dyn_em/module_small_step_em.F:1445-1458`),
+     after the back substitution and before the phi'' update; woof's
+     strict `advance_w_phi` / `advance_w_phi_msf` (and their fused
+     variants) run it in the same place. Per column, htop = (phb + ph_1)
+     at the top w level / g, hbot = htop - zdamp; at each level k >= 2
+     (woof 1..nz) with hk >= hbot, dampwt = dampmag sin^2(pi/2 (hk - hbot)
+     / zdamp), dampmag = dts * dampcoef (one float32 product,
+     `woof.core.acoustic.damp_magnitude`), and
+     w = (w - dampwt (c1f mut + c2f) w_save) / (1 + dampwt).
+   - Active: w'' (the solved column), ph_1 (WRF's `ph_save`, woof's
+     `php`: the heights hk and htop, so the layer moves with the
+     geopotential), mut (woof's `mub2d + mup`) and w_save (WRF's
+     stage-start w, woof's `state.w`, the substep dicts' `w`; a new
+     member of `W_TRAJECTORY` and `W_ACTIVE`, read only when dampmag > 0).
+     Passive: phb, c1f, c2f, dampmag and zdamp. The level test
+     hk >= hbot is a branch; its derivative is continuous (sin^2 has zero
+     slope at the layer bottom), so the TL takes the branch of the base
+     state. At the top level hk = htop, so the ph_1 derivatives cancel.
+   - Done in `kernels/advance_w.cu` (`advance_w_tl` damps w and its
+     tangent; `advance_w_ad` recomputes the damped column, w8, for the
+     phi'' and calc_p_rho adjoints, then reverses the damper between them
+     and the back substitution). The float build prepends
+     `glibc_trig_flt32.cuh` (MIT-licensed Arm optimized-routines
+     `sinf`), so its base gives the strict primal's words
+     (`GPUWM_WRF_EXACT=1` takes `glibc_sinf`); binary64 takes `sin`.
+   - Oracle: WRFPLUS 4.7.1 does linearise the damper, so the earlier
+     note here and in `acoustic.py` ("WRFPLUS has damp_opt 0 only") was
+     wrong: `G_ADVANCE_W` (`wrftladj/module_small_step_em_tl.F:1934-1960`)
+     and `a_advance_w` (`module_small_step_em_ad.F:4096-4140`, the
+     forward recompute, and `4168-4220`, the reverse) carry it with
+     ph_1 and w_save active. `G_ADVANCE_W` is called at
+     `wrftladj/solve_em_tl.F:1353` with `ph_save` as ph_1 and takes
+     dampcoef and zdamp from `config_flags`; the `solve_em_tl.F:753`
+     call that passes `damp_opt`, `dampcoef` and `zdamp` is
+     `g_rk_tendency` (damp_opt 1 and 2's paths, which woof does not
+     accept). WRFPLUS's damp target is `dampwt*mut*w_save`, without c1f
+     and c2f, as the rest of its advance_w (terrain-following only);
+     woof follows the nonlinear WRF's `c1f*mut + c2f`, and the oracle
+     cases are terrain-following. `tools/wrfplus_oracle/advance_w.F90`
+     now reads dampcoef (= dampmag/dtau), zdamp and w_save (with its
+     perturbation) from the record, sets `damp_opt = 3` when dampcoef > 0
+     and writes w_save's adjoint. `advance_w.npz` gains three damped
+     cases (the top third; mapped, lidded and moist; a layer deeper than
+     the column); the five earlier cases' arrays are unchanged.
+   - Step: `model._refuse` no longer refuses `damp_opt 3`; the WGeometry
+     of every substep carries dampmag and zdamp. Refused by name:
+     `damp_opt 3 with upper_wind_limiter_form noaa_wrf39` (the fork's
+     NOAA-WRF 3.9 upper-wind limiter, which runs only with damp_opt 3
+     and is not linearised).
+   - Tests: `tests/test_grad_wrfplus_advance_w.py` adds three damped
+     configurations to every probe (dot product, accumulation, TL
+     against FD, the strict primal's words) and the three oracle cases;
+     `tests/test_grad_wrfplus_damp_step.py` runs the step with damp_opt 3
+     (periodic: a warm step, one with map factors, rotation, hybrid and
+     w_damp, a cold chain of three and a moist mapped step; specified: a
+     warm step and a cold moist mapped chain of two): dycore.step's
+     strict words, the damper moving w and the geopotential, dot product,
+     TL against FD, and the refusals.
+   - Cost (A6000, 40 x 120 x 120, binary32, periodic, median of 20 after
+     3 warm-ups, 2026-11-27, card idle; primal = the strict
+     `advance_w_phi`; the steady repeats of three interleaved runs):
+
+     | damper | primal | TL | AD |
+     |---|---|---|---|
+     | off (dampmag 0) | 0.21 ms | 0.64-0.69 ms (3.0-3.2x) | 1.01-1.03 ms (4.8x) |
+     | on (dampmag 0.6, zdamp 5 km) | 0.245 ms | 0.65-0.71 ms (2.7-2.9x) | 1.08 ms (4.4x) |
+
+     The damper adds about 0.035 ms to the primal, 0.02-0.04 ms to the
+     TL and 0.06 ms to the AD (the AD recomputes the damped column and
+     then reverses it); the ratios stay within G3's ~5x.
+
 Cost is measured from item 2 on. Kernel-level AD/forward ratios are
 reported at every merge, so a G3 cost miss shows up before item 8.
 

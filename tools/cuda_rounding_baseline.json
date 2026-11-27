@@ -169,7 +169,7 @@
     "call_sha256": "08b412438fea2e6dba53d679fc2ae725f2afef478998519b9395664a71b27959",
     "constructor": "RawModule",
     "factory": "_device_module",
-    "factory_sha256": "2a894cb92ad1e6031d85d76d74d401e3a440e4318f2120c5baca13d82127d54f",
+    "factory_sha256": "83228ad87dfaedf44884491c7f21cd2722d1e0cbae5e96753b0f4e89ecbff8d4",
     "file": "woof/grad/wrfplus/acoustic.py",
     "status": "unresolved"
    },
@@ -5173,7 +5173,7 @@
    },
    {
     "file": "woof/grad/wrfplus/kernels/advance_w.cu",
-    "sha256": "7b69f6bc8cf6121193e455c2c59fefd8ebaceef6859b68d9e97c46435d2b37fc"
+    "sha256": "d749ceabbf1931925e345b79eae62e83e61a43c44e8a2c5e9a886752c2abde95"
    },
    {
     "file": "woof/grad/wrfplus/kernels/advect.cu",
@@ -6143,7 +6143,7 @@
    },
    {
     "file": "woof/grad/wrfplus/acoustic.py",
-    "sha256": "56c61f7525cd30a1f1bcb8be57f92a08f584406daa55bd7b8148c5337cc055dc"
+    "sha256": "79d042a4d50d82af0a5c3631e61b68ede6903c0b1be5b6b54e9641b48e8f1c87"
    },
    {
     "file": "woof/grad/wrfplus/advect.py",
