@@ -395,3 +395,27 @@ def test_every_printed_command_line_is_copy_pasteable(linear):
                     continue
                 shlex.split(line)  # balanced quoting
                 assert "(" not in line and "..." not in line
+
+
+def test_plan_round_trips_paths_with_quotes_and_backslashes(linear):
+    import tomllib
+
+    odd = ['dir/"quoted".toml', "back\\slash.toml", 'a "b" \\c.toml']
+    jobs = [replace(_job(f"m{i}"), config=c) for i, c in enumerate(odd)]
+    best, _ = pp.choose(pp.options(jobs, _runner(), max_slots=3,
+                                   allow_mps=False))
+    doc = tomllib.loads(pp.multi_run_plan_text(jobs, best))
+    assert sorted(r["config"] for r in doc["run"]) == sorted(odd)
+
+
+def test_unknown_card_memory_is_refused_with_a_message(
+        tmp_path, capsys, monkeypatch):
+    import woof.runtime_estimate as est
+
+    monkeypatch.setattr(est, "resolve_runner",
+                        lambda args: _runner(vram_bytes=None))
+    cfg = _config(tmp_path, name="ens")
+    args = _parse(str(cfg), "--card", "a6000")
+    assert args.func(args) == 2
+    err = capsys.readouterr().err
+    assert "memory is unknown" in err and "--card" in err

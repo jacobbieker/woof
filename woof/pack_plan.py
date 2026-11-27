@@ -475,6 +475,12 @@ def choose(opts: Sequence[Option], *, objective: str = "makespan",
 # --------------------------------------------------------------------------
 # what to type
 # --------------------------------------------------------------------------
+def _toml_str(value: str) -> str:
+    """A TOML basic string: JSON's escapes (quote, backslash, control
+    characters) are TOML's; non-ASCII is kept as is."""
+    return json.dumps(str(value), ensure_ascii=False)
+
+
 def multi_run_plan_text(jobs: Sequence[Job], option: Option) -> str:
     """A ``gpuwm.multi-run-plan/v1`` plan in the recommended order."""
     from woof.multi_run import PLAN_SCHEMA
@@ -484,12 +490,12 @@ def multi_run_plan_text(jobs: Sequence[Job], option: Option) -> str:
              f"runs_per_gpu = {option.slots}",
              f"mps = {'true' if option.mps else 'false'}", ""]
     for job in order_jobs(jobs, option.order):
-        lines += ["[[run]]", f'name = "{job.name}"',
+        lines += ["[[run]]", f"name = {_toml_str(job.name)}",
                   f"device = {option.high.device[job.name]}",
-                  f'config = "{job.config}"',
-                  f'outdir = "runs/{job.name}"',
-                  f'scratch = "scratch/{job.name}"',
-                  f'cache = "cache/{job.name}"', ""]
+                  f"config = {_toml_str(job.config)}",
+                  f"outdir = {_toml_str(f'runs/{job.name}')}",
+                  f"scratch = {_toml_str(f'scratch/{job.name}')}",
+                  f"cache = {_toml_str(f'cache/{job.name}')}", ""]
     return "\n".join(lines)
 
 
@@ -572,12 +578,7 @@ def render_text(jobs: Sequence[Job], runner: Runner, opts: Sequence[Option],
     lines.append(f"  one at a time on one card: {span(serial_s(jobs))}")
     lines.append(f"  {'per card':>8}  {'MPS':>3}  {'order':<13} "
                  f"{'makespan':>17}  contention")
-    seen = set()
     for o in sorted(opts, key=lambda o: (o.slots, o.mps, o.order)):
-        if (o.slots, o.mps) in seen and o.order == "as-given" \
-                and not o.admitted:
-            continue
-        seen.add((o.slots, o.mps))
         if not o.admitted:
             refused = (o.low.refused or o.high.refused)[0]
             lines.append(f"  {o.slots:>8}  {'on' if o.mps else 'off':>3}  "
@@ -627,6 +628,12 @@ def main(args) -> int:
         runner = resolve_runner(args)
     except RunnerSpecError as error:
         print(f"woof pack-plan: {error}", file=sys.stderr)
+        return 2
+    if runner.vram_bytes is None:
+        print("woof pack-plan: the runner's memory is unknown, so no run "
+              "can be priced against the card and admission would refuse "
+              "every option; pass --card NAME (from the table) or --runner "
+              "FILE with the card's memory", file=sys.stderr)
         return 2
     if args.gpus:
         from dataclasses import replace
