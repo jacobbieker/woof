@@ -487,8 +487,25 @@ extern "C" __global__ void topo_shadow_scan(
 // and HT there is the barycentric (linear) interpolant on the Delaunay
 // triangle (the cell and two consecutive cellsOnCell neighbours) that holds
 // it.  The sample's distance is its horizontal distance from the cell
-// (WRF's dxabs).  A sample whose nearest cell touches the mesh's outer edge
-// ends the scan, as leaving the domain ends WRF's.
+// (WRF's dxabs).  A sample outside the mesh ends the scan, as leaving the
+// domain ends WRF's: on a limited-area mesh, a sample whose nearest cell
+// touches the outer edge is read only from that cell's triangles whose three
+// cells are on the mesh, and ends the scan when none of them holds it (so a
+// cell on the edge still scans inward, and along the edge).
+//
+// The frame: offsets are the chord between centres projected on the cell's
+// tangent plane, and the samples lie in that plane.  Against the arc along
+// the sphere that is a relative length error of (d/R)^2/6, under 3e-6 (7 cm)
+// at shadlen = 25 km, and it moves every centre the same way, so it is below
+// the float32 words the march computes in.  WRF's grid march ignores the
+// curvature too (HT is height above the sphere, distances are map metres).
+//
+// The nearest-cell walk is greedy over cellsOnCell from the last sample's
+// cell.  Each hop strictly lowers the distance to the sample, so no cell is
+// visited twice and n hops bound it; on a Delaunay graph it ends at the
+// nearest centre (a cell that is not the nearest has a neighbour nearer the
+// sample).  A step of dxc is about one hop on a uniform mesh, and about
+// dxc / (the local spacing) where the mesh refines.
 //
 // geom is [7][n]: the cell centre in metres on the sphere as float32
 // hi + lo words (x, y, z hi then x, y, z lo; their sum is the float64
@@ -561,7 +578,7 @@ extern "C" __global__ void topo_shadow_scan_mesh(
         float ce, cn;
         tr_mesh_local(geom, n, o, c, ex, ey, nx_, ny_, nz_, &ce, &cn);
         float best = tr_mesh_dist2(ce, cn, te, tn);
-        for (int hop = 0; hop < 64; ++hop) {
+        for (int hop = 0; hop < n; ++hop) {
             int next = c;
             for (int s = 0; s < max_edges; ++s) {
                 const int m = cells[s * n + c];
@@ -581,16 +598,18 @@ extern "C" __global__ void topo_shadow_scan_mesh(
             if (m == -2) outside = true;
             if (m != -1) edges = s + 1;
         }
-        if (outside || edges < 3) break;
+        if (edges < 3) break;
         tr_mesh_local(geom, n, o, c, ex, ey, nx_, ny_, nz_, &ce, &cn);
         // the triangle (c, a, b) that holds the sample; where none does (a
         // sample at a triangle's edge in rounding), the one it is nearest to
-        // inside, its weights clamped to the triangle
+        // inside, its weights clamped to the triangle.  A triangle with a
+        // corner outside the mesh is not read.
         float w0 = 1.0f, w1 = 0.0f, w2 = 0.0f, worst = -3.4e38f;
         int ta = c, tb = c;
         for (int s = 0; s < edges; ++s) {
             const int a = cells[s * n + c];
             const int b = cells[((s + 1) % edges) * n + c];
+            if (a < 0 || b < 0) continue;
             float ae, an, be, bn;
             tr_mesh_local(geom, n, o, a, ex, ey, nx_, ny_, nz_, &ae, &an);
             tr_mesh_local(geom, n, o, b, ex, ey, nx_, ny_, nz_, &be, &bn);
@@ -610,6 +629,9 @@ extern "C" __global__ void topo_shadow_scan_mesh(
                 if (least >= 0.0f) break;
             }
         }
+        // on the mesh's edge, a sample no on-mesh triangle holds (beyond
+        // rounding) is outside the mesh
+        if (outside && worst < -1.0e-4f) break;
         if (worst < 0.0f) {
             w0 = fmaxf(w0, 0.0f); w1 = fmaxf(w1, 0.0f); w2 = fmaxf(w2, 0.0f);
             const float sum = __fadd_rn(__fadd_rn(w0, w1), w2);

@@ -19,8 +19,9 @@ march is the mesh's own (``topo_shadow_scan_mesh``, :func:`woof.core.topo_radiat
   sample's nearest cell and two consecutive ``cellsOnCell`` neighbours, the mesh's counterpart of WRF's
   two-point interpolation across a grid row;
 * ``dxabs`` is the sample's horizontal distance from the cell, and the test and HT_SHAD update are WRF's;
-* a sample whose nearest cell touches a limited-area mesh's outer edge ends the scan, as leaving the
-  domain ends WRF's.
+* a sample outside a limited-area mesh ends the scan, as leaving the domain ends WRF's: near the outer
+  edge only triangles whose three cells are on the mesh are read, and a sample none of them holds is
+  outside.
 
 On planar terrain both marches read the plane exactly, so the mask is WRF's whenever the sun azimuth and
 the plane do not put a sample within rounding of the threshold
@@ -82,8 +83,11 @@ def shadow_statics(lat_rad, lon_rad, cells_on_cell, n_edges_on_cell, *, radius_m
     for slot in range(cells.shape[1]):
         ok = used[:, slot] & inside[:, slot]
         other = np.where(ok, cells[:, slot], np.arange(n))
-        cosine = np.clip(np.einsum("ki,ki->i", unit, unit[:, other]), -1.0, 1.0)
-        total += np.where(ok, radius_m * np.arccos(cosine), 0.0)
+        # the central angle from the chord, 2*asin(|a - b|/2): well
+        # conditioned at any spacing (arccos of the dot product loses half the
+        # digits on a sub-kilometre mesh)
+        chord = np.linalg.norm(unit - unit[:, other], axis=0)
+        total += np.where(ok, radius_m * 2.0 * np.arcsin(np.minimum(chord / 2.0, 1.0)), 0.0)
         present += ok
     if np.any(present == 0):
         raise ValueError(f"{int(np.count_nonzero(present == 0))} cells have no neighbour on the mesh; "

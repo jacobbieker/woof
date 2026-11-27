@@ -184,6 +184,99 @@ def test_a_hill_shadows_the_cells_behind_it_and_a_night_sky_shadows_nothing():
 
 
 @requires_gpu
+def test_a_mesa_casts_its_analytic_shadow_edge_cells_included():
+    """E1 against a closed form: flat ground before a ramp up to a plateau H higher, toward a sun at
+    elevation e.  A ground cell is shadowed when the plateau's near rim is within L = H / tan(e) of it.
+    The march samples every dxc, so the computed shadow ends between L - dxc and L.  Every flat cell whose
+    ray reaches the rim inside the mesh is held to that, the cells on the mesh's outer edge included
+    (their scan reads the on-mesh triangles and goes on along and into the mesh)."""
+    from scipy.spatial import Delaunay
+
+    lat, lon, cells, counts, x, y = _patch(rows=31, cols=31)
+    low = dict(SUN, gmt=16.5)
+    csza, azimuth = _sun(np.degrees(LAT0), np.degrees(LON0), **low)
+    tan_sun = np.tan(np.arcsin(csza))
+    along = x * np.sin(azimuth) + y * np.cos(azimuth)   # metres toward the sun
+    rise, ramp, dxc = 2000.0, 3000.0, 3000.0
+    height = 300.0 + rise * np.clip(along / ramp, 0.0, 1.0)
+    reach = rise / tan_sun
+    assert 6000.0 < reach < 9000.0
+    mask, shad = _mesh_shadow(height, lat, lon, cells, counts, shadlen=25000.0, sun=low)
+    rim = ramp - along                                   # distance to the rim along the ray
+    hull = Delaunay(np.c_[x, y])
+    steps = np.arange(1, int(25000.0 / dxc) + 2)[None, :] * dxc
+    on_mesh = np.all((hull.find_simplex(np.stack(
+        [x[:, None] + steps * np.sin(azimuth), y[:, None] + steps * np.cos(azimuth)], -1)) >= 0)
+        | (steps > rim[:, None] + dxc), axis=1)
+    flat = along <= 0.0
+    edge = np.any(cells < 0, axis=1)
+    shadowed = flat & on_mesh & (rim <= reach - dxc - 100.0)
+    sunlit = (flat & (rim > reach + 100.0)) | (along >= ramp)
+    assert shadowed.sum() > 15 and (shadowed & edge).sum() > 0 and sunlit.sum() > 100
+    assert np.all(mask[shadowed] == 1), np.flatnonzero(shadowed & (mask == 0))
+    assert np.all(mask[sunlit] == 0), np.flatnonzero(sunlit & (mask == 1))
+    # HT_SHAD: the height the sun must clear, the rim's line of sight at the cell
+    np.testing.assert_array_less(height[shadowed], shad[shadowed])
+
+
+def _reference_mask(lat, lon, height, x, y, *, shadlen, spacing, sun):
+    """An independent float64 march: samples k * spacing along the great circle at the sun azimuth,
+    HT linear on scipy's Delaunay of the patch (whose x, y are the gnomonic plane the patch is built
+    on), ending outside the hull.  Returns WRF's test's largest margin sin(topoelev) - csza per cell
+    (NaN where the sun is down)."""
+    from scipy.interpolate import LinearNDInterpolator
+
+    interp = LinearNDInterpolator(np.c_[x, y], height)
+    p0 = np.array([np.cos(LAT0) * np.cos(LON0), np.cos(LAT0) * np.sin(LON0), np.sin(LAT0)])
+    east = np.array([-np.sin(LON0), np.cos(LON0), 0.0])
+    north = np.array([-np.sin(LAT0) * np.cos(LON0), -np.sin(LAT0) * np.sin(LON0), np.cos(LAT0)])
+    margin = np.full(lat.size, np.nan)
+    for o in range(lat.size):
+        csza, azimuth = _sun(np.degrees(lat[o]), np.degrees(lon[o]), **sun)
+        if csza < 1e-2:
+            continue
+        best = -np.inf
+        for k in range(1, int(shadlen / spacing + 1) + 1):
+            angle = k * spacing / RADIUS
+            la = np.arcsin(np.sin(lat[o]) * np.cos(angle)
+                           + np.cos(lat[o]) * np.sin(angle) * np.cos(azimuth))
+            lo = lon[o] + np.arctan2(np.sin(azimuth) * np.sin(angle) * np.cos(lat[o]),
+                                     np.cos(angle) - np.sin(lat[o]) * np.sin(la))
+            v = np.array([np.cos(la) * np.cos(lo), np.cos(la) * np.sin(lo), np.sin(la)])
+            v = v / (v @ p0) * RADIUS
+            h = float(interp(v @ east, v @ north))
+            if not np.isfinite(h):
+                break
+            best = max(best, np.sin(np.arctan((h - height[o]) / (k * spacing))) - csza)
+        margin[o] = best
+    return margin
+
+
+@requires_gpu
+@pytest.mark.parametrize("gmt", [17.0, 17.25])
+def test_the_mesh_mask_is_an_independent_float64_march_on_rough_terrain(gmt):
+    """E1 on terrain with no closed form: the kernel's mask against a float64 march written apart from
+    it (great-circle samples, scipy's linear interpolant), cell for cell, except where the float64
+    margin is within 1e-4 of WRF's threshold, where float32 may fall either side."""
+    lat, lon, cells, counts, x, y = _patch(rows=25, cols=25)
+    rng = np.random.default_rng(7)
+    height = 600.0 + np.zeros_like(x)
+    for _ in range(12):
+        cx, cy = rng.uniform(-30000.0, 30000.0, 2)
+        amp, width = rng.uniform(800.0, 2500.0), rng.uniform(2500.0, 6000.0)
+        height += amp * np.exp(-((x - cx) ** 2 + (y - cy) ** 2) / (2 * width ** 2))
+    sun = dict(SUN, gmt=gmt)
+    mask, _ = _mesh_shadow(height, lat, lon, cells, counts, shadlen=15000.0, sun=sun)
+    margin = _reference_mask(lat, lon, height.astype(np.float32).astype(np.float64), x, y,
+                             shadlen=15000.0, spacing=3000.0, sun=sun)
+    clear = np.abs(margin) > 1e-4
+    assert clear.sum() > 0.97 * x.size
+    want = (margin >= 0).astype(np.int32)
+    assert 20 < want[clear].sum() < clear.sum() - 20
+    np.testing.assert_array_equal(mask[clear], want[clear])
+
+
+@requires_gpu
 def test_the_engine_runs_the_mesh_search_only_with_the_mesh_statics():
     import cupy as cp
 

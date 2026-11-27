@@ -1307,9 +1307,11 @@ BASELINE_PINNED: dict[str, str] = {
     # tr_shadow_sun, inlined into topo_shadow_scan with the same statements
     # in the same order, and the hex mesh scan (topo_shadow_scan_mesh)
     # added; tests/test_topo_radiation.py's grid oracles hold bitwise on
-    # Metal and CUDA.
+    # Metal and CUDA.  Re-pinned again (2026-11-27) for the mesh scan only:
+    # a cell on a limited-area mesh's edge reads its on-mesh triangles
+    # instead of ending its scan, and the nearest-cell walk is bounded by n.
     "topo_radiation":
-        '145a2b00987962a221488b17dd3dfba9fdd26a3d809a208e8aea86340a146102',
+        'f2a5614df0125b271b093ae5c637dffc9786e60d1f5c4f4aafc21d82467f8a23',
     # Noah mosaic (sf_surface_mosaic = 1): WRF v4.7.1 lsm_mosaic and its
     # ordinary and glacial SFLX subtrees, bitwise against the byte-unmodified
     # WRF column oracle at every non-FTZ word
