@@ -96,10 +96,10 @@ program wrfplus_emdiv_chain
   allocate(one, muave, muaved, mold=mu); one = 1.; muave = 0; muaved = 0
   allocate(tave, taved, uam, vam, wwam, uamd, vamd, wwamd, mold=ww)
   tave = 0; taved = 0; uam = 0; vam = 0; wwam = 0; uamd = 0; vamd = 0; wwamd = 0
-  allocate(b_u(ims:ime, kms:kme, jms:jme, nsub), b_v, b_mu_u, b_mu_v, b_ww, b_t, &
-           b_tave, mold=b_u)
-  allocate(b_mu(ims:ime, jms:jme, nsub), b_mudf, b_mmu, b_mmudf, b_muts, b_muave, &
-           mold=b_mu)
+  allocate(b_u(ims:ime, kms:kme, jms:jme, nsub))
+  allocate(b_v, b_mu_u, b_mu_v, b_ww, b_t, b_tave, mold=b_u)
+  allocate(b_mu(ims:ime, jms:jme, nsub))
+  allocate(b_mudf, b_mmu, b_mmudf, b_muts, b_muave, mold=b_mu)
 
   do s = 1, nsub
     b_u(:,:,:,s) = u; b_v(:,:,:,s) = v; b_mu(:,:,s) = mu; b_mudf(:,:,s) = mudf
