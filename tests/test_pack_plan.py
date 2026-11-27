@@ -421,12 +421,32 @@ def test_unknown_card_memory_is_refused_with_a_message(
     assert "memory is unknown" in err and "--card" in err
 
 
-@pytest.mark.parametrize("gpus", ["0", "-1"])
-def test_gpus_below_one_is_a_usage_error(tmp_path, capsys, gpus):
+@pytest.mark.parametrize("flag,value,message", [
+    ("--gpus", "0", "--gpus must be at least 1"),
+    ("--gpus", "-1", "--gpus must be at least 1"),
+    ("--copies", "0", "--copies must be at least 1"),
+    ("--max-slots", "0", "--max-slots must be at least 1"),
+    ("--mem-margin-gib", "-1", "--mem-margin-gib must be"),
+    ("--mem-margin-gib", "nan", "--mem-margin-gib must be"),
+    ("--deadline-hours", "0", "--deadline-hours must be"),
+    ("--deadline-hours", "inf", "--deadline-hours must be"),
+])
+def test_out_of_range_numbers_are_usage_errors(tmp_path, capsys, flag,
+                                               value, message):
     cfg = _config(tmp_path, name="ens")
-    args = _parse(str(cfg), "--card", "a6000", f"--gpus={gpus}")
+    args = _parse(str(cfg), "--card", "a6000", f"{flag}={value}")
     assert args.func(args) == 2
-    assert "--gpus must be at least 1" in capsys.readouterr().err
+    assert message in capsys.readouterr().err
+
+
+def test_a_zero_margin_is_accepted(tmp_path, monkeypatch):
+    import woof.supervisor as supervisor
+
+    monkeypatch.setattr(supervisor, "priced_reservation_bytes",
+                        lambda e: 4 * GIB)
+    cfg = _config(tmp_path, name="ens")
+    args = _parse(str(cfg), "--card", "a6000", "--mem-margin-gib", "0")
+    assert args.func(args) == 0
 
 
 def test_printed_packed_commands_carry_a_non_default_margin(linear):

@@ -630,9 +630,32 @@ def render_text(jobs: Sequence[Job], runner: Runner, opts: Sequence[Option],
 # --------------------------------------------------------------------------
 # the door
 # --------------------------------------------------------------------------
+def _bad_number(args) -> str | None:
+    """The usage error for an out-of-range numeric flag, or ``None``."""
+    if args.copies < 1:
+        return f"--copies must be at least 1, not {args.copies}"
+    if args.gpus is not None and args.gpus < 1:
+        return f"--gpus must be at least 1, not {args.gpus}"
+    if args.max_slots is not None and args.max_slots < 1:
+        return f"--max-slots must be at least 1, not {args.max_slots}"
+    if args.mem_margin_gib is not None and not (
+            math.isfinite(args.mem_margin_gib) and args.mem_margin_gib >= 0):
+        return ("--mem-margin-gib must be a finite number of GiB, 0 or "
+                f"more, not {args.mem_margin_gib:g}")
+    if args.deadline_hours is not None and not (
+            math.isfinite(args.deadline_hours) and args.deadline_hours > 0):
+        return ("--deadline-hours must be a finite number of hours above "
+                f"0, not {args.deadline_hours:g}")
+    return None
+
+
 def main(args) -> int:
     from woof.runtime_estimate import resolve_runner
 
+    problem = _bad_number(args)
+    if problem:
+        print(f"woof pack-plan: {problem}", file=sys.stderr)
+        return 2
     detected = not (args.card or args.runner)
     try:
         runner = resolve_runner(args)
@@ -646,10 +669,6 @@ def main(args) -> int:
               "FILE with the card's memory", file=sys.stderr)
         return 2
     if args.gpus is not None:
-        if args.gpus < 1:
-            print(f"woof pack-plan: --gpus must be at least 1, not {args.gpus}",
-                  file=sys.stderr)
-            return 2
         from dataclasses import replace
 
         runner = replace(runner, gpus=int(args.gpus))
