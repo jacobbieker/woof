@@ -267,7 +267,10 @@ for dtn in {dtypes!r}:
 @pytest.mark.parametrize("backend", NO_MLX)
 def test_step_tl_matches_finite_differences(backend, tmp_path):
     """||NL(x + a dx) - NL(x)|| / ||a TL dx|| -> 1 in binary64, for one step
-    per variant and the chains of three."""
+    per variant and the chains of three.  With moist_adv_opt 1 the species
+    are perturbed relative to themselves: the seeded qr is zero on about
+    half the cells, where the limiter's scale sits on max(0, ratio)'s
+    kink, and an absolute perturbation crosses it at every a."""
     cases = CASES
     out = _run(backend, f'''
 for i, (over, nstep, warm) in enumerate({cases!r}):
@@ -276,6 +279,10 @@ for i, (over, nstep, warm) in enumerate({cases!r}):
     inputs(geoms)
     x0 = M.run_state(state, cfg, np.float64)
     p = pert(x0, 30 + i)
+    if over.get("_pd"):
+        rng = np.random.default_rng(90 + i)
+        p = [1e-3 * x0[n] * cp.asarray(rng.standard_normal(x0[n].shape)) if n in M.SPECIES
+             else a for n, a in zip(IN, p)]
     def model(xs):
         t = copy(x0)
         for n, a in zip(IN, xs):
