@@ -1,6 +1,6 @@
 """Measure a configuration on THIS runner, and extrapolate the wall.
 
-``woof estimate CONFIG --calibrate N`` is the honest answer for a card
+``woof estimate CONFIG --calibrate N`` measures a card
 nobody has timed: it launches the real run (``woof go``, or ``woof go
 --prepared-root`` when a bundle is given), reads the per-step stream the
 runner already writes (``progress.jsonl``, :mod:`woof.progress_log`),

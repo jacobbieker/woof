@@ -79,7 +79,7 @@ PHASES.  ``prepare`` (fetch-to-first-step, the measured fit
 asynchronous writer up to the measured synchronous 65 MB/s), ``restart``
 writes, and ``data assimilation`` when ``--da`` names one.
 
-Use ``--calibrate N`` on the runner itself for the honest answer on a
+Use ``--calibrate N`` on the runner itself to measure a
 card nobody has timed: it runs N steps of THIS configuration and quotes
 measured against predicted (:mod:`woof.runtime_calibration`).
 """
