@@ -496,9 +496,16 @@ def test_step_walls_drop_warmup_and_divide_thinned_gaps():
     recs = _records(20)
     walls = calib.step_walls(recs, warmup=5)
     assert len(walls) == 15
-    thinned = recs[::2]
+    thinned = recs[::2]                          # steps 1, 3, ..., 19
     walls = calib.step_walls(thinned, warmup=0)
     assert all(w > 0 for w in walls)
+    # Each two-step gap is divided over its steps, so the thinned walls
+    # cover steps 2..19 once each and sum to the unthinned walls there.
+    full = calib.step_walls(recs[:19], warmup=1)
+    assert len(walls) == len(full) == 18
+    assert sum(walls) == pytest.approx(sum(full))
+    assert walls[0] == walls[1] == pytest.approx((recs[2]["emitted_unix_ms"]
+                                                  - recs[0]["emitted_unix_ms"]) / 2000)
 
 
 def test_extrapolation_from_whole_radiation_periods():

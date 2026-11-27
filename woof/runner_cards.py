@@ -8,11 +8,13 @@ the order a caller layers them:
 1. :data:`RUNNER_CARDS`, the built-in card table.  Every figure is a
    vendor nameplate number with its source named on the row: memory,
    memory bandwidth, SM (or GPU-core) count and FP32 throughput, and
-   FP64 only where the vendor's datasheet states it.  No figure here is
-   a measurement of this project's; the timing measurements live in
-   :mod:`woof.runtime_estimate` and name their card.  Memory on the
-   cards this project has run on is what ``nvidia-smi`` reported, and
-   the row says so.
+   FP64 only where the vendor's datasheet states it.  The exceptions
+   are this project's own readings, and each row that carries one says
+   so: memory on the cards this project has run on is what
+   ``nvidia-smi`` reported there, and some capacity and SM figures are
+   the ones ``woof/hex/device_admission.py`` ``KNOWN_CARDS`` measured.
+   No TIMING is in this table; the timing measurements live in
+   :mod:`woof.runtime_estimate` and name their card.
 2. :func:`detect_local_runner`, which reads THIS box without creating a
    CUDA context: ``nvidia-smi`` for an NVIDIA card (name, total memory,
    PCIe generation and width), ``sysctl`` and ``system_profiler`` for
