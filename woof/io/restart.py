@@ -135,7 +135,10 @@ from woof.config import (CORRECT_MODE_RESTART_BREAK_NOTICE, P3_MP_PHYSICS,
                           radiation_scheme_ids)
 from woof.supervisor import _fsync_directory, fsync_file, unique_temp_path
 from woof.correct_mode import (CORRECTION_KEYS as _CORRECTION_KEYS,
+                                KEY_ABSENT_ON as _CORRECTION_KEYS_ABSENT_ON,
                                 OUTPUT_ONLY_KEYS as _OUTPUT_ONLY_CORRECTION_KEYS,
+                                absent_value as _correct_key_absent_value,
+                                key_echoes as _correct_key_echoes,
                                 key_in_scope as _correct_key_in_scope)
 from woof.physics_compat import (RRTMG_VARIANT_LEGACY,
                                   RRTMG_VARIANT_RTE_RRTMGP, rrtmg_variant)
@@ -3368,11 +3371,11 @@ def _drop_default_off_run_keys(values: dict) -> None:
     # (correct mode is the default), and it echoes and digests only where
     # it is on AND read, so a default run whose schemes never read it --
     # every run without WSM6 or New Tiedtke -- echoes and digests as 2.8.9
-    # did, and an on key under its scheme binds.
+    # did, and an on key under its scheme binds.  A key a scheme carried
+    # before it existed (FQ11 under KF-eta and MSKF, correct_mode.
+    # KEY_ABSENT_ON) echoes where it differs from that: off.
     for key in _CORRECTION_KEYS:
-        if (key in _OUTPUT_ONLY_CORRECTION_KEYS
-                or not values.get(key, False)
-                or not _correct_key_in_scope(key, values)):
+        if not _correct_key_echoes(key, values):
             values.pop(key, None)
     from woof.checkpoint_identity import drop_default_cumulus_selectors
     drop_default_cumulus_selectors(values)
@@ -3575,6 +3578,10 @@ def _drop_default_off_run_keys(values: dict) -> None:
     # another commit is refused by the runtime identity whatever it echoes.
     if values.get("diff_metrics_seam_slope", False) is False:
         values.pop("diff_metrics_seam_slope", None)
+    # The MYNN surface-layer Q2 land cap (FQ10): absent while off, which
+    # every earlier header ran.
+    if values.get("mynn_sfclay_q2_land_cap", False) is False:
+        values.pop("mynn_sfclay_q2_land_cap", None)
     # The opt-in resolved obstacles (woof.core.obstacles): every key at its
     # default is what every earlier header ran, so each is echoed only when
     # it differs; obstacle_opt = 1 always echoes with its file.
@@ -5872,6 +5879,7 @@ _RESTART_ABSENT_RUN_DEFAULTS = {
     'noah_land_ice_rain_runoff': False,
     'noah_snow_series_conductivity': False,
     'diff_metrics_seam_slope': False,
+    'mynn_sfclay_q2_land_cap': False,
     'obstacle_opt': 0,
     'obstacle_file': '',
     'obstacle_solid_fraction': 0.5,
@@ -6299,8 +6307,12 @@ def _require_config_match(stored_config: dict, cfg, path) -> None:
             if not (_correct_key_in_scope(key, stored_config)
                     or _correct_key_in_scope(key, live_config)):
                 continue
-            stored = False if stored is absent else stored
-            live = False if live is absent else live
+            # A key its scheme carried before it existed (FQ11 under KF-eta
+            # and MSKF) was on in every header without it.
+            stored = (_correct_key_absent_value(key, stored_config)
+                      if stored is absent else stored)
+            live = (_correct_key_absent_value(key, live_config)
+                    if live is absent else live)
         if key in TERRAIN_DRAG_RUN_DEFAULTS:
             # Absent is the default (_drop_inert_terrain_drag); a moved
             # topo_wind/gwd_opt still refuses below.
@@ -6460,6 +6472,14 @@ def _require_config_match(stored_config: dict, cfg, path) -> None:
         # key is the exact arithmetic every earlier checkpoint ran.
         if _correct_mode_run_flip(stored_config, live_config):
             message += "\n" + CORRECT_MODE_RESTART_BREAK_NOTICE
+        for key in _correct_mode_absent_on_drop(stored_config, live_config):
+            message += (
+                f"\n{key}: this checkpoint was written before the key "
+                "existed, by a build whose scheme applied the correction "
+                "unconditionally, so it ran with it on; this run turns it "
+                f"off (exact mode, or {key} = false), which would drop it "
+                "mid-forecast.  Resume in correct mode, or set "
+                f"{key} = true.")
         raise RestartMismatchError(message)
 
 
@@ -6531,6 +6551,7 @@ ECHO_ABSENT_RUN_VALUES = {"nest_accumulation_archive": False,
                           "noah_land_ice_rain_runoff": False,
                           "noah_snow_series_conductivity": False,
                           "diff_metrics_seam_slope": False,
+                          "mynn_sfclay_q2_land_cap": False,
                           "obstacle_opt": 0, "obstacle_file": "",
                           "obstacle_solid_fraction": 0.5,
                           "obstacle_relax_factor": 10.0,
@@ -6549,9 +6570,13 @@ ECHO_ABSENT_RUN_VALUES = {"nest_accumulation_archive": False,
                           "udm_version": "wrf_471",
                           # The correct-mode keys (2.9.0): the default is
                           # on, the echo drops off, so a header without
-                          # the key ran the exact arithmetic.
+                          # the key ran the exact arithmetic -- except a key
+                          # its scheme carried before it existed
+                          # (_run_config_from_header reads that one by the
+                          # header's scheme selection).
                           **{key: False for key in _CORRECTION_KEYS
-                             if key not in _OUTPUT_ONLY_CORRECTION_KEYS}}
+                             if key not in _OUTPUT_ONLY_CORRECTION_KEYS
+                             and key not in _CORRECTION_KEYS_ABSENT_ON}}
 
 
 def _run_config_from_header(raw_config):
@@ -6570,6 +6595,10 @@ def _run_config_from_header(raw_config):
         values = {k: v for k, v in raw_config.items() if k in names}
         for key, value in ECHO_ABSENT_RUN_VALUES.items():
             values.setdefault(key, value)
+        # A correction its scheme carried before the key existed (FQ11):
+        # absent is what that header's scheme selection ran.
+        for key in _CORRECTION_KEYS_ABSENT_ON:
+            values.setdefault(key, _correct_key_absent_value(key, values))
         if values.get("h_sca_adv_order") == 2:
             values.setdefault("_legacy_h_sca", True)
         return RunConfig(**values)
@@ -7290,10 +7319,24 @@ def _correct_mode_run_flip(stored_run, live_run) -> bool:
     for key in _CORRECTION_KEYS:
         if key in _OUTPUT_ONLY_CORRECTION_KEYS:
             continue
-        if (not stored_run.get(key, False) and live_run.get(key) is True
+        stored_on = stored_run.get(key, _correct_key_absent_value(key, stored_run))
+        live_on = live_run.get(key, _correct_key_absent_value(key, live_run))
+        if (not stored_on and live_on is True
                 and _correct_key_in_scope(key, live_run)):
             return True
     return False
+
+
+def _correct_mode_absent_on_drop(stored_run, live_run) -> tuple[str, ...]:
+    """The correct-mode keys a checkpoint ran on without naming them (its
+    scheme carried the correction before the key existed, correct_mode.
+    KEY_ABSENT_ON) that the live run turns off under that scheme."""
+    return tuple(
+        key for key in _CORRECTION_KEYS_ABSENT_ON
+        if key not in stored_run
+        and _correct_key_absent_value(key, stored_run)
+        and live_run.get(key, _correct_key_absent_value(key, live_run)) is False
+        and _correct_key_in_scope(key, live_run))
 
 
 def _correct_mode_default_flip(stored, live) -> bool:

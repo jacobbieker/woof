@@ -905,8 +905,15 @@ FROZEN_MODULE_DIGESTS = {
         # Previously 9eb33736/5e418a4f; then 78cf5577/0a8949d9 until one
         # word of the header comment changed for the banned-word census
         # (no statement moved).
-        'd5d3e83ef1094a0202b68b297dd1aad357604327ce607a9aad87fc0772fb2db0',
-        '387f2e0d20c9820963853e606a88f71484c3096f3ae0a4a43f29828607ef1b76'),
+        #
+        # RE-PINNED 2026-11-26 (FQ11 kf_capped_downdraft_rain_floor): the
+        # floor moves into an #ifdef KF_CAPPED_DOWNDRAFT_RAIN_FLOOR block;
+        # without the define the unit is the pin above with WRF's bare
+        # pptflx = trppt - tder (tests/test_kf_capped_downdraft_rain_floor.py).
+        # The correct-mode default compiles the define, the pin above's
+        # program.  Previously d5d3e83e/387f2e0d.
+        'b98a64d1c8c8c414cd7100b63f792e8c2504f2719f243f01b6e42d6fa3d78f60',
+        'a48a1a4b3293cc46af03361d5f9877a829c3ef1b11233fe17d35f2e55f20bd13'),
     'lbc_flow': (
         # 4febd041f supplies resolved WDM6/NSSL inflow concentrations.
         # docs/dev/qnn-specified-inflow.md records 4 CPU + 10 GPU
@@ -1218,8 +1225,13 @@ FROZEN_MODULE_DIGESTS = {
         # RE-PINNED by the quirk pass (mynn_sfclay_psih_zolzt): psih2/psih10
         # from zt/L compiled in only under MYNN_SL_PSIH_ZOLZT; without it the
         # preprocessed unit is the previous one.  Previously a02979c2/a9abd502.
-        '2e8b7cb344da2eb74e68893f8921d7140c534d3ed311f471abca8c6580b7a7c0',
-        '179711d725891b0ab4b4431b7e788d0fa372cde253a1a36760c545296c01f6c1'),
+        # RE-PINNED by the quirk pass (mynn_sfclay_q2_land_cap, FQ10): the
+        # Q2 cap over land only, compiled in only under MYNN_SL_Q2_LAND_CAP;
+        # without it the unit is the previous one
+        # (tests/test_mynn_sfclay_q2_land_cap.py strips both blocks and checks
+        # the digest a02979c2).  Previously 2e8b7cb3/179711d7.
+        'c0ae59ecfca4e54c49d7e141168bcc274ac60eddb6d2f4067d9867891cbd7490',
+        '1f61b4c1a35190151579e0599882f8021498e2bff645e8329fb969356742ae7b'),
     'nest': (
         # Re-pinned for a combined four-side boundary launch. The original
         # single-side entry point and SINT expression tree remain unchanged.

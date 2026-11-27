@@ -54,6 +54,7 @@ from woof import simulated_radar_config as simulated_radar_module
 from woof.config_keys import KeyRow, key_rows
 from woof.config import (DEFAULT_COLUMN_CHUNK, RADAR_HEATING_OFF, RadarHeatingConfig,
                           KF_FAMILY_CU_SCHEMES, THOMPSON_CLOUD_BALANCE_MP, THOMPSON_RAIN_SNOW_MP,
+                          KF_CAPPED_DOWNDRAFT_CU,
                           EXPLICIT_HORIZONTAL_DIFFUSION_LIMIT,
                           EPSSM_AUTO,
                           GRELL_FAMILY_CU_PHYSICS, GRELL_FAMILY_DEFAULTS,
@@ -347,9 +348,15 @@ _DOMAIN_RUN_OVERRIDES = (
     # The Noah snow series conductivity (FQ9), on the same terms: a [shared]
     # value reaches the sf_surface_physics = 2 domains only.
     "noah_snow_series_conductivity",
+    # The Kain-Fritsch capped-downdraft rain floor (FQ11), on the same
+    # terms: a [shared] value reaches the cu_physics = 1, 10, 11 domains only.
+    "kf_capped_downdraft_rain_floor",
     # The diffusion-metrics periodic seam correction (FQ12), on the same
     # terms: a [shared] value reaches the diff_opt = 1, 2 domains only.
     "diff_metrics_seam_slope",
+    # The MYNN surface-layer Q2 land cap (FQ10), on the same terms: a
+    # [shared] value reaches the sf_sfclay_physics = 5 domains only.
+    "mynn_sfclay_q2_land_cap",
     # The umbrella over the opt-in quirk corrections (woof.quirk_corrections):
     # per domain like the corrections it turns on, each where its scheme runs.
     "woof_quirk_corrections",
@@ -4505,6 +4512,15 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
         _runs_rrtmg_lw_legacy(lambda name, default, dom=dom: physics_mode.settings.get(
             name, dom.get(name, shared.get(name, default))))
         for dom in domain_tables)
+    # The Kain-Fritsch capped-downdraft rain floor (on in correct mode) is
+    # read only by KF-eta, KF-CuP and MSKF (cu_physics = 1, 10, 11), on the
+    # same terms.
+    tree_runs_kf_capped = any(
+        physics_mode.settings.get(
+            "cu_physics",
+            dom.get("cu_physics",
+                    shared.get("cu_physics", RunConfig.cu_physics))) in KF_CAPPED_DOWNDRAFT_CU
+        for dom in domain_tables)
     # The diffusion-metrics periodic seam correction is read only where
     # compute_diff_metrics runs (diff_opt = 1 or 2), on the same terms.
     tree_runs_diff_metrics = any(
@@ -5132,6 +5148,11 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
                      or kw.get("mynn_sfclay_variant", RunConfig.mynn_sfclay_variant) != "wrf_461")
                 and "mynn_sfclay_psih_zolzt" not in dom):
             kw["mynn_sfclay_psih_zolzt"] = False
+        if (tree_runs_mynn_sl
+                and (kw.get("sf_sfclay_physics", RunConfig.sf_sfclay_physics) != 5
+                     or kw.get("mynn_sfclay_variant", RunConfig.mynn_sfclay_variant) != "wrf_461")
+                and "mynn_sfclay_q2_land_cap" not in dom):
+            kw["mynn_sfclay_q2_land_cap"] = False
         if (tree_runs_noah and kw.get("sf_surface_physics", RunConfig.sf_surface_physics) != 2
                 and "noah_smc_floor_booking" not in dom):
             kw["noah_smc_floor_booking"] = False
@@ -5154,6 +5175,10 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
                 and kw.get("mp_physics", RunConfig.mp_physics) not in THOMPSON_CLOUD_BALANCE_MP
                 and "thompson_lamc_updated_rc" not in dom):
             kw["thompson_lamc_updated_rc"] = False
+        if (tree_runs_kf_capped
+                and kw.get("cu_physics", RunConfig.cu_physics) not in KF_CAPPED_DOWNDRAFT_CU
+                and "kf_capped_downdraft_rain_floor" not in dom):
+            kw["kf_capped_downdraft_rain_floor"] = False
         if (tree_runs_diff_metrics
                 and kw.get("diff_opt", RunConfig.diff_opt) not in (1, 2)
                 and "diff_metrics_seam_slope" not in dom):
@@ -6576,8 +6601,10 @@ def _public_config_value(value):
                                   ("thompson_rain_snow_closure", False),
                                   ("rrtmg_lw_model_top", False),
                                   ("thompson_lamc_updated_rc", False),
+                                  ("kf_capped_downdraft_rain_floor", False),
                                   ("diff_metrics_seam_slope", False),
                                   ("noah_land_ice_rain_runoff", False),
+                                  ("mynn_sfclay_q2_land_cap", False),
                                   ("noah_snow_series_conductivity", False),
                                   *OBSTACLE_RUN_DEFAULTS.items()):
                 value = run_document.get(name, default)
@@ -6639,12 +6666,12 @@ def _public_config_value(value):
             # selected scheme, so a default document without WSM6 or New
             # Tiedtke keeps its bytes under the 2.9.0 correct-mode default,
             # and an exact-mode document keeps the bytes it had before them.
-            from woof.correct_mode import (CORRECTION_KEYS,
-                                            OUTPUT_ONLY_KEYS, key_in_scope)
+            # A key a scheme carried before it existed (FQ11 under KF-eta
+            # and MSKF) is written where it differs from that
+            # (correct_mode.key_echoes).
+            from woof.correct_mode import CORRECTION_KEYS, key_echoes
             for name in CORRECTION_KEYS:
-                if (name in OUTPUT_ONLY_KEYS
-                        or not run_document.get(name, False)
-                        or not key_in_scope(name, run_document)):
+                if not key_echoes(name, run_document):
                     run_document.pop(name, None)
             # Lightning and aer_opt = 2 controls (golden/ports-rad): absent
             # while unread, so default public documents keep their bytes.

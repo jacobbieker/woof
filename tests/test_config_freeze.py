@@ -373,6 +373,14 @@ def test_new_fields_are_reviewed_defaults_appended_last():
     assert names.pop() == "noah_snow_series_conductivity"
     assert RunConfig.__dataclass_fields__["noah_snow_series_conductivity"].default is _cm.CORRECT_KEYS_DEFAULT
     assert RunConfig.__dataclass_fields__["noah_snow_series_conductivity"].kw_only
+    # The MYNN surface-layer Q2 land cap (quirk pass, finding FQ10), appended.
+    assert names.pop() == "mynn_sfclay_q2_land_cap"
+    assert RunConfig.__dataclass_fields__["mynn_sfclay_q2_land_cap"].default is _cm.CORRECT_KEYS_DEFAULT
+    assert RunConfig.__dataclass_fields__["mynn_sfclay_q2_land_cap"].kw_only
+    # The Kain-Fritsch capped-downdraft rain floor (quirk pass, finding FQ11), appended.
+    assert names.pop() == "kf_capped_downdraft_rain_floor"
+    assert RunConfig.__dataclass_fields__["kf_capped_downdraft_rain_floor"].default is _cm.CORRECT_KEYS_DEFAULT
+    assert RunConfig.__dataclass_fields__["kf_capped_downdraft_rain_floor"].kw_only
     # The Noah land-ice rain runoff (quirk pass, finding FQ8), appended.
     assert names.pop() == "noah_land_ice_rain_runoff"
     assert RunConfig.__dataclass_fields__["noah_land_ice_rain_runoff"].default is _cm.CORRECT_KEYS_DEFAULT
@@ -1161,6 +1169,10 @@ def _check_frozen_defaults(actual):
                          ("diff_metrics_seam_slope", __import__("woof.correct_mode", fromlist=["x"]).CORRECT_KEYS_DEFAULT),
                          # the Noah land-ice rain runoff (FQ8)
                          ("noah_land_ice_rain_runoff", __import__("woof.correct_mode", fromlist=["x"]).CORRECT_KEYS_DEFAULT),
+                         # the Kain-Fritsch capped-downdraft rain floor (FQ11)
+                         ("kf_capped_downdraft_rain_floor", __import__("woof.correct_mode", fromlist=["x"]).CORRECT_KEYS_DEFAULT),
+                         # the MYNN surface-layer Q2 land cap (FQ10)
+                         ("mynn_sfclay_q2_land_cap", __import__("woof.correct_mode", fromlist=["x"]).CORRECT_KEYS_DEFAULT),
                          # the Noah snow series conductivity (FQ9)
                          ("noah_snow_series_conductivity", __import__("woof.correct_mode", fromlist=["x"]).CORRECT_KEYS_DEFAULT),
                          # the opt-in resolved obstacles, off

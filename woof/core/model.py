@@ -880,11 +880,11 @@ def restart_identity_payload(exp) -> dict:
         # default-on) and moved every recorded fingerprint and tree restart
         # identity, schemes or not (tests/test_water_overlay.py,
         # tests/test_devices_door.py).
-        from woof.correct_mode import (CORRECTION_KEYS, OUTPUT_ONLY_KEYS,
-                                        key_in_scope)
+        # A key a scheme carried before it existed (FQ11 under KF-eta and
+        # MSKF) binds where it differs from that (correct_mode.key_echoes).
+        from woof.correct_mode import CORRECTION_KEYS, key_echoes
         for name in CORRECTION_KEYS:
-            if (name in OUTPUT_ONLY_KEYS or not run.get(name, False)
-                    or not key_in_scope(name, run)):
+            if not key_echoes(name, run):
                 run.pop(name, None)
         # THE SURFACE-RADIATION CARRIER POLICY, on the same convention the
         # perturbation and spawn blocks above use: the DEFAULT drops out of

@@ -2754,6 +2754,27 @@ forcing lanes were zero. It has not been re-measured since those lanes
 were connected; these numbers do not describe the expected behaviour
 of the current engine.
 
+**Correction: `kf_capped_downdraft_rain_floor` (on in correct mode, finding FQ11).**
+When the Kain-Fritsch family's downdraft would evaporate more than the
+updraft rains, WRF caps it (`DDINC = TRPPT/TDER`, `TDER = TDER*DDINC`) and
+forms the rain flux as `PPTFLX = TRPPT - TDER` with no floor
+(`module_cu_kfeta.F:1810-1821`, `module_cu_kfcup.F:2711-2721`,
+`module_cu_mskf.F:5840` of WRF 4.7.1; 4.8.1 is the same). The float64
+answer is 0, but in binary32 `TDER*DDINC` can round above `TRPPT`, and the
+flux is then a few ulp negative: `RAINCV` is negative for the whole `NCA`
+window and `RAINC` accumulates below zero. With the option on, `kf.cu`,
+`kfcup.cu` and `mskf.cu` floor the flux at zero
+(`KF_CAPPED_DOWNDRAFT_RAIN_FLOOR`); without it each unit is WRF's bare
+subtraction byte for byte (`tests/test_kf_capped_downdraft_rain_floor.py`
+strips the block and checks the digest). On the 149-level KF-CuP column
+that drove a hex forecast's `RAINC` negative, WRF's own Fortran (built as
+WRF builds it) and the port's strict arithmetic both give `RAINCV = 0`; the
+port's default arithmetic gives -2.3e-10 mm, and the option gives 0
+(`tests/test_kfcup_capped_downdraft_gpu.py`). On the seven WRF-graded
+capped KF-eta columns WRF gives 0 and the floor moves no word. It is per
+domain, read only under `cu_physics = 1, 10, 11`, and not scored against
+observations.
+
 **Correction: `gf_deep_rain_evaporation_booking` (on in correct mode, finding FQ1).** WRF
 4.6.1/4.7.1's `cup_output_ens_3d` (`module_cu_gf_deep.F`, lines 3330-3348)
 counts some deep water twice.
@@ -2814,6 +2835,24 @@ T2, TH2, Q2 and the 2 m exchange coefficients move
 (`tests/test_mynn_sfclay_psih_zolzt.py`). Read only where `sf_sfclay_physics
 = 5` at the `wrf_461` variant, off in exact mode; not yet scored against
 observations.
+
+**Correction: `mynn_sfclay_q2_land_cap` (on in correct mode, finding FQ10).** WRF 4.7.1's MYNN
+surface layer ends its 2 m diagnostics with `Q2 = MIN(Q2, 1.05*QV1D)`
+(`module_sf_mynn.F:1149`), at every point, water included. The surface
+driver applies the same limit after the schemes (`module_surface_driver.F:4452-4456`)
+and only where `XLAND < 1.5`; its comment ties it to the land source terms
+("transition periods and weak winds and vegetation source"). Over water Q2
+is the Monin-Obukhov interpolation between the saturated skin and the lowest
+level, which the cap truncates: a warm sea under cooler, drier air cannot
+show a 2 m mixing ratio more than 5 per cent above the air. With the option
+on the kernel keeps the cap where `xland < 1.5` and leaves the water value,
+which stays between the lowest level and the surface mixing ratio. Only Q2
+(and what is derived from it) moves (`tests/test_mynn_sfclay_q2_land_cap.py`).
+Read only where `sf_sfclay_physics = 5` at the `wrf_461` variant, off in
+exact mode; not yet scored against observations. With `sf_surface_physics = 3`
+and `ruc_2m_diagnostic = "log_profile"` the fork diagnostic set applies its own
+final Q2 bound to water after the surface layer, so the key has no effect on
+water there.
 
 ## Passive tracers (`tracer_opt`)
 

@@ -2984,7 +2984,7 @@
     },
     {
       "file": "tests/test_mp8_frozen.py",
-      "line": 3390,
+      "line": 3402,
       "column": 8,
       "surface": "tests",
       "constructor": "cp.RawModule",
@@ -3840,7 +3840,7 @@
     },
     {
       "file": "tests/test_physics_256_levels_gpu.py",
-      "line": 450,
+      "line": 451,
       "column": 13,
       "surface": "tests",
       "constructor": "compiler.compile_using_nvrtc",
@@ -7898,7 +7898,7 @@
     },
     {
       "file": "woof/core/kf.py",
-      "line": 388,
+      "line": 409,
       "column": 20,
       "surface": "package",
       "constructor": "compiler.compile_using_nvrtc",

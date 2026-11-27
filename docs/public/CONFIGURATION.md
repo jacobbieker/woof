@@ -377,7 +377,7 @@ consumed `RunConfig` field -- the knob-parity battery
 consuming kernel/module rather than being decorative -- and every one
 is importable from a WRF namelist.
 
-**Which keys a `[[domain]]` table may override.** Exactly these 475,
+**Which keys a `[[domain]]` table may override.** Exactly these 477,
 and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
 
     madwrf_opt  madwrf_cldinit  madwrf_dt_relax  madwrf_dt_nudge  ra_call_offset
@@ -409,7 +409,8 @@ and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
     ishallow  cugd_avedx  gf_deep_rain_evaporation_booking  ysu_surface_heat_exner
     noah_smc_floor_booking  thompson_rain_snow_closure  rrtmg_lw_model_top
     thompson_lamc_updated_rc  noah_land_ice_rain_runoff
-    noah_snow_series_conductivity  diff_metrics_seam_slope  woof_quirk_corrections
+    noah_snow_series_conductivity  kf_capped_downdraft_rain_floor
+    diff_metrics_seam_slope  mynn_sfclay_q2_land_cap  woof_quirk_corrections
     mynn_sfclay_psih_zolzt  urban_param_file  obstacle_opt  obstacle_file
     obstacle_solid_fraction  obstacle_relax_factor  obstacle_drag_coefficient
     obstacle_wall_z0  kf_edrates  maxiens  maxens  maxens2  maxens3  ensdim  cu_diag
@@ -682,14 +683,38 @@ against observations. Off, and in exact mode, the
 arithmetic is WRF's word for word. It is not a WRF namelist key; set it in
 the TOML.
 
+`mynn_sfclay_q2_land_cap` (default `true`; finding FQ10) is a correction to
+the MYNN surface layer's 2 m mixing ratio (`sf_sfclay_physics = 5`,
+`mynn_sfclay_variant = "wrf_461"`), per domain on the same terms. WRF's
+`module_sf_mynn.F:1149` caps Q2 at `1.05*QV1D` at every point, water
+included, while the surface driver's cap of that limit
+(`module_surface_driver.F:4452-4456`) runs over land only. With `true` the
+cap runs where `XLAND < 1.5` only; Q2 is the only output that moves. Off, and
+in exact mode, the arithmetic is WRF's word for word. It is not a WRF
+namelist key; set it in the TOML.
+
+`kf_capped_downdraft_rain_floor` (default `true`; finding FQ11) is a
+correction to the Kain-Fritsch family (`cu_physics = 1` KF-eta, `10` KF-CuP,
+`11` MSKF), per domain on the same terms. When the scheme caps the
+downdraft (`DDINC = TRPPT/TDER`), binary32 `TDER*DDINC` can round above
+`TRPPT`, and WRF's bare `PPTFLX = TRPPT - TDER` is then a few ulp negative,
+so `RAINCV` is negative for the whole `NCA` window. With `true` the flux is
+floored at zero, the float64 answer. Not read by the previous KF
+(`cu_physics = 99`). Off, and in exact mode, the arithmetic is WRF's word
+for word. It is not a WRF namelist key; set it in the TOML. A checkpoint
+written before the key resumes as its build ran: KF-eta and MSKF floored
+unconditionally, so such a checkpoint continues in correct mode and is
+refused by name in exact mode; KF-CuP did not, so it continues in exact
+mode.
+
 `woof_quirk_corrections` (default unset) is the umbrella over the
 corrections of WRF 4.7.1 / MPAS v8.4.2 quirks (`woof/quirk_corrections.py`).
 They follow the physics mode: unset, every correction is on in correct
 mode (the default) where its scheme runs, and off in exact mode, where the
 run is the WRF / MPAS oracle's arithmetic word for word (parity tests run
 there). On the WRF route exact mode is a strict `GPUWM_WRF_EXACT=1`
-process, or every correct-mode key set `false` (the ten WRF-route keys
-below are correct-mode findings FQ1-FQ9 and FQ12, in the table under "Correct
+process, or every correct-mode key set `false` (the twelve WRF-route keys
+below are correct-mode findings FQ1-FQ12, in the table under "Correct
 mode"); on the hex door it is `--physics-mode exact`; in an MPAS-Ocean,
 MALI or MPAS-Seaice config dict it is `config_physics_mode = 'exact'`.
 A correction's own key, when set, wins over the mode, which is how one is
@@ -712,9 +737,12 @@ likewise. In correct mode, or under `"all"`, these are on:
   `rrtmg_lw_model_top = true` (`ra_lw_physics = 4` with
   `ra_rrtmg_variant = "rrtmg_legacy"`), `thompson_lamc_updated_rc = true`
   (`mp_physics = 28` or `38`), `noah_land_ice_rain_runoff = true`,
-  `noah_snow_series_conductivity = true` (both `sf_surface_physics = 2`) and
-  `diff_metrics_seam_slope = true` (where WRF's mixing package runs on a
-  periodic axis).
+  `noah_snow_series_conductivity = true` (both `sf_surface_physics = 2`),
+  `mynn_sfclay_q2_land_cap = true`
+  (`sf_sfclay_physics = 5` with `mynn_sfclay_variant = "wrf_461"`),
+  `kf_capped_downdraft_rain_floor = true`
+  (`cu_physics = 1`, `10` or `11`) and `diff_metrics_seam_slope = true`
+  (where WRF's mixing package runs on a periodic axis).
 - Hex regional route: `--undriven-species-boundary wrf-flow-dependent`
   (a regional run, `--lbc-dir`, on the WOOF-physics one-card drivers; it
   stays off on local time stepping, partial nest and the partitioned
@@ -951,7 +979,7 @@ for the retained proof and the limits of the forecast evidence.
 ### Correct mode (`[shared]`)
 
 Correct mode is the default. It fixes defects that WRF itself carries
-(water budgets, and the fork's quirk ledger FQ1-FQ9 and FQ12, see
+(water budgets, and the fork's quirk ledger FQ1-FQ12, see
 `woof_quirk_corrections`), one key per scheme, each `true` by default and read only by the
 schemes named in its row. Setting a key to `false` in `[shared]` runs that
 scheme's WRF-matched arithmetic. Strict WRF mode (`GPUWM_WRF_EXACT=1`)
@@ -978,6 +1006,8 @@ configuration has no `[physics]` table; `physics.mode` is not an engine key.
 | `thompson_lamc_updated_rc` | aerosol-aware Thompson (`mp_physics = 28, 38`) | FQ7 | the cloud-water balance forms the cloud slope from the updated cloud mass, not the entry mass |
 | `noah_land_ice_rain_runoff` | Noah (`sf_surface_physics = 2`), land-ice points | FQ8 | liquid rain that falls on land ice is booked as surface runoff, where WRF drops it |
 | `noah_snow_series_conductivity` | Noah (`sf_surface_physics = 2`), snow-covered land points | FQ9 | the soil heat flux under snow blends the series (harmonic) snow-soil conductivity WRF computes and never reads, not the arithmetic mean |
+| `mynn_sfclay_q2_land_cap` | MYNN surface layer (`sf_sfclay_physics = 5`, `mynn_sfclay_variant = "wrf_461"`) | FQ10 | the 1.05 times lowest-level cap on the 2 m mixing ratio runs over land only, as the surface driver's does, not over water |
+| `kf_capped_downdraft_rain_floor` | Kain-Fritsch eta, KF-CuP and MSKF (`cu_physics = 1, 10, 11`) | FQ11 | the capped downdraft's rain flux `TRPPT - TDER` is floored at zero, so `RAINCV` is never negative |
 | `diff_metrics_seam_slope` | WRF's mixing package on a periodic axis | FQ12 | the top w level's coordinate slope at a periodic seam is filled like every other column's, not left at zero |
 
 A checkpoint resumes only under the arithmetic it was written with; a
