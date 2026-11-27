@@ -105,6 +105,10 @@ _W_SCALES = {
     "mup": (0.0, 200.0), "u_pp": (0.0, 1.0), "v_pp": (0.0, 1.0),
     "ht": (500.0, 100.0), "mub2d": (9.0e4, 2e3), "cqw": (1.0, 0.01),
 }
+#: The damper's reference w (uncoupled, m/s; times c1f mut + c2f ~ 9e4 it
+#: is comparable with the coupled w_pp above).  Drawn after every other
+#: field, so the earlier draws (and the fixtures made from them) stand.
+_W_REF = (0.0, 1e-5)
 
 
 def w_geometry(nz=7, ny=8, nx=9, **overrides) -> WGeometry:
@@ -151,6 +155,7 @@ def w_trajectory(geom: WGeometry, seed: int, dtype=np.float64, *,
         out["c1h"], out["c2h"] = np.ones(nz), np.zeros(nz)
         out["c1f"], out["c2f"] = np.ones(nz + 1), np.zeros(nz + 1)
     _msf(out, rng, shapes, ("msft",), geom.has_msf)   # last: earlier draws unchanged
+    out["w"] = _W_REF[0] + _W_REF[1] * rng.standard_normal(shapes["w"])
     return {k: np.ascontiguousarray(v, dtype=dtype) for k, v in out.items()}
 
 
@@ -160,8 +165,8 @@ def w_perturbation(geom: WGeometry, seed: int, dtype=np.float64) -> dict:
     shapes = w_shapes(geom)
     names = W_STATE + W_ACTIVE
     return {n: np.ascontiguousarray(
-        _W_SCALES.get(n, (0.0, 1.0))[1] * rng.standard_normal(shapes[n]),
-        dtype=dtype) for n in names}
+        (_W_REF if n == "w" else _W_SCALES.get(n, (0.0, 1.0)))[1]
+        * rng.standard_normal(shapes[n]), dtype=dtype) for n in names}
 
 
 # calc_coef_w: full pressure and inverse density of a column.
@@ -584,7 +589,11 @@ def stage_trajectory(geom: StageGeometry, seed: int, dtype=np.float64, *,
                         AT_ALIAS))
     out.update(ss_trajectory(geom.ss, seed + 6, dtype, hybrid=hybrid))
     out.update(cw_trajectory(geom.cw, seed + 7, dtype, hybrid=hybrid))
-    out.update(substep_trajectory(geom.substep, seed, dtype, hybrid=hybrid))
+    # The damper's reference w is small_step's w (the strict primal's
+    # state.w through the loop), so ss_trajectory's draw stands.
+    sub = substep_trajectory(geom.substep, seed, dtype, hybrid=hybrid)
+    sub.pop("w")
+    out.update(sub)
     for n in ("phb", "alb", "pb", "muts", "c3h", "c4h", "c3f", "c4f"):
         out[n] = prp[n]
     out["dnw"] = np.ascontiguousarray(1.0 / out["rdnw"], dtype=dtype)
@@ -606,7 +615,9 @@ def stage_perturbation(geom: StageGeometry, seed: int, dtype=np.float64) -> dict
     out.update(at_perturbation(geom.at, seed + 5, dtype))
     out.update(ss_perturbation(geom.ss, seed + 6, dtype))
     out.update(cw_perturbation(geom.cw, seed + 7, dtype))
-    out.update(substep_perturbation(geom.substep, seed, dtype))
+    sub = substep_perturbation(geom.substep, seed, dtype)
+    sub.pop("w")
+    out.update(sub)
     return {n: out[n] for n in stage_active(geom)}
 
 
