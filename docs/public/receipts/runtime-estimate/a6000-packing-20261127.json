@@ -42,7 +42,7 @@
   },
   "findings": [
     "Without MPS each run ran slower than its share of the card (2.24x for two, 4.5x for four, 9.05x for eight), at 18,000 and at 162,000 columns: the card time-slices the contexts and packing gains only the overlap of the runs' start-up (4 large runs: 484.1 s packed against 489.6 s one at a time).",
-    "MPS raised step throughput 2 % (large) and 14-20 % (small).",
+    "MPS cut the per-run step time 13 % at two and at three large runs (0.3976 against 0.4559 s, 0.5962 against 0.6853 s) and 22 % at two small runs (0.0480 against 0.06135 s); the small three- and five-run MPS rows have no matching no-MPS count (compared with the interpolated off rows, about 25 %).",
     "woof.supervisor's GPU preflight fails closed on the pmon type an MPS client reports ('M+C'): with three or more runs launched under --mps, some runs exited before their first step."
   ],
   "predicted_by_pack_plan": {

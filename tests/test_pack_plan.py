@@ -186,8 +186,10 @@ def test_emitted_plan_loads_in_multi_run(tmp_path, linear):
     loaded = load_plan(plan)
     assert [r.name for r in loaded.runs] == [
         j.name for j in pp.order_jobs(jobs, best.order)]
-    assert pp.invocations(best)[0].startswith(
-        f"woof multi-run pack-plan.toml --runs-per-gpu {best.slots}")
+    assert pp.invocations(best, str(plan))[0].startswith(
+        f"woof multi-run {plan} --runs-per-gpu {best.slots}")
+    # No plan written: an obvious placeholder, not a file that is not there.
+    assert pp.NO_PLAN in pp.invocations(best)[0]
 
 
 def _parse(*argv):
@@ -272,7 +274,9 @@ def test_one_per_card_with_more_runs_than_cards_is_not_a_multi_run_plan(
     jobs = [_job(n) for n in "abc"]
     serial = next(o for o in pp.options(jobs, _runner(), max_slots=1))
     lines = pp.invocations(serial, jobs=jobs, gpus=1)
-    assert lines[:3] == ["woof go a.toml", "woof go b.toml", "woof go c.toml"]
+    assert lines[0] == ("CUDA_VISIBLE_DEVICES=0 sh -c "
+                        "'woof go a.toml && woof go b.toml && "
+                        "woof go c.toml' &")
     assert not pp.multi_run_queues(serial, 3, 1)
     assert pp.multi_run_queues(serial, 2, 2)
     assert pp.invocations(serial, jobs=jobs[:2], gpus=2)[0].startswith(
@@ -287,3 +291,54 @@ def test_one_per_card_with_more_runs_than_cards_is_not_a_multi_run_plan(
                   "--max-slots", "1", "--emit-plan", str(plan))
     assert args.func(args) == 0
     assert "not written" in capsys.readouterr().out and not plan.exists()
+
+
+def test_printed_commands_run_what_simulate_predicts_on_two_cards(linear):
+    # Three runs on two cards at one per card: simulate() puts a pair on
+    # one card and one on the other, in parallel; the commands are one
+    # queue per card, the cards in parallel.
+    jobs = [_job(n, gpu=100.0, fixed=0.0) for n in "abc"]
+    runner = _runner(gpus=2)
+    opt = next(o for o in pp.options(jobs, runner, max_slots=1,
+                                     allow_mps=False)
+               if o.order == "as-given")
+    assert opt.high.makespan_s == pytest.approx(200.0)
+    lines = pp.invocations(opt, jobs=jobs, gpus=2)
+    queues = [ln for ln in lines if ln.startswith("CUDA_VISIBLE_DEVICES=")]
+    assert len(queues) == 2 and all(ln.endswith("&") for ln in queues)
+    by_card = {int(q.split("=")[1].split()[0]): q.count("woof go")
+               for q in queues}
+    assert sorted(by_card.values()) == [1, 2]
+    assert by_card == {c: sum(1 for d in opt.high.device.values() if d == c)
+                       for c in by_card}
+
+
+def test_cli_names_the_plan_it_wrote_or_a_placeholder(
+        tmp_path, capsys, monkeypatch):
+    import woof.supervisor as supervisor
+
+    monkeypatch.setattr(supervisor, "priced_reservation_bytes",
+                        lambda e: 9 * GIB)
+    cfg = _config(tmp_path, name="ens")
+    plan = tmp_path / "other.toml"
+    args = _parse(str(cfg), "--copies", "2", "--card", "a6000",
+                  "--max-slots", "2", "--emit-plan", str(plan))
+    assert args.func(args) == 0
+    out = capsys.readouterr().out
+    assert f"woof multi-run {plan}" in out and "pack-plan.toml" not in out
+    args = _parse(str(cfg), "--copies", "2", "--card", "a6000",
+                  "--max-slots", "2")
+    assert args.func(args) == 0
+    assert pp.NO_PLAN in capsys.readouterr().out
+
+
+def test_same_stem_configs_get_unique_deterministic_names(tmp_path):
+    for d in "ab":
+        (tmp_path / d).mkdir()
+        (tmp_path / d / "member.toml").write_text("")
+    (tmp_path / "solo.toml").write_text("")
+    paths = [tmp_path / "a" / "member.toml", tmp_path / "b" / "member.toml",
+             tmp_path / "solo.toml"]
+    assert pp.run_names(paths) == ["a-member", "b-member", "solo"]
+    assert pp.run_names([paths[0], paths[0]]) == ["a-member-1", "a-member-2"]
+    assert pp.run_names(paths) == pp.run_names(paths)

@@ -1115,8 +1115,12 @@ measured rows (`SHARING_ROWS`), the card's own rows first:
 
 On the A6000, runs in separate contexts without MPS are time-sliced: each
 ran slower than its share of the card (2.24x for two), whatever the domain
-size, so packing gains only the overlap of the runs' start-up. MPS gained
-2 % (large) and 14-20 % (small) in step throughput. The RTX PRO 6000 row
+size, so packing gains only the overlap of the runs' start-up. MPS cut each run's step time by 13 % at two and at three large runs
+(0.398 against 0.456 s, 0.596 against 0.685 s; 15 % more step throughput),
+and by 22 % at two small runs (0.048 against 0.061 s; 28 % more
+throughput). Its small three- and five-run rows have no matching no-MPS
+count, so they are compared only against the interpolated off rows (about
+25 %). The RTX PRO 6000 row
 disagrees with the A6000 at four small runs; a card with no rows of its own
 is bracketed by both. A count between measured rows is interpolated, and a
 count past the last follows the measured trend at the low end and the

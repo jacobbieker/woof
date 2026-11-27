@@ -704,3 +704,12 @@ def test_estimate_json_is_serialisable(exp):
     assert doc["provenance"] in (rte.MEASURED, rte.SCALED, rte.SUBSTITUTED,
                                  rte.CALIBRATED)
 
+
+
+def test_another_cards_rows_are_a_labelled_fallback_not_a_measurement():
+    own = rte.sharing_bracket(4, columns=10_000, mps=False, card="rtx-a6000")
+    assert own["measured"] is True and own["basis"].startswith("MEASURED")
+    other = rte.sharing_bracket(4, columns=10_000, mps=False, card="l40s")
+    assert other["measured"] is False
+    assert other["basis"].startswith("UNMEASURED")
+    assert "no contention rows for l40s" in other["basis"]

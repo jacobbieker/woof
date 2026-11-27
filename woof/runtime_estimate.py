@@ -969,7 +969,8 @@ def _sharing_rows(large: bool, mps: bool, card: str | None
     """The rows that price a domain of this size class, and what was
     given up to find them: the same card if it has rows, else any card;
     the same MPS setting if measured, else the other (MPS on is priced
-    from rows without it, which measured slower)."""
+    from rows without it, which measured slower).  A non-empty note means
+    the rows are not this card's own measurement of this setting."""
     sized = [r for r in SHARING_ROWS if r["large"] == large]
     note = ""
     if not sized:
@@ -981,6 +982,9 @@ def _sharing_rows(large: bool, mps: bool, card: str | None
                  f"priced from MPS {'off' if mps else 'on'} rows; ")
         same_mps = sized
     same_card = [r for r in same_mps if card and r["card"] == card]
+    if card and not same_card:
+        note += (f"no contention rows for {card}, priced from other "
+                 "cards' rows; ")
     return (same_card or same_mps), note
 
 

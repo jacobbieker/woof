@@ -123,6 +123,8 @@ def jobs_for(configs: Sequence[str | Path], runner: Runner, *,
     from woof.runtime_estimate import estimate_config
 
     jobs: list[Job] = []
+    bases = run_names(configs)
+    jobs_seen: list[str] = []
     for config in configs:
         est = estimate_config(config, runner, detected=detected,
                               prepared=prepared)
@@ -132,11 +134,31 @@ def jobs_for(configs: Sequence[str | Path], runner: Runner, *,
             peak = priced_reservation_bytes(load_experiment(config))
         except Exception:  # noqa: BLE001 - unpriced is an answer
             peak = None
-        stem = Path(config).stem
+        stem = bases[len(jobs_seen)]
+        jobs_seen.append(stem)
         for i in range(max(1, int(copies))):
             name = stem if copies <= 1 else f"{stem}-{i + 1}"
             jobs.append(job_from_estimate(name, str(config), est, peak))
     return jobs
+
+
+def run_names(configs: Sequence[str | Path]) -> list[str]:
+    """One run name per config, unique and deterministic: the file stem;
+    where stems collide, the parent directory's name before it
+    (``a-member``); where those still collide (the same file twice), an
+    occurrence index (``a-member-1``, ``a-member-2``)."""
+    paths = [Path(c) for c in configs]
+    stems = [p.stem for p in paths]
+    names = [n if stems.count(n) == 1 else f"{p.resolve().parent.name}-{n}"
+             for p, n in zip(paths, stems)]
+    seen: dict[str, int] = {}
+    out = []
+    for n in names:
+        if names.count(n) > 1:
+            seen[n] = seen.get(n, 0) + 1
+            n = f"{n}-{seen[n]}"
+        out.append(n)
+    return out
 
 
 # --------------------------------------------------------------------------
@@ -477,16 +499,36 @@ def multi_run_queues(option: Option, runs: int, gpus: int) -> bool:
     return option.slots > 1 or runs <= max(1, gpus)
 
 
-def invocations(option: Option, plan_path: str = "pack-plan.toml", *,
+#: What the command names when no plan file was written.
+NO_PLAN = "<PLAN.toml: not written; re-run with --emit-plan PLAN.toml>"
+
+
+def invocations(option: Option, plan_path: str | None = None, *,
                 jobs: Sequence[Job] = (), gpus: int = 1) -> list[str]:
+    """What to type.  ``plan_path`` is the plan file written, or ``None``
+    when none was (the command then names an obvious placeholder)."""
+    import shlex
+
     mps = " --mps" if option.mps else ""
     worker = (f"woof energy worker ... --slots-per-gpu {option.slots}{mps}  "
               "(a hindcast queue of runs like these)")
     if jobs and not multi_run_queues(option, len(jobs), gpus):
-        return ([f"woof go {job.config}" for job in
-                 order_jobs(jobs, option.order)]
-                + [f"(one after another: {SERIAL_NOTE})", worker])
-    return [f"woof multi-run {plan_path} --runs-per-gpu {option.slots}{mps}",
+        # One queue per card, as simulate() runs them: the cards in
+        # parallel, each card's runs one after another.
+        per_card: dict[int, list[Job]] = {}
+        for job in order_jobs(jobs, option.order):
+            per_card.setdefault(option.high.device.get(job.name, 0),
+                                []).append(job)
+        lines = []
+        for card in sorted(per_card):
+            chain = " && ".join(f"woof go {shlex.quote(j.config)}"
+                                for j in per_card[card])
+            lines.append(f"CUDA_VISIBLE_DEVICES={card} sh -c "
+                         f"{shlex.quote(chain)} &")
+        return lines + [f"wait  ({SERIAL_NOTE}; one queue per card, the "
+                        "cards in parallel)", worker]
+    plan = shlex.quote(plan_path) if plan_path else NO_PLAN
+    return [f"woof multi-run {plan} --runs-per-gpu {option.slots}{mps}",
             worker]
 
 
@@ -495,7 +537,8 @@ def invocations(option: Option, plan_path: str = "pack-plan.toml", *,
 # --------------------------------------------------------------------------
 def render_text(jobs: Sequence[Job], runner: Runner, opts: Sequence[Option],
                 best: Option | None, note: str, *, objective: str,
-                deadline_s: float | None) -> str:
+                deadline_s: float | None,
+                plan_path: str | None = None) -> str:
     from woof.runtime_estimate import fmt_duration
 
     def span(pair):
@@ -559,7 +602,8 @@ def render_text(jobs: Sequence[Job], runner: Runner, opts: Sequence[Option],
             lines.append(f"  note: {job.name} could not be priced; "
                          "admission runs it alone on its card")
     lines.append("  run it with:")
-    for line in invocations(best, jobs=jobs, gpus=runner.gpus):
+    for line in invocations(best, plan_path, jobs=jobs,
+                           gpus=runner.gpus):
         lines.append(f"    {line}")
     return "\n".join(lines)
 
@@ -597,6 +641,7 @@ def main(args) -> int:
     if plan_written:
         Path(args.emit_plan).write_text(multi_run_plan_text(jobs, best) + "\n",
                                         encoding="utf-8")
+    emitted = str(args.emit_plan) if plan_written else None
     if args.json:
         from woof.multi_run import PACKED_ADMISSION_RULE
 
@@ -609,14 +654,15 @@ def main(args) -> int:
             "recommended": None if best is None else best.as_dict(len(jobs)),
             "note": note or None,
             "invocations": [] if best is None else invocations(
-                best, jobs=jobs, gpus=runner.gpus),
+                best, emitted, jobs=jobs, gpus=runner.gpus),
             "plan_written": args.emit_plan if plan_written else None,
             "admission_rule": PACKED_ADMISSION_RULE,
         }
         print(json.dumps(doc, indent=2, default=str))
     else:
         print(render_text(jobs, runner, opts, best, note,
-                          objective=args.objective, deadline_s=deadline))
+                          objective=args.objective, deadline_s=deadline,
+                          plan_path=emitted))
         if plan_written:
             print(f"  wrote {args.emit_plan}")
         elif best is not None and args.emit_plan:
