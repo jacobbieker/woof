@@ -472,7 +472,8 @@ def calibrate(config, *, steps: int, warmup: int, estimate, runner,
 
 
 __all__ = [
-    "CALIBRATION_SCHEMA", "OUTLIER_FACTOR", "StepSummary", "calibrate",
+    "CALIBRATION_SCHEMA", "LiveEta", "OUTLIER_FACTOR", "StepSummary",
+    "calibrate",
     "calibration_path", "eta_seconds", "extrapolate", "go_command",
     "load_calibrations", "matching_calibration", "measure",
     "read_progress", "record_calibration", "report_from_records",

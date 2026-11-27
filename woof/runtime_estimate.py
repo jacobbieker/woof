@@ -200,6 +200,9 @@ class Anchor:
     #: False only for a bound carried from :mod:`woof.core.pace` that is
     #: not itself a measurement (the moist rung).
     measured: bool = True
+    #: False for a measurement of older code than this tree's: it prices
+    #: a step only when no current anchor of the size class exists.
+    current: bool = True
 
     @property
     def rate(self) -> float:
@@ -221,7 +224,8 @@ class Anchor:
                 "s_per_step": self.s_per_step,
                 "s_per_column_step_nz49": self.rate,
                 "contention": self.contention, "source": self.source,
-                "note": self.note, "measured": self.measured}
+                "note": self.note, "measured": self.measured,
+                "current": self.current}
 
 
 def _radiation_fraction(dt_s: float, radt_min: float) -> float:
@@ -247,7 +251,7 @@ def _pace_anchors() -> tuple[Anchor, ...]:
                 contention="as woof.core.pace states",
                 source="woof/core/pace.py STEP_RATES "
                        f"({rung}, resident): {rate.basis[:160]}...",
-                measured=rate.measured))
+                measured=rate.measured, current=False))
     return tuple(rows)
 
 
@@ -260,12 +264,14 @@ ANCHORS: tuple[Anchor, ...] = (
            "sole occupant confirmed, Linux",
            "docs/public/receipts/obsbattery/grounding-3km-conus-run-report"
            ".json (1440 steps in 1366.03 s)",
-           "gpuwm 1.4.1; radt 12 min as woof/core/pace.py states"),
+           "gpuwm 1.4.1; radt 12 min as woof/core/pace.py states",
+           current=False),
     Anchor("hardware-12km-4090", "rtx-4090", WRF, "full",
            438 * 352, 49, 60.0, 12.0, 400.0 / 360,
            "not stated, Linux",
            "docs/public/HARDWARE.md Linux notes (6 h, 360 steps in 400 s)",
-           "Morrison + RTE-RRTMGP + YSU + Noah + KF"),
+           "Morrison + RTE-RRTMGP + YSU + Noah + KF; code of that page's "
+           "date", current=False),
     Anchor("a6000-manila-12km", "rtx-a6000", WRF, "full",
            150 * 120, 49, 30.0, 12.0, 144.0 / 2880,
            "idle, one forecast at a time",
@@ -277,6 +283,15 @@ ANCHORS: tuple[Anchor, ...] = (
            "docs/ADAPTIVE-TIMESTEP.md (Maui 3 km fixed 7.5 s, 11520 steps "
            "in 358 s)", "no cumulus; 24 h of hourly history inside the "
            "wall"),
+    Anchor("a6000-manila-3km-l", "rtx-a6000", WRF, "full",
+           450 * 360, 49, 7.5, 12.0, 603.44 / 2880,
+           "sole compute process on the card (nvidia-smi every 15 s); host "
+           "load average 5-20 from other work",
+           "docs/public/receipts/runtime-estimate/a6000-manila-3km-l-"
+           "20261127.json (2880 steps; step walls summed, history and "
+           "restart writes excluded)",
+           "woof 1.1.7 fork; Morrison + RTE-RRTMGP + YSU + Noah, no "
+           "cumulus; radiation step 4.97x an ordinary one"),
     # -- hex (MPAS v8.4.2 dycore on a mesh), full physics ----------------
     Anchor("hex-point-5090", "rtx-5090", HEX, "full",
            43_884, 55, 5.0, None, 0.2367,
@@ -432,9 +447,6 @@ def rate_bracket(runner: Runner, route: str, rung: str, *, columns: int,
     substituted = note is not None and "SUBSTITUTE" in note
     if note:
         basis.append(note)
-    same_card = [a for a in rows if a.card == runner.card_key]
-    if same_card:
-        rows = same_card
     small = columns < LAUNCH_BOUND_COLUMNS
     sized = [a for a in rows if (a.columns < LAUNCH_BOUND_COLUMNS) == small]
     if sized:
@@ -445,6 +457,16 @@ def rate_bracket(runner: Runner, route: str, rung: str, *, columns: int,
             f"{LAUNCH_BOUND_COLUMNS:,} columns as this domain ({columns:,}); "
             "per-column rates differ across that line, so treat the bracket "
             "as indicative")
+    current = [a for a in rows if a.current]
+    if current and len(current) < len(rows):
+        basis.append(
+            "set aside as older code than this tree's (a current anchor of "
+            "this size class exists): "
+            + ", ".join(a.id for a in rows if not a.current))
+        rows = current
+    same_card = [a for a in rows if a.card == runner.card_key]
+    if same_card:
+        rows = same_card
     target_gbs, bw_note = _card_bandwidth(runner)
     if bw_note:
         basis.append(bw_note)
@@ -769,6 +791,12 @@ def estimate(exp, runner: Runner, *, config: str = "<config>",
             "warm, up to the MEASURED 53.8 s cold compile"))
     # ------------------------------------------------------- the steps
     prov = root_bracket.provenance
+    # The cheapest and dearest candidates are chosen by their whole step;
+    # a candidate that assumes a dearer radiation step assumes a cheaper
+    # ordinary one, so each phase shows the range across both and the
+    # total (their sum) is at least as wide as the candidates'.
+    lo_ord, hi_ord = min(lo_ord, hi_ord), max(lo_ord, hi_ord)
+    lo_rad, hi_rad = min(lo_rad, hi_rad), max(lo_rad, hi_rad)
     phases.append(Phase(
         "model steps", lo_ord, hi_ord,
         f"{sum(d.steps for d in domains):,} steps over {len(domains)} "
@@ -1158,8 +1186,12 @@ def main(args) -> int:
         from woof.experiment import load_experiment
 
         exp = load_experiment(args.config)
-        admitted, admission = admitted_copies(exp, runner,
-                                              runner.slots_per_gpu)
+        # --copies N alone asks for N on the card: the cap is N, and
+        # admission by memory may lower it.
+        slots = runner.slots_per_gpu
+        if args.copies and slots == 1:
+            slots = args.copies
+        admitted, admission = admitted_copies(exp, runner, slots)
         copies = (min(admitted, args.copies) if args.copies else admitted)
         copies = max(1, copies)
     try:
@@ -1233,7 +1265,8 @@ def register_cli(subparsers):
                    help="first woof run on this box (adds the measured 31 s)")
     p.add_argument("--da", choices=("3dvar", "letkf"), default=None,
                    help="add a data-assimilation phase")
-    p.add_argument("--da-cycles", type=int, default=1, metavar="N")
+    p.add_argument("--da-cycles", type=int, default=1, metavar="N",
+                   help="analyses in the run (default 1)")
     p.add_argument("--members", type=int, default=0, metavar="N",
                    help="LETKF ensemble size")
     p.add_argument("--calibrate", type=int, default=0, metavar="N",
