@@ -114,6 +114,54 @@ pip builds cftime 1.6.6 from source with a C compiler. A
 re-run keeps an existing `.venv` and warns when it has the lock; remove
 `.venv` and re-run to remake it on 3.14t.
 
+**Free-threaded Pixi environments.** A checkout's Pixi workspace
+(`pyproject.toml`, `[tool.pixi.*]`) has a free-threaded twin of each model
+environment: `default-ft` (CUDA 13), `cuda12-ft`, `mlx-ft` (Apple silicon)
+and `cpu-ft` (Linux and macOS). The GIL environments (`default`, `cuda12`,
+`mlx`, `cpu`) stay the defaults, and their locked packages are unchanged.
+
+```bash
+pixi install -e default-ft      # or cuda12-ft, mlx-ft, cpu-ft
+pixi run -e default-ft python -c "import sys, woof; print(sys._is_gil_enabled())"   # False
+PYTHON_GIL=0 pixi run -e default-ft python -m pytest -q tests/test_free_threading.py
+```
+
+- The `freethreaded` feature pins conda-forge's `python-freethreading`
+  metapackage (`python_abi` `cp314t`). Every conda package resolves to its
+  cp314t build. The PyPI dependencies resolve to cp314t wheels: CuPy (12x
+  and 13x), NumPy, SciPy, pyarrow, icechunk, mlx, pyproj, rasterio, netCDF4,
+  matplotlib, rapidgzip and psutil.
+- `wrf-rust` (the `[render]` extra) publishes no cp314t wheel. It builds from
+  its sdist with the environment's Rust toolchain at install time.
+- prefix.dev's conda-to-PyPI mapping has empty records for conda-forge's
+  cp314t builds of numpy, pandas, netcdf4, cftime, numcodecs, pyproj,
+  rasterio, pyyaml, msgpack-python, msgspec and google-crc32c. Without a fix
+  the PyPI resolver would install a second copy over each one, and on macOS
+  rasterio and netCDF4 would build from sdists. The workspace's
+  `conda-pypi-map` overlay names them, so the conda copy is used. It
+  changes nothing for the GIL builds.
+- `mlx-ft` pins `mlx==0.32.4`, the release `mlx` locks. MLX 0.32.5 renamed
+  `mlx/backend/common/metal_kernel.h`, and the Metal launcher includes it.
+- The Metal launcher is built with nanobind's `FREE_THREADED` option. On
+  3.14t that is required: mlx's cp314t wheel uses nanobind's free-threaded
+  internals, and without them `mx.array` does not cross into the launcher.
+  Its shared state is guarded: the GPU-time label is per-thread, and the
+  library and archive directories are read under a lock.
+  `woof.backend.metal.ext.load()` builds and loads the launcher once, even
+  when several threads ask for it at once.
+- Importing `woof`, `woof.cli`, `woof.backend` (the CuPy facade on Metal),
+  `woof.hex`, CuPy, mlx, NumPy, SciPy, pyarrow, rasterio, pyproj,
+  matplotlib or `wrf-rust` leaves the GIL off. Some modules have not
+  declared free-threading support, and importing one switches the GIL back
+  on: netCDF4, cftime, numcodecs (which xarray and zarr import), icechunk,
+  rapidgzip and google-crc32c. The `woof` command line and both prepared
+  runners re-run themselves with `PYTHON_GIL=0`, as in a `.venv`. For
+  `pytest` or your own scripts, export `PYTHON_GIL=0`. The environments do
+  not set it, so an explicit `PYTHON_GIL=1` still means what it says.
+- The `libradtran` and `mpas-oracle` oracle environments have no
+  free-threaded twin. They pin Python 3.11 for conda-forge's builds, and
+  woof never imports them.
+
 ### Manual steps
 
 Use Python 3.11 or newer and Rust 1.94 or newer (`rustc --version`). The

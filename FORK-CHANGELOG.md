@@ -7,6 +7,12 @@ releases and is kept as upstream wrote it.
 
 ## Unreleased
 
+- Free-threaded Pixi environments `default-ft`, `cuda12-ft`, `mlx-ft` and
+  `cpu-ft` (CPython 3.14t from conda-forge). The GIL environments are
+  unchanged and stay the defaults. The Metal launcher builds with nanobind's
+  `FREE_THREADED` option and guards its shared state, so it loads on 3.14t
+  without switching the GIL on. A `free-threaded (cpu-ft)` CI job checks the
+  environment. See docs/install.md, "Free-threaded Pixi environments".
 - `diff_metrics_seam_slope` (correct-mode finding FQ12, read where WRF's
   mixing package runs on a periodic axis): WRF's `compute_diff_metrics` leaves the top w level's slope at a
   periodic seam at zero. On (correct mode, the engine's previous

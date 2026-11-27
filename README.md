@@ -300,6 +300,19 @@ Notes on the 1.1.7 sync:
   `import cupy` resolves to a CuPy-compatible layer over NumPy. It is never
   selected by default. Design and measurements:
   [docs/dev/host-backend.md](docs/dev/host-backend.md).
+- **Free-threaded Pixi environments.** `default-ft` (CUDA 13), `cuda12-ft`,
+  `mlx-ft` and `cpu-ft` are the four model environments on conda-forge's
+  free-threaded CPython 3.14t (`pixi install -e mlx-ft`). The GIL
+  environments stay the defaults. Every dependency resolves to a cp314t
+  build, and nothing is left out: `wrf-rust` has no cp314t wheel and builds
+  from its sdist with the environment's Rust. `mlx-ft` holds MLX at 0.32.4,
+  the release the `mlx` environment locks. The Metal launcher
+  (`woof.backend.metal.ext`) declares free-threading support, and importing
+  `woof` leaves the GIL off. Importing netCDF4, cftime, numcodecs (and so
+  xarray and zarr), icechunk, rapidgzip or google-crc32c switches the GIL
+  back on. The `woof` command line re-runs itself with `PYTHON_GIL=0`; set
+  `PYTHON_GIL=0` yourself for `pytest` or a script. Details:
+  [docs/install.md](docs/install.md), "Free-threaded Pixi environments".
 - **WRF-Chem gas and aerosol chemistry,** each piece held word for word to
   WRF's chem code (v4.7.1; the earlier pieces v4.6.1, being re-pinned): RADM2
   gas phase, MADE/SORGAM aerosol dynamics, SORGAM initial and boundary
