@@ -56,8 +56,10 @@ from .bigstep import (BUOY_ACTIVE, BUOY_PASSIVE, BUOY_STATE, CC_ACTIVE,
                       GeoGeometry, PGFGeometry, WDampGeometry, buoy_ad, buoy_tl,
                       cc_ad, cc_tl, cq_ad, cq_tl, geo_ad, geo_tl, pgf_ad, pgf_tl,
                       wd_ad, wd_tl)
-from .diffusion import (DF_PASSIVE, DF_STATE, DFGeometry, HDGeometry, KMGeometry,
-                        df_ad, df_tl, hd_ad, hd_tl, km_ad, km_tl)
+from .diffusion import (DF_PASSIVE, DF_STATE, H2_PASSIVE, DFGeometry, H2Geometry,
+                        HDGeometry, KCGeometry, KMGeometry, df_ad, df_tl, h2_active,
+                        h2_ad, h2_passive, h2_tl, hd_ad, hd_tl, k2_ad, k2_tl, k3_ad,
+                        k3_tl, km_ad, km_tl, n2_ad, n2_tl)
 from .scalar import (SUMFLUX, ScalarGeometry, SumfluxGeometry, su_ad, su_tl,
                      sumflux_accumulate_ad, sumflux_accumulate_tl,
                      sumflux_finish_ad, sumflux_finish_tl, sumflux_zero_ad,
@@ -212,14 +214,25 @@ class StageSpec:
 
 @dataclass(frozen=True)
 class MixSpec:
-    """diff_opt 1 / km_opt 4 at the step start (prepare_fixed_tendencies):
-    the cold step's diagnosis before it (None when rk_step 1 reuses the
-    carried one), the deformation, the coefficients and the rows."""
+    """diff_opt 1 / km_opt 4 or diff_opt 2 / km_opt 3 or 4 at the step
+    start (prepare_fixed_tendencies): the cold step's diagnosis before it
+    (None when rk_step 1 reuses the carried one), the deformation, the
+    coefficients and the rows."""
     prp: object
     df: DFGeometry
-    km: KMGeometry
-    rows: tuple               # (_MIX_ROWS entry, HDGeometry)
+    km: object                # KMGeometry (diff_opt 1); None under diff_opt 2
+    rows: tuple               # (_MIX_ROWS entry, HDGeometry); diff_opt 2: _mix2_rows
     moist: tuple = ()         # the moist rows' held sources, zeroed at the start
+    #: diff_opt 2 (dycore._compute_wrf_smag_tendencies): the coefficients'
+    #: KCGeometry and km_opt (4: smag2d_km; 3: calculate_N2 and smag_km),
+    #: and the vertical rows (launch_wrf_smag2d_vertical) after ``rows``
+    kc: object = None
+    km_opt: int = 4
+    vrows: tuple = ()
+
+    @property
+    def diff2(self) -> bool:
+        return self.kc is not None
 
 
 @dataclass(frozen=True)
@@ -265,8 +278,12 @@ def _refuse(cfg, state) -> None:
     from woof.core.passive_tracer_contract import active_tracers
     from woof.core.physics_inventory import physics_enabled
     checks.update({
-        "mixing package other than diff_opt 1 with km_opt 4": bool(
+        "mixing package other than diff_opt 1 / km_opt 4 or diff_opt 2 / km_opt 3 or 4": bool(
             wrf_mixing_package_active(cfg) and not _mixes(cfg)),
+        # named on their own: diff_opt 2's constant K, TKE and SFS closures
+        "diff_opt 2 with km_opt 1, 2 or 5": bool(
+            wrf_mixing_package_active(cfg) and int(cfg.diff_opt) == 2
+            and int(cfg.km_opt) in (1, 2, 5)),
         # what else _step_body runs that the chain does not
         "physics": bool(physics_enabled(cfg)),
         "radiation selector 31 (idealized Rayleigh friction)":
@@ -317,24 +334,51 @@ def _refuse_moist(cfg, state) -> dict:
 
 
 def _mixes(cfg) -> bool:
-    """Whether the step runs WRF's diff_opt 1 / km_opt 4 mixing (the
-    package dycore.prepare_fixed_tendencies builds, on the coordinate
-    branch with smag2d_km's coefficients)."""
-    # km_opt 4 runs the package on its own (wrf_mixing_package_active)
-    return int(cfg.diff_opt) == 1 and int(cfg.km_opt) == 4
+    """Whether the step runs a mixing package the binding covers (the
+    package dycore.prepare_fixed_tendencies builds): diff_opt 1 / km_opt 4
+    (the coordinate branch with smag2d_km's coefficients) or diff_opt 2
+    with km_opt 4 (smag2d_km's slope limiter) or 3 (calculate_N2 and
+    smag_km)."""
+    # km_opt 3 and 4 run the package on their own (wrf_mixing_package_active)
+    d, k = int(cfg.diff_opt), int(cfg.km_opt)
+    return (d == 1 and k == 4) or (d == 2 and k in (3, 4))
+
+
+def _diff2(cfg) -> bool:
+    return int(cfg.diff_opt) == 2 and _mixes(cfg)
 
 
 def _refuse_mixing(cfg, state) -> dict:
-    """What the diff_opt 1 / km_opt 4 binding does not cover."""
+    """What the mixing binding does not cover."""
     from woof.core.dycore import coordinate_reference_missing
-    return {
+    out = {}
+    if _diff2(cfg):
+        from woof import wrf_exact
+        out.update({
+            # the rows' TL/AD port the GPUWM_WRF_EXACT_C_DIFFUSION statements
+            "GPUWM_WRF_EXACT_DIFFUSION=0 (diff_opt 2's other arithmetic)":
+                not wrf_exact.DIFFUSION_ENABLED,
+            # the theta row mixes thp as WRF's t_2 = theta - 300, the strict
+            # storage; elsewhere thp is theta - thb and the primal adds the base
+            "diff_opt 2 outside strict mode (GPUWM_WRF_EXACT=1)": not wrf_exact.ENABLED,
+            # calculate_N2's moist branches, the species' rows and the
+            # moist density are not ported
+            "moist diff_opt 2": state.qv is not None,
+            # vertical_diffusion_2 runs only with bl_pbl_physics 0
+            "diff_opt 2 with a PBL scheme": int(getattr(cfg, "bl_pbl_physics", 0)) != 0,
+            "diff_opt 2 with a surface layer (USTM, HFX, QFX)":
+                int(getattr(cfg, "sf_sfclay_physics", 0)) != 0,
+            "isfflx outside 0-2": int(cfg.isfflx) not in (0, 1, 2),
+        })
+    out.update({
         # dycore.initialize_coordinate_reference would raise: a resumed
         # state cannot rebuild WRF's t_init from evolved theta
         "a resumed diff_opt 1 state without diff1_theta_initial": bool(
             coordinate_reference_missing(state, cfg)),
         "tc_horizontal_length_m": bool(getattr(cfg, "tc_horizontal_length_m", 0)),
         "m_opt (the SFS output capture)": bool(getattr(cfg, "m_opt", 0)),
-    }
+    })
+    return out
 
 
 def _qv_table(state, cfg) -> bool:
@@ -561,7 +605,10 @@ def step_geometry(state, cfg, *, reuse_first: bool | None = None,
             sph=SpecPhiGeometry(nz, ny, nx, dtau, spec_zone=szone) if spec else None,
             **moist_parts))
     mix = None
-    if _mixes(cfg):
+    if _diff2(cfg):
+        mix = _mix2_spec(state, cfg, stages[0].diagnose, rdx, rdy, bx, by)
+        held = tuple(_HELD)
+    elif _mixes(cfg):
         # launch_wrf_smag2d_km's and launch_coordinate_horizontal's scalars
         mix = MixSpec(
             prp=stages[0].diagnose,   # _step_body's cold diagnosis before the mixing
@@ -592,6 +639,73 @@ def step_geometry(state, cfg, *, reuse_first: bool | None = None,
         **({} if not spec else dict(
             capture=lb["capture"], fold=lb["fold"], fold_msf=bool(msf),
             final=lb["final"])))
+
+
+#: diff_opt 2's rows on the step dict (dycore._compute_wrf_smag_tendencies,
+#: dry): each H2 row's names bound to the step's, the time-t fields
+#: (_wrf_smag_grid_args with time_t), the diagnosed alt and the K the
+#: primal hands the row.  ``kmv`` is the vertical momentum K (smag_km under
+#: km_opt 4, where smag2d_km's xkmv is xkmh; smag_kmv under km_opt 3).
+_MIX2_TIME_T = (("u", "u0"), ("v", "v0"), ("w", "w0"), ("php", "php0"))
+_MIX2_HORIZONTAL = (("u", "u", "km"), ("v", "v", "km"), ("w", "w", "kmv"),
+                    ("theta", "t", "kh"))
+_MIX2_VERTICAL = (("u", "vu", "kmv"), ("v", "vv", "kmv"), ("w", "vw", "kmv"),
+                  ("theta", "vt", "khv"))
+_MIX2_K = {4: {"km": "smag_km", "kh": "smag_kh", "kmv": "smag_km", "khv": None},
+           3: {"km": "smag_km", "kh": "smag_kh", "kmv": "smag_kmv", "khv": "smag_khv"}}
+
+
+def _mix2_bind(kind, g, k):
+    """(H2 name, step name) pairs of one diff_opt 2 row."""
+    names = dict(_MIX2_TIME_T, field="thp0", xk=k)
+    return tuple((n, names.get(n, n)) for n in h2_active(g) + h2_passive(g))
+
+
+def _mix2_spec(state, cfg, prp, rdx, rdy, bx, by) -> MixSpec:
+    """diff_opt 2's MixSpec: the deformation, the coefficients
+    (launch_wrf_smag2d_km or launch_wrf_smag3d_km's scalars), the
+    horizontal rows (u, v, w and theta, each followed by its open-strip
+    zeroing) and launch_wrf_smag2d_vertical's rows with the surface terms
+    of its isfflx case: without a surface layer the USTM stress and the
+    HFX / QFX arms are cold (inactive), so isfflx 0 takes the cd0 stress,
+    isfflx 0 and 2 the prescribed heat flux.  km_opt 4 leaves xkhv = 0, so
+    its theta row is the heat flux alone (or none)."""
+    from woof.core import dycore as D
+    f32 = np.float32
+    nz, ny, nx = int(cfg.nz), int(cfg.ny), int(cfg.nx)
+    km_opt, isfflx = int(cfg.km_opt), int(cfg.isfflx)
+    seam = int(cfg.diff_metrics_seam_slope is False)   # the primal's flag 2
+    cf = dict(cf1=float(f32(state.cf1)), cf2=float(f32(state.cf2)), cf3=float(f32(state.cf3)))
+    common = dict(boundary_x=bx, boundary_y=by, seam_cold=seam)
+    K = _MIX2_K[km_opt]
+    rows = []
+    for kind, row, k in _MIX2_HORIZONTAL:
+        g = H2Geometry(nz, ny, nx, rdx, rdy, row=row, **cf, **common)
+        rows.append((kind, g, _mix2_bind(kind, g, K[k])))
+    heat = dict(heat="const", heat_flux=float(f32(cfg.tke_heat_flux))) \
+        if isfflx in (0, 2) else {}
+    vrows = []
+    for kind, row, k in _MIX2_VERTICAL:
+        extra = {}
+        if row in ("vu", "vv") and isfflx == 0:
+            extra = dict(surface="cd0", cd0=float(f32(cfg.tke_drag_coefficient)))
+        elif row == "vt":
+            if km_opt == 3:
+                extra = dict(full_theta=1, **heat)
+            elif heat:
+                extra = dict(interior=0, **heat)
+            else:
+                continue
+        g = H2Geometry(nz, ny, nx, rdx, rdy, row=row, **cf, **common, **extra)
+        vrows.append((kind, g, _mix2_bind(kind, g, K[k])))
+    return MixSpec(
+        prp=prp,   # _step_body's cold diagnosis before the mixing
+        df=DFGeometry(nz, ny, nx, rdx, rdy, **cf, **common),
+        km=None, rows=tuple(rows), vrows=tuple(vrows), km_opt=km_opt,
+        kc=KCGeometry(nz, ny, nx, rdx, rdy, dx=float(f32(cfg.dx)), dy=float(f32(cfg.dy)),
+                      c_s=float(f32(cfg.c_s)), prandtl=float(f32(D._PRANDTL)),
+                      dt=float(f32(cfg.dt)), mix_upper_bound=float(f32(cfg.mix_upper_bound)),
+                      isotropic=int(bool(cfg.mix_isotropic)), **common))
 
 
 def _lbc_geometries(state, cfg, step: int, msf: int, qvt: bool = False) -> dict:
@@ -713,6 +827,15 @@ def run_state(state, cfg, dtype=np.float64) -> dict:
         out.update(_mix_state(state, cfg, dtype))
         if state.qv is not None:   # the moist rows' held sources
             out.update({_q_slot(n): cp.zeros((nz, ny, nx), dtype=dtype) for n in SPECIES})
+    if _diff2(cfg):
+        # the base theta (calculate_N2, the theta row's full_theta), 3-D
+        thb = cp.asarray(state.thb)
+        if thb.ndim == 1:
+            thb = cp.broadcast_to(thb[:, None, None], (nz, ny, nx))
+        out["thb"] = cp.ascontiguousarray(thb.astype(dtype, copy=True))
+        if int(cfg.km_opt) == 3:   # smag_km's vertical pair and BN2
+            out.update({n: cp.zeros((nz, ny, nx), dtype=dtype)
+                        for n in ("smag_kmv", "smag_khv", "bn2")})
     if cfg.specified:
         out.update(_lbc_state(state, cfg, dtype))
     return out
@@ -727,12 +850,14 @@ def _mix_state(state, cfg, dtype) -> dict:
     import cupy as cp
     from woof.core import dycore as D
     nz, ny, nx = int(cfg.nz), int(cfg.ny), int(cfg.nx)
-    D.initialize_coordinate_reference(state, cfg)
     out = {n: cp.zeros((nz, ny, nx), dtype=dtype)
            for n in DF_STATE + ("smag_km", "smag_kh")}
     out["smag_mut"] = cp.zeros((ny, nx), dtype=dtype)
-    for n, a in (("dn", state.dn), ("dnw", state.dnw),
-                 ("diff1_theta_initial", state._scratch["diff1_theta_initial"])):
+    arrays = [("dn", state.dn), ("dnw", state.dnw)]
+    if not _diff2(cfg):
+        D.initialize_coordinate_reference(state, cfg)
+        arrays.append(("diff1_theta_initial", state._scratch["diff1_theta_initial"]))
+    for n, a in arrays:
         out[n] = cp.ascontiguousarray(cp.asarray(a).astype(dtype, copy=True))
     return out
 
@@ -1098,6 +1223,9 @@ def _held_start_tl(x, dx, geom, snap, tl):
     snap(DF_STATE)
     df_tl({n: x[n] for n in DF_STATE}, {n: dx[n] for n in DF_STATE}, _df_traj(x),
           _df_act(dx), m.df, nl=True)
+    if m.diff2:
+        _mix2_tl(x, dx, geom, snap, tl)
+        return
     snap(("smag_km", "smag_kh"))
     km_tl(_km_out(x), _km_out(dx), {**{n: x[n] for n in DF_STATE}, "msft": x["msft"]},
           {n: dx[n] for n in DF_STATE}, m.km, nl=True)
@@ -1117,6 +1245,98 @@ def _held_start_tl(x, dx, geom, snap, tl):
             _couple(dx, geom, x)
 
 
+#: diff_opt 2's coefficients on the step dict.
+_K2_OUT = {"xkmh": "smag_km", "xkhh": "smag_kh"}
+_K3_OUT = {**_K2_OUT, "xkmv": "smag_kmv", "xkhv": "smag_khv"}
+
+
+def _kc_names(m) -> list:
+    """diff_opt 2's coefficient operators in order: (name, outputs,
+    active inputs {operator name: step name}, passive names)."""
+    t = dict(_MIX2_TIME_T)
+    d = {n: n for n in DF_STATE}
+    if m.km_opt == 4:
+        return [("k2", _K2_OUT, {**d, "php": "php0"}, ("phb", "msft"))]
+    return [("n2", {"bn2": "bn2"}, {"thp": "thp0", "php": "php0"}, ("thb", "phb")),
+            ("k3", _K3_OUT, {**d, **t, "bn2": "bn2"}, ("phb", "msft", "msfu", "msfv"))]
+
+
+_KC_OPS = {"k2": (k2_tl, k2_ad), "n2": (n2_tl, n2_ad), "k3": (k3_tl, k3_ad)}
+
+
+def _bound(d, pairs):
+    return {a: d[b] for a, b in pairs}
+
+
+def _strip(d, names, geom):
+    """dycore._zero_open_strips(width 1) on ``d[names]``: the outer
+    row of each bounded axis.  Linear and its own adjoint."""
+    bx, by = geom.mix.df.boundary_x, geom.mix.df.boundary_y
+    for n in names:
+        a = d[n]
+        if bx:
+            a[..., :1] = 0
+            a[..., -1:] = 0
+        if by:
+            a[..., :1, :] = 0
+            a[..., -1:, :] = 0
+
+
+def _mix2_tl(x, dx, geom, snap, tl):
+    """diff_opt 2 after the deformation (dycore._compute_wrf_smag_tendencies
+    on a dry state, bl_pbl_physics 0): the coefficients; the u, v, w and
+    theta rows, each into its zeroed held slot and then its open strips
+    cleared; the vertical rows and surface terms; every slot's open strips
+    cleared; _restore_open_ring_surface_fluxes (a no-op here: the binding
+    takes periodic or specified axes); then the coupling as diff_opt 1."""
+    m = geom.mix
+    for op, outs, act, pas in _kc_names(m):
+        snap(tuple(outs.values()))
+        traj = {**{k: x[v] for k, v in act.items()}, **{n: x[n] for n in pas}}
+        _KC_OPS[op][0]({k: x[v] for k, v in outs.items()}, {k: dx[v] for k, v in outs.items()},
+                       traj, {k: dx[v] for k, v in act.items()}, m.kc, nl=True)
+    # each row adds into its own slot, zeroed above: no snapshot needed
+    pairs = [(kind, g, b, True) for kind, g, b in m.rows]
+    pairs += [(kind, g, b, False) for kind, g, b in m.vrows]
+    for kind, g, b, clear in pairs:
+        act = h2_active(g)
+        h2_tl({"tend": x[_HELD[kind]]}, {"tend": dx[_HELD[kind]]}, _bound(x, b),
+              {a: dx[v] for a, v in b if a in act}, g, nl=True)
+        if clear:
+            for d in ((x, dx) if tl else (x,)):
+                _strip(d, (_HELD[kind],), geom)
+    for d in ((x, dx) if tl else (x,)):
+        _strip(d, tuple(_HELD.values()), geom)
+    if not geom.specified and geom.couple:
+        snap(tuple(_HELD[k] for k in geom.couple))
+        _couple(x, geom)
+        if tl:
+            _couple(dx, geom, x)
+
+
+def _mix2_ad(ax, back, peek, geom):
+    """Adjoint of :func:`_mix2_tl`."""
+    m = geom.mix
+    if not geom.specified and geom.couple:
+        base = back()
+        _couple(ax, geom, base)
+    _strip(ax, tuple(_HELD.values()), geom)
+    base = peek()   # the rows read no slot they write
+    pairs = [(kind, g, b, True) for kind, g, b in m.rows]
+    pairs += [(kind, g, b, False) for kind, g, b in m.vrows]
+    for kind, g, b, clear in reversed(pairs):
+        if clear:
+            _strip(ax, (_HELD[kind],), geom)
+        act = h2_active(g)
+        h2_ad({"tend": ax[_HELD[kind]]}, _bound(base, b),
+              {a: ax[v] for a, v in b if a in act}, g)
+    for op, outs, act, pas in reversed(_kc_names(m)):
+        base = back()
+        traj = {**{k: base[v] for k, v in act.items()}, **{n: base[n] for n in pas}}
+        _KC_OPS[op][1]({k: ax[v] for k, v in outs.items()}, traj,
+                       {k: ax[v] for k, v in act.items()}, m.kc)
+
+
 def _held_zeroed(geom):
     """The slots prepare_fixed_tendencies zeroes: the held rows and, with
     the moist mixing, the species' held sources."""
@@ -1127,7 +1347,11 @@ def _held_zeroed(geom):
 def _held_start_ad(ax, back, peek, geom):
     """Adjoint of :func:`_held_start_tl`."""
     m = geom.mix
-    if m is not None:
+    if m is not None and m.diff2:
+        _mix2_ad(ax, back, peek, geom)
+        base = back()
+        df_ad({n: ax[n] for n in DF_STATE}, _df_traj(base), _df_act(ax), m.df)
+    elif m is not None:
         if not geom.specified and geom.couple:
             base = back()
             _couple(ax, geom, base)

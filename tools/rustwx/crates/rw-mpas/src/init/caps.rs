@@ -1,17 +1,19 @@
 //! Two init-time ceilings that native MPAS `init_atmosphere` does not apply,
 //! each reported with a count, the cap value and the largest value it met.
 //!
-//! ## Snow water equivalent: 5000 kg m-2
+//! ## Snow water equivalent: 2000 kg m-2
 //!
 //! Some analyses publish the snow on an ice sheet as a store of tens of metres
 //! of water equivalent: Met Office Global carries about 51,800 kg m-2 over
 //! Greenland and ICON up to about 15,200 kg m-2.  Case 7 takes the snow depth
 //! as `snow * 5 / 1000`, so 51,800 kg m-2 starts the land model under 259 m of
-//! snow.  The ceiling is the one WRF's Noah-MP initialisation applies
-//! (`module_sf_noahmpdrv.F`, `NOAHMP_INIT`: "cap SWE at 5000mm ... cap SNOW
-//! at 5000, maintain density"), and the same 5000 mm is Noah-MP's own glacier
-//! equilibrium in `SNOWWATER`.  As there, the snow depth is scaled by the same
-//! factor so the snow density is unchanged.  It applies at every cell, after
+//! snow.  The ceiling is the one Noah-MP's initialisation applies: SNOW
+//! is capped at 2000 mm, "cap SNOW at 2000, maintain density" (WRF 4.7.1
+//! `module_sf_noahmpdrv.F` 2027-2038, `NOAHMP_INIT`; WRF 4.8.1
+//! `NoahmpInitMainMod.F90` 58-71; MPAS 8.4.2 `physics_noahmp/drivers/mpas/
+//! NoahmpInitMainMod.F90` 51-64).  It is not Noah-MP's in-model glacier limit
+//! (`SWEMAXGLA`, 5000 mm, in `SNOWWATER`), a separate constant.  As there,
+//! the snow depth is scaled by the same factor so the snow density is unchanged.  It applies at every cell, after
 //! the sea-ice step has cleared the snow off open water.
 //!
 //! ## Soil moisture: the cell's own SMCMAX
@@ -34,7 +36,7 @@ use std::collections::BTreeMap;
 pub const LAND_ICE_SOIL_CATEGORY: i32 = 16;
 
 /// The snow water equivalent ceiling, kg m-2.
-pub const SNOW_WATER_CAP_KG_M2: f32 = 5000.0;
+pub const SNOW_WATER_CAP_KG_M2: f32 = 2000.0;
 
 /// `MAXSMC` for soil categories 1..=19 of `SOILPARM.TBL`'s `STAS` block, in
 /// table order.  Category 14 is water (1.0) and 16 is land ice.  A test reads
@@ -114,7 +116,7 @@ pub fn cap_snow(snow: &mut [f32], snowh: &mut [f32]) -> SnowCap {
     let cap = SNOW_WATER_CAP_KG_M2;
     let mut out = SnowCap {
         cap_kg_m2: cap,
-        rule: "SNOW > 5000 kg m-2: SNOWH = SNOWH * 5000 / SNOW, SNOW = 5000 (WRF \
+        rule: "SNOW > 2000 kg m-2: SNOWH = SNOWH * 2000 / SNOW, SNOW = 2000 (WRF \
                module_sf_noahmpdrv.F NOAHMP_INIT, density kept)"
             .to_string(),
         ..SnowCap::default()
@@ -230,36 +232,36 @@ mod tests {
 
     #[test]
     fn snow_below_at_and_above_the_cap() {
-        let mut snow = vec![0.0, 4999.0, 5000.0, 5001.0, 51_800.0];
+        let mut snow = vec![0.0, 1999.0, 2000.0, 2001.0, 51_800.0];
         let mut snowh: Vec<f32> = snow.iter().map(|s| s * 5.0 / 1000.0).collect();
         let before_h = snowh.clone();
         let cap = cap_snow(&mut snow, &mut snowh);
-        assert_eq!(snow, vec![0.0, 4999.0, 5000.0, 5000.0, 5000.0]);
+        assert_eq!(snow, vec![0.0, 1999.0, 2000.0, 2000.0, 2000.0]);
         // Below and at the cap, untouched to the bit.
         assert_eq!(&snowh[..3], &before_h[..3]);
         // Above it the density (snow / snowh) is kept.
         for c in 3..5 {
-            assert!((snowh[c] - 25.0).abs() < 1e-4, "{}", snowh[c]);
+            assert!((snowh[c] - 10.0).abs() < 1e-4, "{}", snowh[c]);
         }
         assert_eq!(cap.cells_capped, 2);
-        assert_eq!(cap.cap_kg_m2, 5000.0);
+        assert_eq!(cap.cap_kg_m2, 2000.0);
         assert_eq!(cap.source_max_kg_m2, 51_800.0);
         assert!((cap.source_max_snowh_m - 259.0).abs() < 1e-3);
         assert!(cap
             .note
-            .starts_with("rw_mpas_init: capped SNOW at 5000 kg m-2 on 2 cell(s)"));
+            .starts_with("rw_mpas_init: capped SNOW at 2000 kg m-2 on 2 cell(s)"));
         assert!(cap.note.contains("source value up to 51800 kg m-2"));
     }
 
     #[test]
     fn snow_cap_is_silent_when_nothing_is_above_it() {
-        let mut snow = vec![0.0, 415.0, 5000.0];
-        let mut snowh = vec![0.0, 2.075, 25.0];
+        let mut snow = vec![0.0, 415.0, 2000.0];
+        let mut snowh = vec![0.0, 2.075, 10.0];
         let cap = cap_snow(&mut snow, &mut snowh);
         assert_eq!(cap.cells_capped, 0);
         assert!(cap.note.is_empty());
-        assert_eq!(snow, vec![0.0, 415.0, 5000.0]);
-        assert_eq!(snowh, vec![0.0, 2.075, 25.0]);
+        assert_eq!(snow, vec![0.0, 415.0, 2000.0]);
+        assert_eq!(snowh, vec![0.0, 2.075, 10.0]);
     }
 
     #[test]

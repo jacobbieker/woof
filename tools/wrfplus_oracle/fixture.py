@@ -1,6 +1,6 @@
 """Make a WRFPLUS 4.7.1 oracle fixture for one TL/AD routine.
 
-    python tools/wrfplus_oracle/fixture.py advance_uv|advance_w|calc_coef_w|advance_mu_t|small_step|rk_stage|advect|bigstep|rhsph|coriolis|w_damp|lbc|lbc_final|diffusion|hdiff|diffusion2|vdiffusion2|emdiv_chain \
+    python tools/wrfplus_oracle/fixture.py advance_uv|advance_w|calc_coef_w|advance_mu_t|small_step|rk_stage|advect|bigstep|rhsph|coriolis|w_damp|lbc|lbc_final|diffusion|hdiff|diffusion2|vdiffusion2|kcoef2|emdiv_chain \
         --exe /mnt/NVME2/.../wrfplus_advance_uv \
         --runner "docker run --rm -v /mnt/NVME2/woof-work:/mnt/NVME2/woof-work wrf-oracle:u2404" \
         --out tests/data/wrfplus/advance_uv.npz
@@ -2622,6 +2622,144 @@ def _h2_fixture(exe, runner, seed, table) -> dict:
     return out
 
 
+#: kcoef2: the diff_opt 2 coefficient routines (diffusion2.F90 row 7):
+#: smag2d_km (km_opt 4 with its slope limiter), calculate_N2 (dry) and
+#: smag_km (km_opt 3, anisotropic and isotropic), each on periodic,
+#: specified and channel axes; smag2d_km also on steep slopes (alpha > 1).
+#: The TL and AD are fourth-order central differences over every active
+#: woof word, as diffusion2's.
+KC_OPS = {"k2": (1, ("xkmh", "xkhh")), "n2": (2, ("bn2",)),
+          "k3": (3, ("xkmh", "xkhh", "xkmv", "xkhv"))}
+KC_OUT = {"xkmh": 1, "xkhh": 2, "xkmv": 3, "xkhv": 4, "bn2": 5}
+KC_ACTIVE = {"k2": ("defor11", "defor22", "defor12", "php"), "n2": ("thp", "php"),
+             "k3": ("defor11", "defor22", "defor12", "u", "v", "w", "php", "bn2")}
+KC_FIELD_IDS = {**H2_FIELD_IDS, "thp": 11, "bn2": 12}
+KCOEF2_CASES = {}
+for _op in KC_OPS:
+    for _kind, _over in (("periodic", {}), ("spec", dict(boundary_x=1, boundary_y=1)),
+                         ("spec_y", dict(boundary_y=1))):
+        KCOEF2_CASES[f"kc_{_op}_{_kind}"] = dict(op=_op, **_over)
+KCOEF2_CASES["kc_k2_steep"] = dict(op="k2", steep=True)
+KCOEF2_CASES["kc_k2_spec_steep"] = dict(op="k2", steep=True, boundary_x=1, boundary_y=1)
+KCOEF2_CASES["kc_k3_iso"] = dict(op="k3", isotropic=1)
+KCOEF2_CASES["kc_k3_spec_iso"] = dict(op="k3", isotropic=1, boundary_x=1)
+
+
+def _kc_record_head(geom, tr, vert, op, out_name, nrec):
+    L = _df_layout(geom)
+    bx, by = geom.boundary_x, geom.boundary_y
+    flags = (int(not bx) | (int(not by) << 1) | (int(bool(bx or by)) << 2) | (7 << 4))
+    blob = np.array([geom.nx, geom.ny, geom.nz, flags, nrec], dtype=np.int32).tobytes()
+    blob += np.asarray([geom.rdx, geom.rdy, 1.6, -0.8, 0.2], dtype="<f8").tobytes()
+    for n in ("fnm", "fnp", "dn", "dnw"):
+        blob += np.concatenate([vert[n], [0.0]]).astype("<f8").tobytes()
+    for n in ("msfu", "msfv"):
+        blob += np.asarray(_rp_pad2(L, tr[n], False), dtype="<f8").tobytes(order="F")
+    blob += np.asarray(L.pad2(tr["msft"]), dtype="<f8").tobytes(order="F")
+    blob += np.asarray(L.pad3(tr["phb"]), dtype="<f8").tobytes(order="F")
+    act = np.zeros(L.s3 + (11,), order="F")
+    act[..., H2_FIELD_IDS["alt"] - 1] = 1.0
+    for n, f in KC_FIELD_IDS.items():
+        if n in tr and f <= 11:
+            act[..., f - 1] = L.pad3(tr[n], end=_h2_end(n))
+    blob += np.asarray(act, dtype="<f8").tobytes(order="F")
+    blob += np.full(L.s3, -0.0, dtype="<f8").tobytes(order="F")
+    blob += np.array([KC_OPS[op][0], KC_OUT[out_name], geom.isotropic],
+                     dtype=np.int32).tobytes()
+    blob += np.asarray([geom.dx, geom.dy, geom.dt, geom.mix_upper_bound, geom.c_s],
+                       dtype="<f8").tobytes()
+    blob += np.asarray(L.pad3(tr["thb"]), dtype="<f8").tobytes(order="F")
+    blob += np.asarray(L.pad3(tr["bn2"]), dtype="<f8").tobytes(order="F")
+    return blob, L
+
+
+def kcoef2(exe: str, runner: list[str], seed: int = 20261230) -> dict:
+    from woof.grad.wrfplus import diffusion as D
+    out = {}
+    for n, (name, over) in enumerate(KCOEF2_CASES.items()):
+        over = dict(over)
+        op, steep = over.pop("op"), over.pop("steep", False)
+        dims = dict(H2_DIMS)
+        dims.update(over)
+        geom = cases.kc_geometry(**dims)
+        geom.validate()
+        tr = cases.kc_trajectory(geom, seed + 10 * n, steep=steep)
+        pe = cases.kc_perturbation(geom, seed + 10 * n + 1)
+        rng = np.random.default_rng(seed + 10 * n + 2)
+        vrng = np.random.default_rng(seed + 10 * n + 3)
+        v = cases._vertical(geom.nz, vrng, False)
+        dn = np.zeros(geom.nz)
+        dn[1:] = np.diff(v["znu"])
+        fnm, fnp = np.zeros(geom.nz), np.zeros(geom.nz)
+        fnm[1:] = 0.5 * v["dnw"][:-1] / dn[1:]
+        fnp[1:] = 0.5 * v["dnw"][1:] / dn[1:]
+        vert = dict(dn=dn, dnw=v["dnw"], fnm=fnm, fnp=fnp)
+        sh = D.kc_shapes(geom)
+        active = KC_ACTIVE[op]
+        recs, cols = [], []
+        for a in active:
+            imgs = _h2_images(_df_layout(geom), sh[a], _h2_end(a))
+            x = tr[a].ravel()
+            scale = float(np.sqrt(np.mean(tr[a] ** 2)))
+            for w, mem in enumerate(imgs):
+                # ph' rides on phb (1e4) and the winds on each other in
+                # the shears: a step of the field's scale.  The others
+                # relative to the word itself (deformations span 1e-4 to
+                # 0.1 /s, and strain's sqrt bends sharply near 0)
+                h = (1e-3 * max(abs(float(x[w])), scale) if a in ("php", "u", "v", "w")
+                     else 1e-4 * max(abs(float(x[w])), 1e-2 * scale))
+                cols.append((a, w, h))
+                for m in (1, -1, 2, -2):
+                    recs.append((m * h, [KC_FIELD_IDS[a]] * len(mem), mem))
+        body = [np.array([0], np.int32).tobytes() + np.array([0.0], "<f8").tobytes()]
+        for h, ids, mem in recs:
+            body.append(np.array([len(ids)], np.int32).tobytes()
+                        + np.array([h], "<f8").tobytes()
+                        + np.array(ids, np.int32).tobytes() + np.array(mem, np.int32).tobytes())
+        prefix = f"{name}/"
+        seeds, adj = {}, 0.0
+        dx = np.concatenate([pe[a].ravel() for a in active])
+        mask = None
+        for o in KC_OPS[op][1]:
+            head, L = _kc_record_head(geom, tr, vert, op, o, len(recs) + 1)
+            with tempfile.TemporaryDirectory(dir=Path(exe).parent) as tmp:
+                fin, fout = Path(tmp) / "in.bin", Path(tmp) / "out.bin"
+                fin.write_bytes(head + b"".join(body))
+                subprocess.run(runner + [exe, str(fin), str(fout)], check=True)
+                result = fout.read_bytes()
+            n3 = int(np.prod(L.s3))
+            vals = np.frombuffer(result, dtype="<f8").reshape(len(recs) + 1, n3)
+            base = L.take3(vals[0].reshape(L.s3, order="F"), sh[o])
+            touched = ~((base == 0.0) & np.signbit(base))
+            # one mask for every output: the words all of them touch
+            mask = touched if mask is None else (mask & touched)
+            f = lambda r: L.take3(vals[r].reshape(L.s3, order="F"), sh[o])[touched]  # noqa: E731
+            jac = np.empty((int(touched.sum()), len(cols)))
+            for c, (_, _, h) in enumerate(cols):
+                r = 1 + 4 * c
+                jac[:, c] = (8.0 * (f(r) - f(r + 1)) - (f(r + 2) - f(r + 3))) / (12.0 * h)
+            seeds[o] = rng.standard_normal(sh[o]) * touched
+            tl = np.zeros(sh[o])
+            tl[touched] = jac @ dx
+            adj = adj + jac.T @ seeds[o][touched]
+            nl = np.zeros(sh[o])
+            nl[touched] = base[touched]
+            out[prefix + "wrfplus/nl_" + o] = nl
+            out[prefix + "wrfplus/tl_d_" + o] = tl
+        out[prefix + "op"] = np.array(op)
+        out[prefix + "geometry"] = np.array(json.dumps(dataclasses.asdict(geom)))
+        out[prefix + "wrfplus/mask"] = mask
+        for kind, d in (("seed", seeds), ("traj", tr), ("pert", pe)):
+            for k, val in d.items():
+                out[prefix + kind + "/" + k] = val
+        at = 0
+        for a in active:
+            size = int(np.prod(sh[a]))
+            out[prefix + "wrfplus/ad_" + a] = adj[at:at + size].reshape(sh[a])
+            at += size
+    return out
+
+
 ROUTINES = {"advance_uv": advance_uv, "advance_w": advance_w,
             "calc_coef_w": calc_coef_w, "advance_mu_t": advance_mu_t,
             "small_step": small_step, "rk_stage": rk_stage,
@@ -2629,7 +2767,7 @@ ROUTINES = {"advance_uv": advance_uv, "advance_w": advance_w,
             "coriolis": coriolis, "w_damp": w_damp,
             "lbc": lbc, "lbc_final": lbc_final, "diffusion": diffusion,
             "hdiff": hdiff, "diffusion2": diffusion2, "vdiffusion2": vdiffusion2,
-            "emdiv_chain": emdiv_chain}
+            "kcoef2": kcoef2, "emdiv_chain": emdiv_chain}
 
 
 def main(argv=None) -> int:
@@ -2643,7 +2781,8 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
     data = ROUTINES[args.routine](args.exe, shlex.split(args.runner))
     # vdiffusion2 runs diffusion2.F90's vertical_diffusion_2 row
-    stem = {"vdiffusion2": "diffusion2"}.get(args.routine, args.routine)
+    stem = {"vdiffusion2": "diffusion2", "kcoef2": "diffusion2"}.get(args.routine,
+                                                                   args.routine)
     driver = ROOT / "tools/wrfplus_oracle" / f"{stem}.F90"
     data["provenance"] = np.array(
         f"WRFPLUS 4.7.1 (configure wrfplus 17, real*8, -O0 -ffp-contract=off); "

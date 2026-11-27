@@ -737,8 +737,13 @@ Notes on the 1.1.7 sync:
   imports under the 4.8.1 Registry, which has the same keys and defaults as
   4.8.0's. The scheme fixes in 4.8.1 are being ported one family at a time.
   Until a family lands, a run receipt that says `"4.8.1"` also lists the
-  changes the engine does not run yet (`wrf_reference_pending`). Noah-MP
-  5.2.2 stays excluded on licence grounds.
+  changes the engine does not run yet (`wrf_reference_pending`). Of the 42
+  dycore, advection, nesting and diffusion oracle lanes, 23 are re-pinned to
+  4.8.1 with their fixtures as they are: no routine they exercise differs
+  from their 4.6.1, 4.7.1 or 4.8.0 pin (`tools/wrf481_source/lanes-v4.8.1.json`,
+  built by `python -m tools.wrf481_source.lanes`). The other 19 wait for the
+  port that changes their words. Noah-MP 5.2.2 stays excluded on licence
+  grounds.
 - **Corrections of WRF/MPAS quirks, on by default (correct mode).**
   Each key changes only the arithmetic it names, where its scheme runs.
   Exact mode turns every one off, so the run is the WRF 4.7.1 / MPAS v8.4.2
@@ -911,8 +916,12 @@ Notes on the 1.1.7 sync:
     `slope_rad = 1` on the WOOF column route builds SLOPE and SLP_AZI from
     the least-squares terrain plane through each cell's mesh neighbours, in
     place of WRF's grid-axis centred differences (`woof/hex/slope_statics.py`
-    documents the difference); spherical meshes only, and `topo_shading`
-    stays refused;
+    documents the difference); spherical meshes only. `topo_shading = 1`
+    runs WRF's sun and shadow test along the sun azimuth over the mesh,
+    sampling the terrain every mean neighbour spacing up to `shadlen` by
+    linear interpolation on the Voronoi cells' Delaunay triangles
+    (`woof/hex/topo_shading.py`); on a plane its mask is WRF's, on real
+    terrain it samples different points of the same surface;
   - CCPP TKE-EDMF on the column seam;
   - diagnostics: `nwp_diagnostics` maxima, `p_lev`/`z_lev` levels, `tslist`
     station series, `prec_acc_dt` windows and `acc_phy_tend`, AFWA
@@ -1575,6 +1584,12 @@ Notes on the 1.1.7 sync:
   (`hd_tl/hd_ad`: WRF `horizontal_diffusion` for u, v, w and scalars,
   `horizontal_diffusion_3dmp` for theta) reproduce woof's strict
   `wrf_diff_opt1_horizontal` and match WRFPLUS to about 1e-16.
+  diff_opt 2 with km_opt 3 or 4 (dry, no PBL or surface layer) is bound
+  too: `horizontal_diffusion_2` and `vertical_diffusion_2` with its
+  isfflx 0-2 surface terms, and the coefficients (`smag2d_km` with its
+  terrain-slope limiter, `calculate_N2` and `smag_km`), each reproducing
+  woof's strict kernels word for word and checked against FD of WRF
+  4.7.1's own routines.
   The step also covers WRF's external-mode filter (`emdiv > 0`, WRF's
   default 0.01): advance_uv's damping term from the column-mass tendency
   the previous acoustic substep wrote, carried between substeps and
@@ -1670,8 +1685,12 @@ Notes on the 1.1.7 sync:
   `time_step` rules are enforced, and `var4d_lbc`, `jcdfi_use` and
   `multi_inc` are refused by name. On a dry OSSE, two outer loops lower
   the nonlinear cost and pass the gradient, dot-product and TL-vs-FD
-  checks. It has not yet been checked against compiled WRFDA 4D-Var. The
-  window model is binary64 and refused on Metal.
+  checks. The window model perturbs the lateral boundary tables as WRFDA
+  does with `var4d_lbc` off, and carries each loop's table increment to
+  the next. Against compiled WRFDA 4.7.1 + WRFPLUS 4.7.1 on the adiabatic
+  L1 lane it agrees to tolerance, not word for word, because woof runs its
+  own trajectory (docs/var.md). The window model is binary64 and refused
+  on Metal.
   `woof.da.var.gen_be` (experimental, Python API, host binary64) makes a
   `be.dat` from woof or WRF history files (NMC 24 h minus 12 h pairs, or
   ensemble members minus their mean): WRFDA's gen_be stages for
@@ -1807,6 +1826,17 @@ Notes on the 1.1.7 sync:
   anchors are named runs with receipts. `--calibrate N` times N steps on
   this box and remembers the result, and `woof go`'s forecast heartbeat now
   shows an ETA ([docs/public/HARDWARE.md](docs/public/HARDWARE.md#how-long-a-run-takes-woof-estimate)).
+- **Packing runs onto cards (`woof pack-plan`).** Takes one or more
+  configurations, or N copies of one, and a runner. It recommends runs
+  per card, MPS on or off, and the order, with every option's predicted
+  makespan against one run at a time and the `woof multi-run` /
+  `woof energy worker` command to run it. Every option goes through
+  multi-run's own admission (priced memory, margin, slot and CPU caps), so
+  it never recommends a packing admission would refuse. Contention comes
+  from measured rows: on an RTX A6000, two to eight runs sharing the card
+  without MPS each ran 2.2-9.1x slower, so packing gains only start-up
+  overlap there. MPS options compete on their measured makespan like the
+  others ([docs/public/HARDWARE.md](docs/public/HARDWARE.md#packing-runs-onto-cards-woof-pack-plan)).
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`

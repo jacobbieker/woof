@@ -523,16 +523,6 @@
         "reason": "SFIRE needs a fire grid refined by sr_x/sr_y inside each atmospheric cell and WRF's fire-spread and fuel-moisture integration on it; hex has a Voronoi cell column and no fire grid, so ifire=2 would validate and never ignite or spread anything",
         "follow_up": "the fire-smoke path (biomass_burn_opt, emission frames on cell centres) for a smoke source, or a WRF domain for SFIRE"
       },
-      "topo_shading": {
-        "inactive_values": ["0"],
-        "reason": "WRF's terrain shadow mask marches the sun direction over the neighbouring terrain of a structured grid; a hex column has no neighbour terrain and no shadow statics are staged. THE BREAKAGE: on gpuwm-hex 0.6.1, x1.40962 with --physics topo_shading=1 ran and changed every history frame against the run without it (digest e334f5fd against 09df5028), though no shadow it computed can be right",
-        "follow_up": "topo_shading=0"
-      },
-      "shadlen": {
-        "inactive_values": [],
-        "reason": "shadlen is the search length of topo_shading's terrain shadow mask, which hex cannot run (see topo_shading)",
-        "follow_up": "drop shadlen with topo_shading=0"
-      },
       "wind_farm_scheme": {
         "refused_values": ["mav", "fitch_legacy"],
         "reason": "the MAV scheme and WRF's legacy Fitch turbine list (WRF V3.5, windturbines_spec) place turbines by their i/j or lat/lon on a structured grid; only fitch_wrf builds a per-cell placement (CellPlacement) on the mesh, so the turbines would be recorded and exert no drag",
