@@ -262,6 +262,7 @@ tests/test_gfdleta_lw_helpers_cuda.py  needs a CUDA device: it is skipped when G
 tests/test_gfdleta_math_cuda.py  needs a CUDA device: it is skipped when GPUWM_NO_LOCAL_GPU is set, and a GPU leg runs the GFDL-Eta math helper words against the committed fixtures (4efa12f66a4).
 tests/test_gfdleta_runtime_cuda.py  needs a CUDA device: it is skipped when GPUWM_NO_LOCAL_GPU is set, and a GPU leg runs the GFDL-Eta runtime driver against the committed fixtures (382ff1c01e3).
 tests/test_gfdleta_tables_cuda.py  needs a CUDA device: it is skipped when GPUWM_NO_LOCAL_GPU is set, and a GPU leg runs the GFDL-Eta table build words against the committed fixtures (ca7aa6593d7).
+tests/test_kfcup_capped_downdraft_gpu.py  needs a GPU device (CUDA, or Metal through the mlx backend): it is skipped when GPUWM_NO_LOCAL_GPU is set, and a GPU leg runs the KF-CuP capped-downdraft column with the FQ11 rain floor on and off against its recorded RAINCV words (4f28e7fad).
 tests/test_gsfcsw_gpu.py  needs a CUDA device and CuPy for the Goddard shortwave kernel comparisons; a GPU leg with the card runs it (ef7179ad4be).
 tests/test_nudging_forecast_gpu.py  needs a CUDA device and an explicit GPU pool lease (WOOF_DOWNSCALE_GPU_TEST=1); a leased GPU leg runs the nudged forecast (2799c9d0d40).
 tests/test_nudging_gpu.py  needs a CUDA device and an explicit GPU pool lease (WOOF_DOWNSCALE_GPU_TEST=1); a leased GPU leg runs the analysis-nudging kernels (2799c9d0d40).

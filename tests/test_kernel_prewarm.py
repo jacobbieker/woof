@@ -383,7 +383,7 @@ def test_kf_prewarm_uses_the_production_trigger_variant(monkeypatch, name, trigg
     assert len(jobs) == 1
     _label, factory, args = jobs[0]
     factory(*args)
-    assert calls == [(7, trigger)]
+    assert calls == [(7, trigger, False)]
 
 
 def test_parallel_plan_covers_selected_physics_and_code_dependent_shapes():
@@ -753,3 +753,60 @@ def test_the_thompson_fork_column_variants_the_run_launches_are_warmed(monkeypat
         {("thompson_fork_unit", ("thompson_fork_unit", False, False)),
          ("thompson_fork_unit[closure=1,lamc=1]", ("thompson_fork_unit", True, True))}
         if on else {("thompson_fork_unit", ("thompson_fork_unit", False, False))})
+
+
+@pytest.mark.parametrize("mode", ["correct", "exact"])
+@pytest.mark.parametrize("cu, name, label", [
+    (1, "kf", "kf[KF_CAPPED_DOWNDRAFT_RAIN_FLOOR=1]"),
+    (11, "mskf", "mskf[GPUWM_MSKF_NO_AEROSOL=1,KF_CAPPED_DOWNDRAFT_RAIN_FLOOR=1]"),
+])
+def test_the_kf_rain_floor_variants_the_run_launches_are_warmed(monkeypatch, mode, cu, name, label):
+    """FQ11 compiles kf.cu and mskf.cu with the capped-downdraft rain floor
+    define where it is on, and only the unit the run launches."""
+    from woof import correct_mode
+    from woof.config import RunConfig, validate_run_config
+    run = validate_run_config(RunConfig(
+        nx=8, ny=8, nz=12, dx=3000.0, dy=3000.0, ztop=12000.0, dt=10.0, run_seconds=60.0, moist=True,
+        cu_physics=cu, **correct_mode.resolve(mode).settings))
+    monkeypatch.setattr(kernel_prewarm, "static_modules", lambda _experiment: (name,))
+    monkeypatch.setattr(kernel_prewarm, "_inline_jobs", lambda _modules: [])
+    monkeypatch.setattr(kernel_prewarm, "_variant_jobs", lambda *_args: [])
+    labels = {job[0] for job in kernel_prewarm.static_jobs(
+        SimpleNamespace(domains=(SimpleNamespace(run=run),)))}
+    on = mode == "correct"
+    assert labels == ({label} if on else {label.replace(",KF_CAPPED_DOWNDRAFT_RAIN_FLOOR=1", "")
+                                          .replace("[KF_CAPPED_DOWNDRAFT_RAIN_FLOOR=1]", "")})
+
+
+def test_the_kf_rain_floor_tier_follows_each_trigger_units_domains(monkeypatch):
+    """Every KF-eta domain advances W0AVG in the trigger-1 unit, so kf is
+    warmed in each domain's tier; kf_trigger2 only in its own domains'."""
+    from woof import correct_mode
+    from woof.config import RunConfig, validate_run_config
+
+    def run(trigger, mode):
+        return validate_run_config(RunConfig(
+            nx=8, ny=8, nz=12, dx=3000.0, dy=3000.0, ztop=12000.0, dt=10.0, run_seconds=60.0,
+            moist=True, cu_physics=1, kfeta_trigger=trigger, **correct_mode.resolve(mode).settings))
+    monkeypatch.setattr(kernel_prewarm, "static_modules", lambda _experiment: ("kf", "kf_trigger2"))
+    monkeypatch.setattr(kernel_prewarm, "_inline_jobs", lambda _modules: [])
+    monkeypatch.setattr(kernel_prewarm, "_variant_jobs", lambda *_args: [])
+    experiment = SimpleNamespace(domains=(SimpleNamespace(run=run(1, "correct")),
+                                          SimpleNamespace(run=run(2, "exact"))))
+    jobs = {job[0]: job[2] for job in kernel_prewarm.static_jobs(experiment)}
+    assert jobs == {"kf": (1, False), "kf[KF_CAPPED_DOWNDRAFT_RAIN_FLOOR=1]": (1, True),
+                    "kf_trigger2": (2, False)}
+
+
+@pytest.mark.parametrize("mode", ["correct", "exact"])
+def test_the_kfcup_rain_floor_variant_the_run_launches_is_warmed(mode):
+    """FQ11 compiles KF-CuP's column with the capped-downdraft rain floor
+    define where it is on (cu_physics = 10)."""
+    from woof import correct_mode
+    from woof.config import RunConfig, validate_run_config
+    run = validate_run_config(RunConfig(
+        nx=8, ny=8, nz=12, dx=3000.0, dy=3000.0, ztop=12000.0, dt=10.0, run_seconds=60.0, moist=True,
+        cu_physics=10, bl_pbl_physics=1, sf_sfclay_physics=1, **correct_mode.resolve(mode).settings))
+    experiment = SimpleNamespace(domains=(SimpleNamespace(run=run),))
+    labels = {job[0] for job in kernel_prewarm._variant_jobs(experiment, ("kfcup",))}
+    assert ("kfcup[KF_CAPPED_DOWNDRAFT_RAIN_FLOOR=1]" in labels) is (mode == "correct")

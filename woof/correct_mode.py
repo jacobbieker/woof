@@ -96,7 +96,7 @@ MY1  WRF 4.6.1's MYNN (and every MYNN-EDMF before NCAR/MYNN-EDMF f3c9d9e,
      MY1 as uncorrected; GSD MYNN 4.1 (gsd_41) adds the flux with its sign
      and does not carry it.
 
-FQ1-FQ8 and FQ12 are the fork's quirk ledger on the WRF route (woof.quirk_corrections,
+FQ1-FQ8, FQ11 and FQ12 are the fork's quirk ledger on the WRF route (woof.quirk_corrections,
 ``woof_quirk_corrections``): corrections of WRF 4.7.1 arithmetic that
 contradicts itself, each with its own key.  Like the findings above they are
 on in correct mode and off in exact mode (and in a strict WRF process).
@@ -138,6 +138,11 @@ FQ8  Noah (sf_surface_physics = 2) on a land-ice point keeps the liquid rain
      the rain leaves the water budget; the key books it as surface runoff
      (``noah_land_ice_rain_runoff``).  A WRF-Hydro coupling carries it (the
      glacial arm writes SFCRUNOFF, never the routing planes).
+FQ11 The Kain-Fritsch family (cu_physics = 1, 10, 11) caps the downdraft
+     with DDINC = TRPPT/TDER and forms the rain flux TRPPT - TDER with no
+     floor; in binary32 TDER*DDINC can round above TRPPT, so RAINCV and
+     RAINC go a few ulp negative.  The key floors the flux at zero, the
+     float64 answer (``kf_capped_downdraft_rain_floor``).
 FQ12 WRF's compute_diff_metrics (diff_opt = 1, 2) fills a periodic axis's
      seam slope (zx at ids/ide, zy at jds/jde) for levels 1..ktf only, so the
      top w level at the seam keeps its cold zero and the top mass level's
@@ -367,6 +372,15 @@ CORRECTIONS: tuple[Correction, ...] = (
         carriers=(("sf_surface_physics", (2,)),),
     ),
     Correction(
+        finding="FQ11",
+        keys=("kf_capped_downdraft_rain_floor",),
+        summary=(
+            "Kain-Fritsch, KF-CuP and MSKF floor the capped downdraft's "
+            "precipitation flux at zero, so convective rain is never a few "
+            "ulp negative"),
+        carriers=(("cu_physics", (1, 10, 11)),),
+    ),
+    Correction(
         finding="FQ12",
         keys=("diff_metrics_seam_slope",),
         summary=(
@@ -429,7 +443,7 @@ KEY_SCOPE: Mapping[str, tuple[str, tuple[int, ...]]] = {
     "mynn_boulac_down_sign": ("bl_pbl_physics", (5,)),
     # ML1's second key: the BouLac (8) and k-epsilon (17) length kernels.
     "pbl_boulac_down_sign": ("bl_pbl_physics", (8, 17)),
-    # FQ1-FQ8 and FQ12, the fork's quirk ledger (woof.quirk_corrections).
+    # FQ1-FQ8, FQ11 and FQ12, the fork's quirk ledger (woof.quirk_corrections).
     "gf_deep_rain_evaporation_booking": ("cu_physics", (3,)),
     "ysu_surface_heat_exner": ("bl_pbl_physics", (1,)),
     "mynn_sfclay_psih_zolzt": ("sf_sfclay_physics", (5,)),
@@ -442,6 +456,9 @@ KEY_SCOPE: Mapping[str, tuple[str, tuple[int, ...]]] = {
     "thompson_lamc_updated_rc": ("mp_physics", THOMPSON_CLOUD_BALANCE_MP),
     # FQ8: Noah's glacial arm (sf_surface_physics = 2, land-ice points).
     "noah_land_ice_rain_runoff": ("sf_surface_physics", (2,)),
+    # FQ11: KF-eta (kf.cu), KF-CuP (kfcup.cu) and MSKF (mskf.cu); the old
+    # KF (99) has no capped-downdraft subtraction.
+    "kf_capped_downdraft_rain_floor": ("cu_physics", (1, 10, 11)),
     # FQ12: compute_diff_metrics runs under either diffusion option.
     "diff_metrics_seam_slope": ("diff_opt", (1, 2)),
 }
@@ -593,6 +610,41 @@ def _scope_values(cfg) -> dict:
 #: default moves no Thompson run's identity.  The run receipt's correct_mode
 #: block still records them.
 OUTPUT_ONLY_KEYS: tuple[str, ...] = ("thompson_cloud_surface_booking",)
+
+#: Correct-mode keys whose scheme already carried the correction before the
+#: key existed, by the selector values that did: a checkpoint header,
+#: fingerprint or document without the key ran it ON there, and OFF under
+#: every other scheme.  FQ11: kf.cu floored the capped-downdraft rain flux
+#: unconditionally from d547dc8c3 and mskf.cu from 695ddf87a, while
+#: kfcup.cu ran WRF's bare subtraction until the key gated all three.
+KEY_ABSENT_ON: Mapping[str, tuple[str, tuple[int, ...]]] = {
+    "kf_capped_downdraft_rain_floor": ("cu_physics", (1, 11)),
+}
+
+
+def absent_value(key: str, values: Mapping) -> bool:
+    """What a header, fingerprint or document without ``key`` ran under the
+    scheme selection in ``values``: False (the matched arithmetic) except
+    where :data:`KEY_ABSENT_ON` says the scheme carried the correction."""
+    rule = KEY_ABSENT_ON.get(key)
+    if rule is None:
+        return False
+    selector, schemes = rule
+    try:
+        return _selector_int(selector, values) in schemes
+    except (TypeError, ValueError):
+        return False
+
+
+def key_echoes(key: str, values: Mapping) -> bool:
+    """Is correction ``key`` written into a checkpoint echo, digest,
+    fingerprint or experiment document?  Only where a selected scheme reads
+    it and its value is not what absence means (:func:`absent_value`), so
+    every record written before the key keeps its bytes."""
+    if key in OUTPUT_ONLY_KEYS or not key_in_scope(key, values):
+        return False
+    absent = absent_value(key, values)
+    return bool(values.get(key, absent)) != absent
 
 
 CORRECTIONS_BY_FINDING: Mapping[str, Correction] = {
@@ -845,11 +897,13 @@ __all__ = [
     "CARRIER_GENERATIONS", "CORRECTIONS", "CORRECTIONS_BY_FINDING",
     "CORRECTION_KEYS",
     "CORRECT_KEYS_DEFAULT", "Correction", "CorrectModeResolution", "EXACT",
-    "FINDING_BY_KEY", "KEY_GENERATIONS", "KEY_SCOPE", "KEY_UNREAD",
+    "FINDING_BY_KEY", "KEY_ABSENT_ON", "KEY_GENERATIONS", "KEY_SCOPE",
+    "KEY_UNREAD",
     "OUTPUT_ONLY_KEYS", "PHYSICS_MODES", "SCOPE_SELECTORS",
     "PHYSICS_MODE_CORRECT",
     "PHYSICS_MODE_DEFAULT", "PHYSICS_MODE_EXACT", "STRICT",
-    "STRICT_FORCED_BY", "in_effect", "key_in_scope", "resolution_of",
+    "STRICT_FORCED_BY", "absent_value", "in_effect", "key_echoes",
+    "key_in_scope", "resolution_of",
     "resolve",
     "run_receipt", "uncorrected", "uncorrected_notice",
 ]

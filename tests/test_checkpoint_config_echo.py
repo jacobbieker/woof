@@ -148,6 +148,11 @@ MOVED = {
     "rrtmg_lw_model_top": (
         dict(ra_lw_physics=4, ra_sw_physics=4, ra_rrtmg_variant="rrtmg_legacy"),
         {"rrtmg_lw_model_top"}),
+    # Correct-mode FQ11: KF-eta floored unconditionally before the key, so
+    # a header without it ran it on there and the echo carries it off.
+    "kf_capped_downdraft_rain_floor": (
+        dict(cu_physics=1, moist=True, kf_capped_downdraft_rain_floor=False),
+        {"kf_capped_downdraft_rain_floor"}),
     # Correct-mode FQ12 (on by default): echoed where the mixing package
     # runs under diff_opt 1 or 2 on a periodic axis.
     "diff_metrics_seam_slope": (
@@ -314,6 +319,9 @@ DEFAULT_OFF = frozenset({
     # The Thompson cloud slope from the updated mass (FQ7), absent while the
     # aerosol-aware Thompson does not run.
     "thompson_lamc_updated_rc",
+    # The Kain-Fritsch capped-downdraft rain floor (FQ11), absent while off
+    # or while KF-eta, KF-CuP and MSKF do not run.
+    "kf_capped_downdraft_rain_floor",
     # The diffusion-metrics seam correction (FQ12), absent while off or
     # while no mixing package runs on a periodic axis under diff_opt 1, 2.
     "diff_metrics_seam_slope",
@@ -516,6 +524,11 @@ def _checkpoint_state(cfg, monkeypatch):
     if cfg.sf_surface_physics == 2:
         driver.noah_params = _identity_bound_physics_state(
             cfg, monkeypatch)[1].noah_params
+    if cfg.cu_physics == 1 and getattr(driver, "cumulus_callable", None) is None:
+        # The FQ11 row runs KF-eta; bind its stock adapter as the identity
+        # fixture does (these CPU tests never execute the scheme).
+        from woof.core.kf import KainFritsch
+        driver.cumulus_callable = KainFritsch()
     if cfg.sf_surface_mosaic:
         # The tile identity a mosaic header binds, without the tiles: this
         # file reads the configuration echo, not the tile carriers

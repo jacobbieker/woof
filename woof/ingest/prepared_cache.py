@@ -580,6 +580,9 @@ DEFAULT_TOLERANT_IDENTITY_FIELDS = frozenset({
     # The Noah land-ice rain runoff (FQ8, sf_surface_physics = 2 only, on in
     # correct mode): step-time; preparation never reads it.
     "run.noah_land_ice_rain_runoff",
+    # The Kain-Fritsch capped-downdraft rain floor (FQ11, cu_physics = 1,
+    # 10, 11 only, on in correct mode): step-time; preparation never reads it.
+    "run.kf_capped_downdraft_rain_floor",
     # The diffusion-metrics periodic seam correction (FQ12, diff_opt = 1 or
     # 2, on in correct mode): step-time; preparation never reads it.
     "run.diff_metrics_seam_slope",

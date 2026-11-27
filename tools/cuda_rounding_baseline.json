@@ -2249,7 +2249,7 @@
     "call_sha256": "bc97ef0ac9d4187fe203db9e86eb73dcacbbe76cb68fbf60b1388d6098f98439",
     "constructor": "compile_using_nvrtc",
     "factory": "_kf_module",
-    "factory_sha256": "9240c5d5fe9c73177185a0511eb80a088517bebee9d63a95039e0877a5fad084",
+    "factory_sha256": "06186c732d2d4e5c0d5f68acb1575f6fc74c2f3026359f490c9f3ef3d68f7810",
     "file": "woof/core/kf.py",
     "status": "unresolved"
    },
@@ -3681,7 +3681,7 @@
    },
    {
     "file": "woof/core/kernels/kf.cu",
-    "sha256": "d5d3e83ef1094a0202b68b297dd1aad357604327ce607a9aad87fc0772fb2db0"
+    "sha256": "b98a64d1c8c8c414cd7100b63f792e8c2504f2719f243f01b6e42d6fa3d78f60"
    },
    {
     "file": "woof/core/kernels/kf_old.cu",
@@ -3693,7 +3693,7 @@
    },
    {
     "file": "woof/core/kernels/kfcup.cu",
-    "sha256": "2a77ac6f1bbaf0f3704c7a4d6813774cfe7b19525649c528cdae21134d702dae"
+    "sha256": "0de29106a1ecef3f6e63416b449108859a22a0dc2c39d90ec936319fb2c6e08f"
    },
    {
     "file": "woof/core/kernels/km5.cu",
@@ -3809,7 +3809,7 @@
    },
    {
     "file": "woof/core/kernels/mskf.cu",
-    "sha256": "28d338515dacf93c1b2664547feca66ae70f4f7083fb97c14b9fb0ef117a4708"
+    "sha256": "fd4cc745a7b6962eaa1e61a9459085b2979b9069a796e64ce0b3073b0d14c893"
    },
    {
     "file": "woof/core/kernels/mskf_aerosol.cuh",
@@ -5755,7 +5755,7 @@
    },
    {
     "file": "woof/core/kf.py",
-    "sha256": "9580c7938b5a6f2498a33adbdc99494d10776116eb4970b72eae53bec9ce620f"
+    "sha256": "572de9414a0f524aa4e3f6df237dff25b21208099bb9d709ea709a14ec15b25c"
    },
    {
     "file": "woof/core/microphysics.py",
@@ -17940,7 +17940,7 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "0892f486547dbd9e25cb58eec0599ad089b08eb819e361aba3bf756b5f7a03c6",
+    "sha256": "9810b6dece01a9e6e7d5a34d01992485abe358ba7ef59cfcabdf1f724b1609f8",
     "sites": {
      "100": 261
     }
@@ -17970,7 +17970,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "387f2e0d20c9820963853e606a88f71484c3096f3ae0a4a43f29828607ef1b76"
+   "source_sha256": "a48a1a4b3293cc46af03361d5f9877a829c3ef1b11233fe17d35f2e55f20bd13"
   },
   "kernels:kf_old": {
    "assessment": "static_diagnostic_only",
@@ -18085,13 +18085,13 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "aad1b9861301a2fddbb97445eef55660069a420cbfa25ab6a959ba98e3e4f595",
+    "sha256": "043cb0482f9f4d983a24ad0558c64b9eae97d771e59f764c415cdf727e6c53ca",
     "sites": {
      "100": 649
     }
    },
    "native_differences": {
-    "sha256": "f24b10e47da9e28cb522e16dd32a2ae690c2b5391ab99469a531b83c3cba7ca2",
+    "sha256": "9389ad901129d39826a296f4f8f1af224e118454c3286dbf4aa058f50d129139",
     "sites": {
      "100": 49
     }
@@ -18115,7 +18115,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "78083893d169c5e6d6d2621718166742b34ddccb7b515e0f5a11cce782f49a8b"
+   "source_sha256": "7ede1157f4ba1a611710898414ef2d57acaf560f07266d1102c05724ed6f301a"
   },
   "kernels:km5": {
    "assessment": "static_diagnostic_only",
@@ -19143,13 +19143,13 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "f8bc304c8617ec9979d3bf3bf06c464c6288f753944e9e58a0cbebdd1bece769",
+    "sha256": "dbb054088a7ded0c69272fbfba71e8c7a621c9bda0977851fe7fe50c062de290",
     "sites": {
      "100": 724
     }
    },
    "native_differences": {
-    "sha256": "ecfc9bcb5dc26c88d4408cc1d35115c8cc930d452a104851b4e77936d4b88355",
+    "sha256": "c5dad6a5cd9d7a2106eba9e176f4e280d66de9c18d6143d066a264cd16375877",
     "sites": {
      "100": 53
     }
@@ -19175,7 +19175,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "31a67aeb18faaa6bd37d4df7b09b65016373a70668f09230a13e7ddba82d4e0f"
+   "source_sha256": "1a8082f6441f137685343faa8af57a83f6a505e83a19eaadace1f81a48b8adc4"
   },
   "kernels:mskf_aerosol_replay": {
    "assessment": "static_diagnostic_only",

@@ -753,12 +753,13 @@ Notes on the 1.1.7 sync:
     turns every one on / off whatever the mode (the hex door takes
     `--quirk-corrections all|none`); a key set false next to `"all"` is
     refused by name, and a key set next to `"none"` wins. On the WRF route
-    the keys are correct-mode findings FQ1-FQ8 and FQ12, so the run receipt's
-    `correct_mode` block names them.
+    the keys are correct-mode findings FQ1-FQ8, FQ11 and FQ12, so the run
+    receipt's `correct_mode` block names them.
     It covers `gf_deep_rain_evaporation_booking`, `ysu_surface_heat_exner`,
     `mynn_sfclay_psih_zolzt`, `noah_smc_floor_booking`,
     `thompson_rain_snow_closure`, `rrtmg_lw_model_top`,
-    `thompson_lamc_updated_rc`, `noah_land_ice_rain_runoff` and `diff_metrics_seam_slope` (WRF route);
+    `thompson_lamc_updated_rc`, `noah_land_ice_rain_runoff`,
+    `kf_capped_downdraft_rain_floor` and `diff_metrics_seam_slope` (WRF route);
     `--undriven-species-boundary wrf-flow-dependent` (hex, regional, where its drivers carry it; the only
     flag `--quirk-corrections` sets); `woof_land_ice_isomip_freezing_salinity`,
     `woof_bottom_drag_dry_edges`, `woof_rayleigh_bottom_friction` and
@@ -825,6 +826,13 @@ Notes on the 1.1.7 sync:
     glacier leaves the water budget unbooked. The option adds it to the
     surface runoff (finding FQ8); a WRF-Hydro coupling carries it. Not yet
     scored against observations.
+  - `kf_capped_downdraft_rain_floor` (Kain-Fritsch eta, KF-CuP and MSKF,
+    `cu_physics = 1, 10, 11`, WRF route). When the scheme caps the
+    downdraft (`DDINC = TRPPT/TDER`), binary32 `TDER*DDINC` can round
+    above `TRPPT`, and WRF's bare `PPTFLX = TRPPT - TDER` then publishes a
+    few ulp of negative `RAINCV` for the whole `NCA` window. The option
+    floors the flux at zero, the float64 answer (finding FQ11). Off, and in
+    exact mode, each kernel is WRF's subtraction byte for byte.
   - `diff_metrics_seam_slope` (where WRF's mixing package runs on a periodic axis,
     WRF route). WRF's `compute_diff_metrics` fills the coordinate slope at
     a periodic seam for every level but the top w level, which keeps its
@@ -1837,6 +1845,19 @@ Notes on the 1.1.7 sync:
   at 100 and 256 layers, and admission prices it per domain. Past 256 is
   refused by name. The hex option-matrix row runs on CUDA at 149
   levels ([the record](docs/kernel_local_memory_bounds.md)).
+- **KF-family capped-downdraft rain floor is a quirk correction.** When
+  `KF_cup_PARA` caps the downdraft (`DDINC = TRPPT/TDER`), binary32
+  `TDER*DDINC` can round one ulp above `TRPPT`, and the bare
+  `TRPPT - TDER` then gives about -2e-10 mm of `RAINCV` for the whole
+  `NCA` window, at any level count; on the hex option matrix's 149-level
+  case that drove `RAINC` below zero and the forecast stopped. KF-eta,
+  KF-CuP and MSKF now floor the flux at zero under
+  `kf_capped_downdraft_rain_floor` (correct-mode FQ11, on by default); in
+  exact mode each kernel is WRF's bare subtraction byte for byte (WRF
+  4.7.1 and 4.8.1 carry no floor at `module_cu_kfeta.F:1821`,
+  `module_cu_kfcup.F:2721` or `module_cu_mskf.F:5840`). WRF's own Fortran
+  gives 0 on the KF-CuP column, as the strict port does; the negative is
+  the default arithmetic's (`tests/test_kfcup_capped_downdraft_gpu.py`).
 - **256-level hex member init and TC potential intensity.** The hex GPU
   member init (`woof/hex/init_gpu/physics.cu`) and the TC diagnostics'
   potential-intensity sounding (`tc_climate/potential_intensity.cu`) held
