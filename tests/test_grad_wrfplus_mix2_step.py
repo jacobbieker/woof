@@ -238,7 +238,9 @@ cases = {"km4": dict(K4), "km3": dict(K3), "km1": dict(K4, km_opt=1, khdif=100.0
          "km2": dict(K4, km_opt=2), "km5": dict(K4, km_opt=5),
          "moist": dict(K4, moist=True, moist_adv_opt=0), "isfflx": dict(K4, isfflx=3),
          "tc": dict(K4, tc_horizontal_length_m=500.0), "mopt": dict(K4, m_opt=1),
-         "tracer": dict(K4, tracer_opt=2)}
+         "tracer": dict(K4, tracer_opt=2),
+         "pbl": dict(K4, bl_pbl_physics=1, sf_sfclay_physics=1),
+         "sfclay": dict(K4, sf_sfclay_physics=1)}
 for key, over in cases.items():
     try:
         cfg = H.make_config(8, 6, 6, h_sca_adv_order=5, terrain_opt=1, **over)
@@ -257,6 +259,9 @@ for key, over in cases.items():
     assert "tc_horizontal_length_m" in out["tc"], out
     assert "m_opt" in out["mopt"], out
     assert "passive tracers" in out["tracer"], out
+    assert "diff_opt 2 with a PBL scheme" in out["pbl"], out
+    assert "diff_opt 2 with a surface layer" in out["pbl"], out
+    assert "diff_opt 2 with a surface layer" in out["sfclay"], out
 
 
 def test_refuses_the_other_diffusion_arithmetic(tmp_path):

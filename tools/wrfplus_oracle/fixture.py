@@ -2607,7 +2607,8 @@ def kcoef2(exe: str, runner: list[str], seed: int = 20261230) -> dict:
             vals = np.frombuffer(result, dtype="<f8").reshape(len(recs) + 1, n3)
             base = L.take3(vals[0].reshape(L.s3, order="F"), sh[o])
             touched = ~((base == 0.0) & np.signbit(base))
-            mask = touched if mask is None else mask
+            # one mask for every output: the words all of them touch
+            mask = touched if mask is None else (mask & touched)
             f = lambda r: L.take3(vals[r].reshape(L.s3, order="F"), sh[o])[touched]  # noqa: E731
             jac = np.empty((int(touched.sum()), len(cols)))
             for c, (_, _, h) in enumerate(cols):

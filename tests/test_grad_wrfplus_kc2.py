@@ -60,6 +60,10 @@ BACKENDS = [pytest.param("host", marks=pytest.mark.skipif(not HAVE_CXX, reason="
             pytest.param("mlx", marks=pytest.mark.skipif(not _has_metal(), reason="no Metal"))]
 
 KINDS = ("k2", "n2", "k3")
+# flat, steep (smag2d_km's alpha off its floor) and, for smag_km, a
+# strongly stable BN2 on about half the points (max(0, .) clamps there and
+# the 1e-6 l^2 floor takes over)
+VARIANTS = (False, True, "stable")
 # Periodic, bounded (both axes, one), the shortest column and a two-cell
 # line (periodic self-reads), the cold seam, isotropic km_opt 3 and a
 # bounded channel with the cold seam.
@@ -122,9 +126,10 @@ for dtn in {dtypes!r}:
     for op in {KINDS!r}:
         S, X = OPS[op][:2]
         for i, over in enumerate({CONFIGS!r}):
-            for steep in (False, True):
+            for steep in ({VARIANTS!r} if op == "k3" else (False, True)):
                 g = C.kc_geometry(**over)
-                tr = dev(C.kc_trajectory(g, 11 + i, dt, hybrid=bool(i % 2), steep=steep))
+                tr = dev(C.kc_trajectory(g, 11 + i, dt, hybrid=bool(i % 2), steep=steep is True,
+                                         stable=steep == "stable"))
                 p = dev(C.kc_perturbation(g, 100 + i, dt))
                 dy = seed(op, tr, 200 + i, dt)
                 def tl(dx):
@@ -135,7 +140,7 @@ for dtn in {dtypes!r}:
                 out[f"{{dtn}}/{{op}}/{{i}}/{{steep}}"] = K.dot_product(
                     tl, ad, [p[n] for n in X], [dy[s] for s in S], terms=dtn == "float32")
 """, tmp_path)
-    assert len(out) == (1 if backend == "mlx" else 2) * len(KINDS) * len(CONFIGS) * 2
+    assert len(out) == (1 if backend == "mlx" else 2) * (len(KINDS) * 2 + 1) * len(CONFIGS)
     for key, rel in out.items():
         limit = 1e-12 if key.startswith("float64") else 1e-5
         assert rel < limit, (key, rel)
@@ -186,9 +191,10 @@ def test_tl_matches_finite_differences(backend, tmp_path):
 for op in {KINDS!r}:
     S, X = OPS[op][:2]
     for i, over in enumerate({CONFIGS!r}):
-        for steep in (False, True):
+        for steep in ({VARIANTS!r} if op == "k3" else (False, True)):
             g = C.kc_geometry(**over)
-            tr = dev(C.kc_trajectory(g, 31 + i, np.float64, hybrid=bool(i % 2), steep=steep))
+            tr = dev(C.kc_trajectory(g, 31 + i, np.float64, hybrid=bool(i % 2),
+                                     steep=steep is True, stable=steep == "stable"))
             p = dev(C.kc_perturbation(g, 300 + i, np.float64))
             def model(xs):
                 t = dict(tr); t.update(dict(zip(X, xs)))
@@ -200,7 +206,7 @@ for op in {KINDS!r}:
             out[f"{{op}}/{{i}}/{{steep}}"] = K.tl_residual(
                 model, tl, [tr[n] for n in X], [p[n] for n in X], [1e-2, 1e-4, 1e-6])
 """, tmp_path)
-    assert len(out) == len(KINDS) * len(CONFIGS) * 2
+    assert len(out) == (len(KINDS) * 2 + 1) * len(CONFIGS)
     for key, rows in out.items():
         misfits = [r for _, r in rows]
         assert misfits[-1] < 1e-5, (key, rows)
@@ -313,9 +319,10 @@ def woof(g, tr):
     return {{op: run_tl(op, g, tr, zero, True, fill=7.0)[0] for op in OPS}}
 import dataclasses
 for i, over in enumerate({CONFIGS!r}):
-    for steep in (False, True):
+    for steep in {VARIANTS!r}:
         g = C.kc_geometry(rdx=float(f32(1 / dx)), rdy=float(f32(1 / dy)), dx=dx, dy=dy, **over)
-        tr = dev(C.kc_trajectory(g, 41 + i, f32, hybrid=bool(i % 2), steep=steep))
+        tr = dev(C.kc_trajectory(g, 41 + i, f32, hybrid=bool(i % 2), steep=steep is True,
+                                 stable=steep == "stable"))
         p, w = primal(g, tr), woof(g, tr)
         for op in OPS:
             out[f"{{op}}/{{i}}/{{steep}}"] = sum(diff(w[op][s], p[op][s]) for s in w[op])
@@ -336,13 +343,13 @@ for i, over in enumerate({CONFIGS!r}):
             w2 = woof(other, t2)
             out[f"moves/{{key}}/{{i}}/{{steep}}"] = int(
                 sum(diff(w1[op][s], w2[op][s]) for op in OPS for s in w1[op]) == 0)
-        if steep and min(g.nx, g.ny) >= 4 and not g.boundary_x and not g.boundary_y:
+        if steep is True and min(g.nx, g.ny) >= 4 and not g.boundary_x and not g.boundary_y:
             flat = dict(tr)
             flat["phb"] = cp.asarray(C.kc_trajectory(g, 41 + i, f32, hybrid=bool(i % 2))["phb"])
             w2 = woof(g, flat)
             out[f"moves/alpha/{{i}}"] = int(diff(w["k2"]["xkmh"], w2["k2"]["xkmh"]) == 0)
 """, tmp_path, extra_env=STRICT_ENV)
-    assert len([k for k in out if not k.startswith("moves")]) == len(CONFIGS) * 2 * len(KINDS)
+    assert len([k for k in out if not k.startswith("moves")]) == len(CONFIGS) * 3 * len(KINDS)
     assert any(k.startswith("moves/seam") for k in out)
     assert any(k.startswith("moves/iso") for k in out)
     bad = {k: v for k, v in out.items() if v}

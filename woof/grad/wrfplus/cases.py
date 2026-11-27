@@ -1473,14 +1473,16 @@ def _kc_inner(geom, shape):
 
 
 def kc_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False,
-                  steep: bool = False) -> dict:
+                  steep: bool = False, stable: bool = False) -> dict:
     """Host state of the diff_opt 2 coefficients (smag2d_km, calculate_N2,
     smag_km): deformations spread over 1e-4 to 0.1 /s, winds of 10 m/s and
     w of 0.5 m/s, a base geopotential rising 4e3 per level (``hybrid``
     stretches it) over terrain (``steep``: slopes near 0.3, so smag2d_km's
     alpha leaves its floor 1), ph' of 20, theta - 300 of 5 K over a base
     rising 3 K per level, an unstable BN2 (so smag_km's max(0, .) never
-    clamps) and map factors near 1.  No point lies within 3% of smag2d_km's
+    clamps; ``stable`` makes about half the points strongly stable, BN2 =
+    1 /s2, so max(0, .) clamps there and smag_km's floor 1e-6 l^2 takes
+    over, well clear of either switch) and map factors near 1.  No point lies within 3% of smag2d_km's
     10 mlen cap, its def_limit switch or alpha's floor."""
     from .diffusion import K2_PASSIVE, K3_ACTIVE, K3_PASSIVE, N2_ACTIVE, kc_shapes
     rng = np.random.default_rng(seed)
@@ -1508,6 +1510,8 @@ def kc_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False,
     out["thp"] = (out["thb"] - 300.0) + 5.0 + 2.0 * rng.standard_normal(sh["thp"])
     out["thb"] = np.full(sh["thb"], 300.0) if not hybrid else out["thb"]
     out["bn2"] = -(1e-5 + 1e-4 * rng.uniform(size=sh["bn2"]))
+    if stable:
+        out["bn2"] = np.where(rng.uniform(size=sh["bn2"]) < 0.5, 1.0, out["bn2"])
     inner = _kc_inner(geom, sh["bn2"])
     msft = out["msft"]
     mlen = np.sqrt(geom.dx / msft * geom.dy / msft)

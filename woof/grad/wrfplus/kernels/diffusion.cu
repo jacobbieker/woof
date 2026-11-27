@@ -1656,9 +1656,12 @@ static __device__ __forceinline__ Dl h2_d12m(const H2Src& s, int k, int j, int i
 }
 
 // wrf_smag2d_km (diff_opt 2: the slope limiter) then wrf_smag_km_bc.
-// WRFPLUS's derivatives: none where the coefficient takes the 10 * mlen
-// cap or alpha its floor 1; sqrt' and |.|' = 0 at 0; the def_limit switch
-// is a branch, not differentiated.
+// Kink conventions (woof's, in the style of WRFPLUS's generated code; the
+// oracle is FD of WRF's nonlinear routine, which grades off the kinks
+// only): no derivative where the coefficient takes the 10 * mlen cap or
+// alpha its floor 1; sqrt' and |.|' = 0 at 0 (so a rest base state with
+// zero deformation has a zero TL); the def_limit switch is a branch, not
+// differentiated.
 static __device__ int h2_km2(const H2Src& s, int k, int j, int i, Dl* out)
 {
     if (h2_outer(s, j, i)) {
@@ -1728,7 +1731,8 @@ static __device__ Dl h2_n2(const H2Src& s, int k, int j, int i)
 }
 
 // wrf_smag3d_km (the GPUWM_WRF_EXACT_C_DIFFUSION statements) then
-// wrf_smag_km_bc on both pairs.  WRFPLUS's derivatives: none where
+// wrf_smag_km_bc on both pairs.  Kink conventions (woof's; see
+// h2_km2): none where
 // max(0, D^2 - N^2/Pr) clamps, at a floor (1e-6 l^2) or cap
 // (mix_upper_bound l^2 / dt) the coefficient takes; pow' = 0 at 0.
 static __device__ int h2_km3(const H2Src& s, int k, int j, int i, Dl* out)
