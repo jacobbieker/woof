@@ -31,7 +31,7 @@
 # tag; pin it by digest for a reproducible fleet.
 
 ARG CUDA_BASE=nvidia/cuda:12.6.3-base-ubuntu22.04
-ARG PIXI_VERSION=0.84.1
+ARG PIXI_VERSION=0.85.0
 ARG RCLONE_VERSION=1.71.1
 
 FROM ghcr.io/prefix-dev/pixi:${PIXI_VERSION} AS pixi

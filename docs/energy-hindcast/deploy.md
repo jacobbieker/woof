@@ -38,9 +38,9 @@ context.
 
 | Build arg | Default | Meaning |
 |---|---|---|
-| `CUDA` | `12` | `12` selects pixi env `default`, `13` selects `cuda13` |
+| `CUDA` | `12` | `12` selects pixi env `cuda12`, `13` selects `default` (both on free-threaded CPython 3.14t) |
 | `CUDA_BASE` | `nvidia/cuda:12.6.3-base-ubuntu22.04` | base image for both stages; pin it by digest for a reproducible fleet |
-| `PIXI_VERSION` | `0.77.0` | the pixi that reads `pixi.lock` |
+| `PIXI_VERSION` | `0.85.0` | the pixi that reads `pixi.lock` |
 | `RCLONE_VERSION` | `1.71.1` | the object-store copier the entrypoint uses |
 | `PREFETCH_WIF` | `1` | also stage the WIF aerosol climatology |
 
