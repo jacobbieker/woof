@@ -1962,6 +1962,88 @@ static __device__ Dl h2_eval(const H2Src& s, int o, int k, int j, int i)
     return h2_row_s(s, k, j, i);
 }
 
+// The pieces are linear in their input: d piece / d (the seeded word), as
+// h2_eval(...).d gives it, from the read indices alone (no values; the
+// map-factor division only where the word is read).  32-bit index
+// arithmetic (the wrapper keeps every array below 2^31 words).
+static __device__ __forceinline__ unsigned h2_col(const H2Src& s, int j, int i)
+{
+    return (unsigned)(h2_iy(s, j) * s.nx + h2_ix(s, i));
+}
+// 1 / msft at column c when c is the seeded column cw, else 0 (what's
+// tangent)
+static __device__ __forceinline__ wreal h2_wt(const H2Src& s, unsigned c, unsigned cw)
+{
+    return c == cw ? wdiv((wreal)1, s.msft[c]) : (wreal)0;
+}
+
+static __device__ __forceinline__ wreal h2_pcoef(const H2Src& s, int o, int k, int j, int i,
+                                                 unsigned w)
+{
+    const unsigned m2 = (unsigned)(s.ny * s.nx);
+    const unsigned lw = w / m2, cw = w - lw * m2;   // a mass or w-level word's level, column
+    if (o >= H2O_TWP && o < H2O_TWP + 14) {
+        int y = (o - H2O_TWP) / 7, q = (o - H2O_TWP) % 7;
+        const unsigned kw = (unsigned)k;
+        if (k <= 0 || k >= s.nz) return (wreal)0;
+        if (q < 2) {          // RA / KA: rho or K at the slot's two columns
+            if (lw != kw && lw != kw - 1) return (wreal)0;
+            wreal n = (wreal)((h2_col(s, j - y, i - 1 + y) == cw) + (h2_col(s, j, i) == cw));
+            return lw == kw ? (wreal)0.5 * (s.fnm[k] * n) : (wreal)0.5 * (s.fnp[k] * n);
+        }
+        h2_dslot(s, &j, &i);
+        int jn = j - y, in = i - 1 + y;
+        switch (q - 2) {
+        case 0:               // rz: rdz at w level kw of the two columns
+            if (lw != kw) return (wreal)0;
+            return (wreal)0.5 * (wreal)((h2_col(s, j, i) == cw) + (h2_col(s, jn, in) == cw));
+        case 1: {             // UL's tangent: what at kw + 1 less at kw - 1
+            if (lw != kw + 1 && lw != kw - 1) return (wreal)0;
+            wreal t = h2_wt(s, h2_col(s, j, i), cw) + h2_wt(s, h2_col(s, jn, in), cw);
+            return lw == kw + 1 ? (wreal)0.25 * t : (wreal)0.25 * (-t);
+        }
+        case 2: {             // zx or zy
+            unsigned at = y ? (unsigned)R3(k, s.by ? max(0, min(j, s.ny)) : df_per(j, s.ny),
+                                           h2_ix(s, i), s.ny + 1, s.nx)
+                            : (unsigned)R3(k, h2_iy(s, j),
+                                           s.bx ? max(0, min(i, s.nx)) : df_per(i, s.nx),
+                                           s.ny, s.nx + 1);
+            return at == w ? (wreal)1 : (wreal)0;
+        }
+        case 3:               // WX: what at kw of the two columns
+            if (lw != kw) return (wreal)0;
+            return (y ? s.rdy : s.rdx) * (h2_wt(s, h2_col(s, j, i), cw)
+                                          - h2_wt(s, h2_col(s, jn, in), cw));
+        default: {            // DU: u (v) at kw less at kw - 1
+            unsigned c = y ? (unsigned)R3(k, h2_jv(s, j), h2_ix(s, i), s.ny + 1, s.nx)
+                           : (unsigned)R3(k, h2_iy(s, j), h2_iu(s, i), s.ny, s.nx + 1);
+            unsigned lvl = y ? (unsigned)((s.ny + 1) * s.nx) : (unsigned)(s.ny * (s.nx + 1));
+            return w == c ? (wreal)1 : (w == c - lvl ? (wreal)-1 : (wreal)0);
+        }
+        }
+    }
+    switch (o - H2O_K3P) {
+    case 0: case 1: case 5:   // d11, d22, BN2 at the point
+        return lw == (unsigned)k && h2_col(s, j, i) == cw ? (wreal)1 : (wreal)0;
+    case 2:                   // rdzw
+        return lw == (unsigned)max(0, min(k, s.nz - 1)) && h2_col(s, j, i) == cw
+                   ? (wreal)1 : (wreal)0;
+    case 3: {                 // w(k + 1) - w(k)
+        unsigned c = (unsigned)(j * s.nx + i);
+        if (cw != c) return (wreal)0;
+        return lw == (unsigned)(k + 1) ? (wreal)1 : (lw == (unsigned)k ? (wreal)-1 : (wreal)0);
+    }
+    case 4: {                 // the d12 average of (j..j+1, i..i+1)
+        if (lw != (unsigned)k) return (wreal)0;
+        int n = (h2_col(s, j, i) == cw) + (h2_col(s, j + 1, i) == cw)
+                + (h2_col(s, j, i + 1) == cw) + (h2_col(s, j + 1, i + 1) == cw);
+        return (wreal)0.25f * (wreal)n;
+    }
+    default: break;
+    }
+    return (wreal)0;
+}
+
 // an output's levels and horizontal staggers
 static __device__ void h2_odims(const H2Src& s, int o, int* nl, int* sy, int* sx)
 {
@@ -2342,6 +2424,101 @@ static __device__ wreal h2_gather(const H2Src& s, int stage, int id, int k, int 
     return acc;
 }
 
+// ---- the piece stages' gather (TWP, KM3P): the word's adjoint from the
+// pieces that read it, sum_piece sum_point P(point) d piece(point) / d word.
+
+// the output id of a piece stage's slot q (h2_outputs)
+static __device__ __forceinline__ int h2_pout(int stage, int q)
+{
+    if (stage == H2S_TWP) return H2O_TWP + q;
+    if (q < 6) return H2O_K3P + q;
+    return H2O_TWP + (q < 11 ? 2 + (q - 6) : 9 + (q - 11));
+}
+
+// The outputs offset off (of lo..hi) adds on an axis of n points (n +
+// stag outputs), as h2_cand: x0 and, at a periodic staggered axis's image
+// 0, x1 = n; none when an earlier offset had the same image.
+static __device__ __forceinline__ int h2_axis(int c, int lo, int off, int n, int stag,
+                                              int bounded, int* x0, int* x1)
+{
+    int x = c + off;
+    if (bounded) {
+        *x0 = x;
+        return (x >= 0 && x < n + stag) ? 1 : 0;
+    }
+    x = df_per(x, n);
+    for (int o = lo; o < off; ++o)
+        if (df_per(c + o, n) == x) return 0;
+    *x0 = x;
+    *x1 = n;
+    return (stag && x == 0) ? 2 : 1;
+}
+
+static __device__ wreal h2_pgather(const H2Src& s, int stage, int id, int k, int j, int i,
+                                   unsigned w, const wreal* P)
+{
+    int slot[8], win[48];
+    int np = h2_pairs(s, stage, id, slot, win);
+    size_t pst = h2_pstride(s);
+    wreal acc = (wreal)0;
+    for (int p = 0; p < np; ++p) {
+        int o = h2_pout(stage, slot[p]);
+        int nl, sy, sx;
+        h2_odims(s, o, &nl, &sy, &sx);
+        size_t base = (size_t)slot[p] * pst;
+        const int* wp = win + 6 * p;
+        for (int ok = wp[0]; ok <= wp[1]; ++ok) {
+            int kk, k1;
+            if (!h2_axis(k, wp[0], ok, nl, 0, 1, &kk, &k1)) continue;
+            for (int oj = wp[2]; oj <= wp[3]; ++oj) {
+                int j0, j1;
+                int nj = h2_axis(j, wp[2], oj, s.ny, sy, s.by, &j0, &j1);
+                for (int bj = 0; bj < nj; ++bj) {
+                    int jj = bj ? j1 : j0;
+                    for (int oi = wp[4]; oi <= wp[5]; ++oi) {
+                        int i0, i1;
+                        int ni = h2_axis(i, wp[4], oi, s.nx, sx, s.bx, &i0, &i1);
+                        for (int bi = 0; bi < ni; ++bi) {
+                            int ii = bi ? i1 : i0;
+                            wreal a = P[base + R3(kk, jj, ii, s.ny + sy, s.nx + sx)];
+                            if (a != (wreal)0) acc = acc + a * h2_pcoef(s, o, kk, jj, ii, w);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return acc;
+}
+
+// One piece-stage AD thread: decode word t of the stage's concatenated
+// inputs and gather.  *slot_out is its position in h2_inputs, *at_out its
+// word.
+static __device__ bool h2_ad_pieces(const H2Src& s, int stage, size_t t, const wreal* P,
+                                    int* slot_out, size_t* at_out, wreal* acc)
+{
+    int ids[12];
+    int ni = h2_inputs(s, stage, ids);
+    for (int q = 0; q < ni; ++q) {
+        int nl, sy, sx;
+        h2_idims(s, stage, ids[q], &nl, &sy, &sx);
+        size_t ny = (size_t)(s.ny + sy), nx = (size_t)(s.nx + sx), size = (size_t)nl * ny * nx;
+        if (t >= size) {
+            t -= size;
+            continue;
+        }
+        // 32-bit decode (every array is below 2^31 words)
+        unsigned u = (unsigned)t, nx1 = (unsigned)nx, ny1 = (unsigned)ny;
+        unsigned r = u / nx1;
+        int i = (int)(u - r * nx1), j = (int)(r % ny1), k = (int)(r / ny1);
+        *slot_out = q;
+        *at_out = t;
+        *acc = h2_pgather(s, stage, ids[q], k, j, i, u, P);
+        return true;
+    }
+    return false;
+}
+
 // One AD thread: decode word t of the stage's concatenated inputs, seed it
 // and gather.  *slot_out is its position in h2_inputs, *at_out its word.
 static __device__ bool h2_ad_piece(H2Src& s, int stage, size_t t, const wreal* const* a,
@@ -2357,7 +2534,10 @@ static __device__ bool h2_ad_piece(H2Src& s, int stage, size_t t, const wreal* c
             t -= size;
             continue;
         }
-        int i = (int)(t % nx), j = (int)((t / nx) % ny), k = (int)(t / (nx * ny));
+        // 32-bit decode (every array is below 2^31 words)
+        unsigned u = (unsigned)t, nx1 = (unsigned)nx, ny1 = (unsigned)ny;
+        unsigned r = u / nx1;
+        int i = (int)(u - r * nx1), j = (int)(r % ny1), k = (int)(r / ny1);
         s.which = ids[q];
         s.at = t;
         *slot_out = q;
@@ -2631,12 +2811,10 @@ extern "C" __global__ void h2_tw_ad(const wreal* __restrict__ P,
     s.rho = rho; s.rhod = rho; s.km = km; s.kmd = km;
     s.msft = msft; s.msfu = msfu; s.msfv = msfv; s.fnm = fnm; s.fnp = fnp;
     size_t t = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
-    const wreal* a[14];
-    for (int q = 0; q < 14; ++q) a[q] = P;
     int q;
     size_t at;
     wreal acc;
-    if (!h2_ad_piece(s, H2S_TWP, t, a, h2_pstride(s), &q, &at, &acc)) return;
+    if (!h2_ad_pieces(s, H2S_TWP, t, P, &q, &at, &acc)) return;
     wreal* out = q == 0 ? au : q == 1 ? av : q == 2 ? aw : q == 3 ? azx : q == 4 ? azy
                  : q == 5 ? ardz : q == 6 ? arho : akm;
     out[at] = out[at] + acc;
@@ -3116,12 +3294,10 @@ extern "C" __global__ void h2_km3_ad(const wreal* __restrict__ P, KC3_IN,
 {
     H2Src s = kc3_src(KC3_ARGS);
     size_t t = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
-    const wreal* a[16];
-    for (int q = 0; q < 16; ++q) a[q] = P;
     int q;
     size_t at;
     wreal acc;
-    if (!h2_ad_piece(s, H2S_KM3P, t, a, h2_pstride(s), &q, &at, &acc)) return;
+    if (!h2_ad_pieces(s, H2S_KM3P, t, P, &q, &at, &acc)) return;
     wreal* outs[11] = {a11, a22, a12, au, av, aw, azx, azy, ardz, ardzw, abn2};
     outs[q][at] = outs[q][at] + acc;
 }
