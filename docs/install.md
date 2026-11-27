@@ -115,22 +115,36 @@ re-run keeps an existing `.venv` and warns when it has the lock; remove
 `.venv` and re-run to remake it on 3.14t.
 
 **Free-threaded Pixi environments.** A checkout's Pixi workspace
-(`pyproject.toml`, `[tool.pixi.*]`) has a free-threaded twin of each model
-environment: `default-ft` (CUDA 13), `cuda12-ft`, `mlx-ft` (Apple silicon)
-and `cpu-ft` (Linux and macOS). The GIL environments (`default`, `cuda12`,
-`mlx`, `cpu`) stay the defaults, and their locked packages are unchanged.
+(`pyproject.toml`, `[tool.pixi.*]`) runs its model environments on
+conda-forge's free-threaded CPython 3.14t: `default` (CUDA 13), `cuda12`,
+`mlx` (Apple silicon) and `cpu` (Linux and macOS). Each one has a twin on
+the standard CPython 3.14 build, which holds the GIL: `default-gil`,
+`cuda12-gil`, `mlx-gil` and `cpu-gil`. The twins lock exactly the packages
+the environments of the same name locked before the switch.
 
 ```bash
-pixi install -e default-ft      # or cuda12-ft, mlx-ft, cpu-ft
-pixi run -e default-ft python -c "import sys, woof; print(sys._is_gil_enabled())"   # False
-PYTHON_GIL=0 pixi run -e default-ft python -m pytest -q tests/test_free_threading.py
+pixi install                    # default: CUDA 13 on 3.14t
+pixi run -e mlx python -c "import sys; print(sys._is_gil_enabled())"   # False
+pixi install -e cpu-gil         # the standard-CPython twin
 ```
 
 - The `freethreaded` feature pins conda-forge's `python-freethreading`
   metapackage (`python_abi` `cp314t`). Every conda package resolves to its
   cp314t build. The PyPI dependencies resolve to cp314t wheels: CuPy (12x
   and 13x), NumPy, SciPy, pyarrow, icechunk, mlx, pyproj, rasterio, netCDF4,
-  matplotlib, rapidgzip and psutil.
+  matplotlib, rapidgzip and psutil. The `gil` feature pins `python_abi`
+  `cp314`.
+- The free-threaded environments set `PYTHON_GIL=0` on activation, beside
+  `mlx`'s `WOOF_BACKEND` and `PYTHONPATH`. Some modules have not declared
+  free-threading support, and importing one would switch the GIL back on:
+  netCDF4, cftime, numcodecs (which xarray and zarr import), icechunk,
+  rapidgzip and google-crc32c. With `PYTHON_GIL=0` the GIL stays off, as it
+  does for the `woof` command line in a 3.14t `.venv`, which re-runs itself
+  with it. Woof's own modules need none of this: importing `woof`,
+  `woof.cli`, `woof.backend` (the CuPy facade on Metal) or `woof.hex`, CuPy,
+  mlx, NumPy, SciPy, pyarrow, rasterio, pyproj, matplotlib or `wrf-rust`
+  leaves the GIL off with `PYTHON_GIL` unset. `PYTHON_GIL=1 pixi run ...`
+  still turns the GIL on. The `-gil` twins do not set it.
 - `wrf-rust` (the `[render]` extra) publishes no cp314t wheel. It builds from
   its sdist with the environment's Rust toolchain at install time.
 - prefix.dev's conda-to-PyPI mapping has empty records for conda-forge's
@@ -140,27 +154,17 @@ PYTHON_GIL=0 pixi run -e default-ft python -m pytest -q tests/test_free_threadin
   rasterio and netCDF4 would build from sdists. The workspace's
   `conda-pypi-map` overlay names them, so the conda copy is used. It
   changes nothing for the GIL builds.
-- `mlx-ft` pins `mlx==0.32.4`, the release `mlx` locks. MLX 0.32.5 renamed
-  `mlx/backend/common/metal_kernel.h`, and the Metal launcher includes it.
 - The Metal launcher is built with nanobind's `FREE_THREADED` option. On
   3.14t that is required: mlx's cp314t wheel uses nanobind's free-threaded
   internals, and without them `mx.array` does not cross into the launcher.
   Its shared state is guarded: the GPU-time label is per-thread, and the
   library and archive directories are read under a lock.
   `woof.backend.metal.ext.load()` builds and loads the launcher once, even
-  when several threads ask for it at once.
-- Importing `woof`, `woof.cli`, `woof.backend` (the CuPy facade on Metal),
-  `woof.hex`, CuPy, mlx, NumPy, SciPy, pyarrow, rasterio, pyproj,
-  matplotlib or `wrf-rust` leaves the GIL off. Some modules have not
-  declared free-threading support, and importing one switches the GIL back
-  on: netCDF4, cftime, numcodecs (which xarray and zarr import), icechunk,
-  rapidgzip and google-crc32c. The `woof` command line and both prepared
-  runners re-run themselves with `PYTHON_GIL=0`, as in a `.venv`. For
-  `pytest` or your own scripts, export `PYTHON_GIL=0`. The environments do
-  not set it, so an explicit `PYTHON_GIL=1` still means what it says.
-- The `libradtran` and `mpas-oracle` oracle environments have no
-  free-threaded twin. They pin Python 3.11 for conda-forge's builds, and
-  woof never imports them.
+  when several threads ask for it at once. It builds against MLX 0.32.4
+  (`mlx-gil`) and 0.32.5 (`mlx`), which renamed the
+  `mlx/backend/common/metal_kernel.h` header.
+- The `libradtran` and `mpas-oracle` oracle environments are unchanged. They
+  pin Python 3.11 for conda-forge's builds, and woof never imports them.
 
 ### Manual steps
 

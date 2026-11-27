@@ -270,7 +270,7 @@ platforms = ["linux-64", { platform = "osx-arm64", macos = "14.0" }]
 
 # prefix.dev's conda-to-PyPI hash mapping holds empty records for conda-forge's
 # free-threaded (cp314t) builds of these packages, so without an overlay the
-# *-ft environments would install the PyPI copy over the conda one (an sdist
+# free-threaded environments would install the PyPI copy over the conda one (an sdist
 # build of rasterio and netCDF4 on macOS).  Overlay mode: every other package,
 # and every GIL build, keeps the default mapping.
 [tool.pixi.workspace.conda-pypi-map.conda-forge]
@@ -370,33 +370,36 @@ ninja = "*"
 make = "*"
 git = "*"
 
-# Free-threaded CPython 3.14t (PEP 703), for the environments named *-ft.
-# conda-forge's python-freethreading metapackage pins python_abi to cp314t,
-# so every conda package resolves to its free-threaded build and pixi's PyPI
-# resolution takes cp314t wheels (or builds the sdist).
+# Free-threaded CPython 3.14t (PEP 703): the model environments (default,
+# cuda12, mlx, cpu) run on it.  conda-forge's python-freethreading metapackage
+# pins python_abi to cp314t, so every conda package resolves to its
+# free-threaded build and pixi's PyPI resolution takes cp314t wheels (or
+# builds the sdist: wrf-rust).  PYTHON_GIL=0 keeps the GIL off when a module
+# that has not declared free-threading support is imported (netCDF4, cftime,
+# numcodecs, icechunk, rapidgzip, google-crc32c), as the woof command line's
+# own re-exec does; activation variables from the other features (mlx's
+# WOOF_BACKEND and PYTHONPATH) are merged with it.
 [tool.pixi.feature.freethreaded.dependencies]
 python-freethreading = "3.14.*"
 
-# mlx-ft only: hold MLX at the release the mlx environment locks.  0.32.5
-# renamed mlx/backend/common/metal_kernel.h, which woof.backend.metal.ext's
-# launch.cpp includes, so the Metal launcher does not build against it.
-[tool.pixi.feature.mlx-freethreaded]
-platforms = ["osx-arm64-macos-14-0"]
+[tool.pixi.feature.freethreaded.activation.env]
+PYTHON_GIL = "0"
 
-[tool.pixi.feature.mlx-freethreaded.pypi-dependencies]
-mlx = "==0.32.4"
+# The GIL twins (*-gil): the standard CPython 3.14 build, held explicitly.
+[tool.pixi.feature.gil.dependencies]
+python_abi = { version = "3.14.*", build = "*_cp314" }
 
 [tool.pixi.environments]
-default = { features = ["base", "cu13"], no-default-feature = true }
-cuda12 = { features = ["base", "cu12"], no-default-feature = true }
-mlx = { features = ["base", "mlx"], no-default-feature = true }
-cpu = { features = ["base", "cpu"], no-default-feature = true }
+default = { features = ["base", "cu13", "freethreaded"], no-default-feature = true }
+cuda12 = { features = ["base", "cu12", "freethreaded"], no-default-feature = true }
+mlx = { features = ["base", "mlx", "freethreaded"], no-default-feature = true }
+cpu = { features = ["base", "cpu", "freethreaded"], no-default-feature = true }
+default-gil = { features = ["base", "cu13", "gil"], no-default-feature = true }
+cuda12-gil = { features = ["base", "cu12", "gil"], no-default-feature = true }
+mlx-gil = { features = ["base", "mlx", "gil"], no-default-feature = true }
+cpu-gil = { features = ["base", "cpu", "gil"], no-default-feature = true }
 libradtran = { features = ["libradtran"], no-default-feature = true }
 mpas-oracle = { features = ["mpas-oracle"], no-default-feature = true }
-default-ft = { features = ["base", "cu13", "freethreaded"], no-default-feature = true }
-cuda12-ft = { features = ["base", "cu12", "freethreaded"], no-default-feature = true }
-mlx-ft = { features = ["base", "mlx", "freethreaded", "mlx-freethreaded"], no-default-feature = true }
-cpu-ft = { features = ["base", "cpu", "freethreaded"], no-default-feature = true }
 
 [tool.pixi.feature.base.tasks]
 doctor = "woof doctor"

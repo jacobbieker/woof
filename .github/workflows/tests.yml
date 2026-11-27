@@ -5,8 +5,9 @@ name: tests
 # byte-pinned assets).
 #
 # Every environment is a pixi environment from the committed pixi.lock
-# (locked: true): cpu on Linux and macOS, mlx on macOS, default (CUDA 12) on
-# the opt-in self-hosted CUDA runner.
+# (locked: true): cpu on Linux and macOS, mlx on macOS, default (CUDA 13) on
+# the opt-in self-hosted CUDA runner.  All three run on free-threaded CPython
+# 3.14t; the interpreters job also runs cpu-gil, their standard-CPython twin.
 #
 # This file is deliberately not named ci.yml.  tools/promote_prepared_release.py,
 # tools/workflow_rehearsals.py and several tests/ contracts describe the
@@ -264,46 +265,56 @@ jobs:
           path: junit/*.xml
           if-no-files-found: warn
 
-  # ------------------------------------------------- free-threaded CPython
-  # The cpu-ft environment (CPython 3.14t from conda-forge, pyproject.toml):
-  # it installs from the lock, woof imports without switching the GIL back
-  # on, and the free-threading and hex same-host rank-thread tests pass with
-  # PYTHON_GIL=0 (as the woof command line runs itself on a 3.14t build).
-  freethreaded:
-    name: free-threaded (ubuntu-24.04, cpu-ft)
+  # ------------------------------------------------------ interpreters
+  # The model environments (cpu, default, cuda12, mlx) run on free-threaded
+  # CPython 3.14t, with PYTHON_GIL=0 from their activation (pyproject.toml);
+  # every other job here runs on them.  This job checks the cpu interpreter
+  # is a 3.14t build and that importing woof keeps the GIL off even without
+  # PYTHON_GIL, and runs the free-threading and hex same-host rank-thread
+  # tests there and on cpu-gil, the standard-CPython twin, so a regression
+  # that only a GIL interpreter shows is still caught.
+  interpreters:
+    name: interpreter (ubuntu-24.04, ${{ matrix.env }})
     if: github.event_name != 'push'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [cpu, cpu-gil]
     env:
       GPUWM_NO_LOCAL_GPU: "1"
       WOOF_HEX_NO_LOCAL_GPU: "1"
+      PIXI_ENV: ${{ matrix.env }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: prefix-dev/setup-pixi@ad1da6449d9e506fd127fd67ab2d054a769f6a94 # v0.11.2
         with:
           pixi-version: ${{ env.PIXI_VERSION }}
-          environments: cpu-ft
+          environments: ${{ matrix.env }}
           locked: true
           cache: true
           cache-write: false
-      - name: the interpreter is free-threaded and importing woof keeps the GIL off
+      - name: the interpreter is the one the environment names, and importing woof keeps a free-threaded GIL off
         run: |
-          pixi run -e cpu-ft --locked python -c '
-          import sys, sysconfig
-          assert sysconfig.get_config_var("Py_GIL_DISABLED") == 1, "not a free-threaded build"
+          # env -u PYTHON_GIL: the import itself must not switch the GIL on.
+          pixi run -e "$PIXI_ENV" --locked env -u PYTHON_GIL python -c '
+          import os, sys, sysconfig
+          free = sysconfig.get_config_var("Py_GIL_DISABLED") == 1
+          name = os.environ["PIXI_ENV"]
+          assert free == (name != "cpu-gil"), f"{name}: Py_GIL_DISABLED={free}"
           import woof, woof.cli, woof.backend, woof.hex
-          assert not sys._is_gil_enabled(), "importing woof switched the GIL on"
+          if free:
+              assert not sys._is_gil_enabled(), "importing woof switched the GIL on"
           print(sys.version, "GIL enabled:", sys._is_gil_enabled())'
-      - name: free-threading and hex same-host rank-thread tests (PYTHON_GIL=0)
-        env:
-          PYTHON_GIL: "0"
+      - name: free-threading and hex same-host rank-thread tests
         run: |
           mkdir -p junit
-          pixi run -e cpu-ft --locked python -m pytest -q -rfE -p no:cacheprovider -o faulthandler_timeout=1200 -n auto --dist loadfile \
-            -m "$CPU_MARKERS" --junitxml=junit/freethreaded.xml tests/test_free_threading.py
+          pixi run -e "$PIXI_ENV" --locked python -m pytest -q -rfE -p no:cacheprovider -o faulthandler_timeout=1200 -n auto --dist loadfile \
+            -m "$CPU_MARKERS" --junitxml="junit/interpreter-$PIXI_ENV.xml" tests/test_free_threading.py
           cd components/hex
-          pixi run -e cpu-ft --locked python -m pytest -q -rfE -p no:cacheprovider -o faulthandler_timeout=1200 -n auto --dist loadfile \
-            -m "$CPU_MARKERS" --junitxml=../../junit/freethreaded-hex.xml \
+          pixi run -e "$PIXI_ENV" --locked python -m pytest -q -rfE -p no:cacheprovider -o faulthandler_timeout=1200 -n auto --dist loadfile \
+            -m "$CPU_MARKERS" --junitxml="../../junit/interpreter-$PIXI_ENV-hex.xml" \
             tests/test_rank_processes.py tests/test_rank_processes_shared.py tests/test_samehost_forecast_check_instrument.py \
             tests/test_samehost_pipeline_v841.py tests/test_samehost_rank_workers_v841.py tests/test_samehost_serial_io_v841.py \
             tests/test_advection_prep_threads.py tests/test_fingerprint_threads.py tests/test_init_thread_identity.py \
@@ -311,11 +322,11 @@ jobs:
             tests/test_samehost_restart.py tests/test_rank_gather.py tests/test_samehost_eager_memory.py
       - name: counts
         if: always() && hashFiles('junit/*.xml') != ''
-        run: python3 .github/ci/junit_summary.py "free-threaded (cpu-ft, linux)" junit/*.xml >> "$GITHUB_STEP_SUMMARY"
+        run: python3 .github/ci/junit_summary.py "interpreter (${PIXI_ENV}, linux)" junit/*.xml >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: junit-freethreaded
+          name: junit-interpreter-${{ matrix.env }}
           path: junit/*.xml
           if-no-files-found: warn
 

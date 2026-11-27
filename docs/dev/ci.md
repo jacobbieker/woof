@@ -30,7 +30,9 @@ them. An mlx leg now times out at 150 min (the longest measured leg took
 
 Every environment is a pixi environment from the committed `pixi.lock`,
 installed with `locked: true` through `prefix-dev/setup-pixi`, with the pixi
-cache on. The helper scripts are in `.github/ci/`.
+cache on. `cpu`, `mlx` and `default` run on free-threaded CPython 3.14t with
+`PYTHON_GIL=0`; only the `interpreter` job also runs the standard-CPython
+twin, `cpu-gil`. The helper scripts are in `.github/ci/`.
 
 The file is named `tests.yml` and not `ci.yml` on purpose. Several tools and
 tests in this tree describe the engine's own `ci.yml`
@@ -48,7 +50,7 @@ are bound to PyPI trusted publishing.
 | `lint` | ubuntu-24.04 | `cpu` | `actionlint`; `tests/test_no_undefined_names.py` (ruff F821/F822/F823 over `woof`, `tools`, `tilestream`); `compileall` over the owned Python trees; `python -m tools.import_sweep`; a check that the test legs partition `tests/` | No undefined names, no syntax errors, and every shipped module imports (or names a declared optional extra) |
 | `native (ubuntu-24.04)` | ubuntu-24.04 | `cpu` | `cargo build --release --locked --offline` in every workspace that the `build-native` pixi task names, read from `pyproject.toml` | The vendored Rust bridges build offline. Their executables and shared libraries are packed as the `native-linux` artifact |
 | `cpu (ubuntu-24.04, N)` | ubuntu-24.04 | `cpu` | Legs `0`–`7`: `tests/test_*.py` split into 8 legs by a hash of each path. `hex`: `components/hex/tools/battery/cpu_files.txt`, run from `components/hex`. `stage1`: `tools/battery/run_stage1.py`, the maintained Stage 1 list. Every leg first stages the externalized Thompson tables (`qr_acr_qg_V4.dat`, `freezeH2O.dat`, left out of the `recast-woof-data` wheel) with `woof fetch-tables`, SHA-256 verified against the pins, cached under `~/.woof/tables/thompson`. Every leg uses `-m "not gpu and not bigcard and not assets"` and `pytest-xdist -n auto --dist loadfile` | The CPU tier passes on Linux, with the bridges and the Thompson tables present |
-| `free-threaded (ubuntu-24.04, cpu-ft)` | ubuntu-24.04 | `cpu-ft` | Checks that the interpreter is a CPython 3.14t build and that importing `woof`, `woof.cli`, `woof.backend` and `woof.hex` leaves the GIL off. Then, with `PYTHON_GIL=0`, runs `tests/test_free_threading.py` and the hex same-host rank-thread tests (`test_rank_processes*`, `test_samehost_*` and the thread tests named in the job). No native bridges are needed | The free-threaded environment installs from the lock, and woof's rank threads pass without the GIL |
+| `interpreter (ubuntu-24.04, cpu / cpu-gil)` | ubuntu-24.04 | `cpu`, `cpu-gil` | Checks that `cpu` is a CPython 3.14t build and `cpu-gil` is not, and that on 3.14t importing `woof`, `woof.cli`, `woof.backend` and `woof.hex` leaves the GIL off with `PYTHON_GIL` unset. Then runs `tests/test_free_threading.py` and the hex same-host rank-thread tests (`test_rank_processes*`, `test_samehost_*` and the thread tests named in the job) in each. No native bridges are needed | The free-threaded environment, which every other job runs, and its GIL twin both install from the lock, and woof's rank threads pass on both interpreters |
 | `native (macos-15)` | macos-15 (arm64) | `mlx` | The same Rust build on macOS | The bridges build on macOS |
 | `macos (macos-15, mlx env, N)` | macos-15 | `mlx` | The same legs as `cpu` | The CPU tier passes on macOS in the environment Mac users run (`WOOF_BACKEND=mlx` is set by the env) |
 | `metal probe + device-free translator checks` | macos-15 | `mlx` | Checks for an Apple-silicon GPU (`mx.metal.device_info()` architecture `applegpu_*`). Without one it still runs `tools/metal_translation_census.py --translate-only --gate` (both rounding modes) and `tools/f64_soft_grade.py host` | Every CUDA kernel unit translates to MSL, and the soft-binary64 header is word-exact on the host. Whether Metal exists is reported |

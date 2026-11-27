@@ -44,7 +44,14 @@
 #include <vector>
 
 #include "mlx/array.h"
+// MLX 0.32.5 renamed mlx/backend/common/metal_kernel.h to custom_kernel.h
+// (its CompileOptions/MathMode moved into mlx::core::fast); this file uses
+// neither, only the header's place in the include order.
+#if __has_include("mlx/backend/common/custom_kernel.h")
+#include "mlx/backend/common/custom_kernel.h"
+#else
 #include "mlx/backend/common/metal_kernel.h"
+#endif
 #include "mlx/backend/metal/device.h"
 #include "mlx/primitives.h"
 #include "mlx/utils.h"

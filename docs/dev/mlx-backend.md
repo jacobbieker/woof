@@ -13,8 +13,9 @@ pixi run -e mlx pytest tests/test_kessler_wrf461_parity.py
 ```
 
 The pixi `mlx` environment (osx-arm64, macOS ≥ 14) sets `WOOF_BACKEND=mlx`.
-Its free-threaded twin `mlx-ft` (CPython 3.14t) does the same; see
-docs/install.md, "Free-threaded Pixi environments".
+It runs on free-threaded CPython 3.14t (and sets `PYTHON_GIL=0`); `mlx-gil` is
+the same environment on the standard build. See docs/install.md,
+"Free-threaded Pixi environments".
 A Mac with MLX installed and no CuPy also selects mlx on its own.
 
 ## Layout
