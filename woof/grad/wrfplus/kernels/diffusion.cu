@@ -2689,9 +2689,9 @@ static __device__ __forceinline__ int h2_axis(int c, int lo, int off, int n, int
         *x0 = x;
         return (x >= 0 && x < n + stag) ? 1 : 0;
     }
-    x = df_per(x, n);
+    x = df_near(x, n);
     for (int o = lo; o < off; ++o)
-        if (df_per(c + o, n) == x) return 0;
+        if (df_near(c + o, n) == x) return 0;
     *x0 = x;
     *x1 = n;
     return (stag && x == 0) ? 2 : 1;
