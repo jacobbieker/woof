@@ -590,9 +590,11 @@ def advance_mu_t(exe: str, runner: list[str], seed: int = 20261122) -> dict:
 
 #: emdiv_chain cases: the uv geometry's overrides (its mt twin shares
 #: spec_zone, the spacing and dtau, without map factors), emdiv and nsub.
+#: spec_zone 1, the zone the step runs advance_mu_t with
+#: (acoustic._mass_w_boundary_zone).
 CHAIN_CASES = {
     "wrf": (dict(spec_zone=1), 0.01, 3),
-    "strong_lid_moist": (dict(spec_zone=2, top_lid=1, moist_cq=1, nz=9, ny=9, nx=10),
+    "strong_lid_moist": (dict(spec_zone=1, top_lid=1, moist_cq=1, nz=9, ny=9, nx=10),
                          0.1, 4),
 }
 #: The names advance_uv and advance_mu_t share on the chain: advance_uv's
