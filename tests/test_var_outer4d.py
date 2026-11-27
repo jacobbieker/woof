@@ -20,14 +20,15 @@ Breakage this prevents:
   OSSE, ``tests/_var4d_osse.py``; host backend here, ``cuda`` on pb with
   ``WOOF_TEST_VAR4D_BACKEND=cuda``).
 
-Against WRFDA itself: the 4D.0 L1 lane with ``max_ext_its = 2``
-(``WOOF_WRFDA471_4DVAR_L1_DIR``), skipped until that lane runs.
+Against WRFDA itself: the 4D.4 L1 gate, lane L1 with ``max_ext_its`` 1 or 2
+(``WOOF_WRFDA471_4DVAR_L1_DIR``, CUDA; tests/_var4d_l1.py).
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -419,6 +420,49 @@ def test_analyse_runs_two_outer_loops_through_its_pieces(monkeypatch):
         run(nl=lambda it, s: o4.Trajectory(slots=[fg(np.zeros((NX + 1, NY, NZ)), t) for t in stamps]))
 
 
+def test_analyse_carries_the_boundary_increment_to_the_next_loop(monkeypatch):
+    """A TL model with boundary tables (``WindowModel(lbc="wrfda")``): after
+    loop 1, ``analyse`` asks it for the table perturbation of loop 1's
+    ``xhat`` (transferred about loop 1's start), adds it to the model's
+    tables and hands it to the rerun on the analysis state
+    (da_transfer_xatowrf.inc:665-727); the last loop makes none."""
+    import time
+
+    from woof.da.var import transfer4d as t4
+
+    A, bg, y, fg, stamps = _fake_pieces(monkeypatch)
+    def toy_xa(b, xbu, cv):
+        return {k: SIGMA_B * cv.reshape(NX, NY, NZ) for k in ("t", "u", "v", "q", "psfc")}
+
+    monkeypatch.setattr(A, "xa_from_cv", toy_xa)
+    monkeypatch.setattr(t4, "xa_to_tl", lambda x0, xb0, grid0, press, ph: {"t_2": 2.0 * x0["t"], "start": grid0})
+    asked, added, seen = [], [], []
+
+    class Tables(SpyIdentity):
+        def boundary_increment(self, g0):
+            asked.append(g0)
+            return {"lbc_theta_west": g0["t_2"][:1]}
+
+        def add_boundary_increment(self, inc):
+            added.append(inc)
+
+    def nl_model(it, state):
+        seen.append(state)
+        return o4.Trajectory(slots=[fg(state.fields["t"], s) for s in stamps])
+
+    first = [fg(bg, s) for s in stamps]
+    xb, grid = A.wrftoxb(first[0])
+    r = A._analyse_var4d(None, first[0], xb, grid, ["o"] * 3, first, "proj",
+                         {"time_window_min": stamps[0], "time_window_max": stamps[-1]},
+                         f4.Var4D(model=Tables(), nl_model=nl_model), max_ext_its=2, ntmax=30, eps=1e-8, check_rh=0,
+                         landuse_table=None, write=None, timings={}, t0=time.perf_counter())
+    x1 = np.asarray(r.cg[0].xhat)
+    assert len(asked) == 1 and asked[0]["start"] == {"start": stamps[0]}
+    np.testing.assert_array_equal(asked[0]["t_2"], 2.0 * SIGMA_B * x1.reshape(NX, NY, NZ))
+    assert len(added) == 1 and added[0] is seen[0].lbc_increment
+    np.testing.assert_array_equal(seen[0].lbc_increment["lbc_theta_west"], asked[0]["t_2"][:1])
+
+
 # ------------------------------------------------------------ the tutorial (identity TL, persistence NL)
 
 
@@ -475,44 +519,57 @@ def test_two_outer_loops_on_the_tutorial_with_a_persistence_model():
     assert fm.first_guess_time(state) == times[0]
 
 
-def _l1_window_model(d: Path):
-    """P3a's window over the lane's WRF states (plan section 3 item 1), with
-    ``trajectory(it)`` giving loop ``it``'s per-step states: built once the
-    lane writes them (WRFPLUS's ``auxinput6`` every time step)."""
-    pytest.skip("the L1 lane's per-step WRF states are not wired into a window yet (4D.0)")
+def test_l1_two_outer_loops_against_wrfda(tmp_path):
+    """The 4D.4 L1 gate (plan section 4): ``analyse(var4d=..., max_ext_its=N)``
+    against WRFDA 4.7.1 + WRFPLUS 4.7.1 on lane L1 (adiabatic, ``diff_opt 0``,
+    ``damp_opt 0``, ``emdiv 0``, ``moist_adv_opt 0``; ``var4d_lbc`` off).
 
-
-@pytest.mark.skip(reason="4D.0's L1 lane (adiabatic WRFDA 4.7.1 + WRFPLUS, max_ext_its = 2) is being debugged "
-                         "separately; enable once its first runs are in and the layout below is fixed")
-def test_l1_two_outer_loops_against_wrfda():
-    """GV6 on lane L1 with ``max_ext_its = 2`` (plan section 4).
-
-    Expected layout of ``WOOF_WRFDA471_4DVAR_L1_DIR``: ``be.dat``,
-    ``ob01.ascii`` .. ``ob07.ascii``, ``fg`` (12Z), ``it1/`` and ``it2/``
-    holding each outer loop's ``nl_d01_<date>`` slot states (WRF's own,
-    so the innovation gate isolates the DA side), and ``rsl.out.0000``.
-    Checks per loop: the iteration count, ``J0`` and the final ``J`` to
-    1e-12 (the ``minimize_cg`` lines), then the increments (O7)."""
+    ``WOOF_WRFDA471_4DVAR_L1_DIR`` is ``tools/wrfda_oracle/run_4dvar.sh l1``'s run
+    directory with ``MAX_EXT_ITS`` 1 or 2 (``namelist.input``, ``fg``,
+    ``wrfbdy_d01``, ``be.dat``, ``ob01.ascii`` .. ``ob07.ascii``, ``wrfda.out``,
+    ``wrfvar_output`` and, for two loops, ``wrfvar_output_01``).  CUDA only
+    (``WOOF_TEST_VAR4D_BACKEND=cuda``): tests/_var4d_l1.py runs P3a's binary64
+    window as both models.  WRFPLUS's trajectory is not readable from this
+    WRFDA build, so woof runs its own: the gate is tolerance-level, not word
+    for word (tests/_var4d_l1.py's docstring), and checks per loop the
+    iteration count, ``J0``, the final ``J`` and the gradient norms, the
+    increments, and the window's dot product with the boundary tables."""
     d = os.environ.get("WOOF_WRFDA471_4DVAR_L1_DIR")
     if not d:
         pytest.skip("WOOF_WRFDA471_4DVAR_L1_DIR is not set")
-    from woof.da.var.analysis import analyse
-
+    if os.environ.get("WOOF_TEST_VAR4D_BACKEND") != "cuda":
+        pytest.skip("the L1 gate runs the lane's window on CUDA (WOOF_TEST_VAR4D_BACKEND=cuda)")
     d = Path(d)
-    window = ("2008-02-05_12:00:00", "2008-02-05_18:00:00")
-    loops = {it: sorted((d / f"it{it}").glob("nl_d01_*")) for it in (1, 2)}
-    rsl = (d / "rsl.out.0000").read_text().splitlines()
-    want = [ln.split() for ln in rsl if ln.startswith(" minimize_cg ")]
-    model = _l1_window_model(d)
-    lines = []
-    analyse(d / "be.dat", [d / f"ob0{n}.ascii" for n in range(1, 8)], d / "fg", fgat=loops[1], time_window=window,
-            max_ext_its=2, var4d=f4.Var4D(model=model, var4d_bin=3600, nl_model=lambda it, s: o4.Trajectory(
-                slots=loops[it], states=model.trajectory(it))), write=lines.append)
-    got = [ln.split() for ln in lines if ln.startswith(" minimize_cg ")]
-    assert len(got) == len(want)
-    for g, w in zip(got, want):
-        assert g[:3] == w[:3]
-        assert float(g[3].replace("D", "e")) == pytest.approx(float(w[3].replace("D", "e")), rel=1e-12)
+    m = re.search(r"max_ext_its\s*=\s*(\d+)", (d / "namelist.input").read_text(), re.I)
+    loops = int(m.group(1)) if m else 1
+    env = dict(os.environ, WOOF_BACKEND="cuda", PYTHONPATH=str(ROOT), **STRICT)
+    done = subprocess.run([sys.executable, str(ROOT / "tests" / "_var4d_l1.py"), str(d), str(tmp_path),
+                           str(loops)], capture_output=True, text=True, env=env, timeout=7200)
+    assert done.returncode == 0, done.stderr[-4000:]
+    out = json.loads([ln for ln in done.stdout.splitlines() if ln.startswith("RESULT ")][-1][7:])
+    assert out["dot"]["rel"] < 1e-10
+    woof, wrfda = out["woof_cg"], out["wrfda_cg"]
+    for it in range(1, loops + 1):
+        w = [r for r in woof if r[0] == it]
+        f = [r for r in wrfda if r[0] == it]
+        assert w and f, f"loop {it}: no minimize_cg lines"
+        # J0 and |grad J0| (the innovations through woof's trajectory, L1_J0_RTOL), the final J
+        assert w[0][2] == pytest.approx(f[0][2], rel=L1_J0_RTOL[it - 1])
+        assert w[0][3] == pytest.approx(f[0][3], rel=L1_G0_RTOL[it - 1])
+        assert w[-1][2] == pytest.approx(f[-1][2], rel=L1_JF_RTOL[it - 1])
+        assert abs(len(w) - len(f)) <= L1_ITER_SLACK
+    for name, fields in out["increments"].items():
+        for k in ("U", "V", "T", "MU"):
+            assert fields[k]["corr"] > L1_INC_CORR, (name, k, fields[k])
+
+
+#: L1 tolerances, set from the first agreed runs (docs/var.md records them): two
+#: models from one start, not word-exact (the test's docstring).
+L1_J0_RTOL = (1e-2, 1e-2)
+L1_G0_RTOL = (1e-2, 1e-2)
+L1_JF_RTOL = (1e-2, 1e-2)
+L1_ITER_SLACK = 5
+L1_INC_CORR = 0.9
 
 
 # ------------------------------------------------------------ the L2-style OSSE on the real window

@@ -244,11 +244,24 @@ Differences from WRFDA (open questions, recorded in the plan):
 - In later loops woof recomputes the qc flags from the raw observations.
   WRFDA carries all of them except `fails_error_max` across loops
   (`da_get_innov_vector_sound.inc`).
-- woof does not add WRFDA's TL lateral-boundary perturbation in the var4d
-  transfer (`da_transfer_xatowrf.inc`). The rerun's boundaries are
-  `nl_model`'s responsibility.
-- One background-error scaling serves every loop. WRFDA can scale it per
-  loop (`var_scaling1..5`).
+- One background-error scaling serves every loop. WRFDA rescales per loop
+  (`da_scale_background_errors.inc:19-51`, `var_scaling1..5(it)` and
+  `len_scaling1..5(it)`), but their defaults are 1.0 in every loop
+  (`Registry/registry.var:307-316`), which reloads loop 1's errors: woof
+  refuses nothing here because it takes no scaling options.
+
+**Lateral boundaries** (a `WindowModel` on a specified domain,
+`lbc="wrfda"`, the default there). WRFDA perturbs the boundary tables even
+with `var4d_lbc = .false.`: `da_transfer_xatowrftl.inc:282` couples the TL
+start into the value tables (`da_transfer_wrftl_lbc_t0`), and
+`da_transform_vtoy.inc:75` sets each tendency table to `-g_b /
+interval_seconds` (`da_transfer_xatowrftl_lbc`, whose end perturbation is
+zero without `var4d_lbc`). `window4d.lbc_tl` / `lbc_ad` are that map and
+its adjoint. After each loop but the last, `analyse` adds the loop's own
+table perturbation to the tables, as `da_transfer_xatowrf.inc:665-727`
+does: into the `WindowModel`'s window, and onto the analysis state
+(`FirstGuess.lbc_increment`) for an `nl_model` with its own tables.
+`lbc="fixed"` keeps the tables unperturbed (not WRFDA's).
 
 The CLI runs one loop with the identity TL. The trajectory is the FGAT
 slots, and `--first-guess` is at the window's start:
