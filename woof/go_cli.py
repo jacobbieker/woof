@@ -1789,10 +1789,11 @@ def _run_forecast(plan: dict, digests: dict, *, explain: bool,
     progress = plan["run"] / "progress.json"
     if plan.get("domains", 1) > 1:
         progress = plan["run"] / "evidence" / "progress.json"
+    run_seconds = _forecast_seconds(plan)
     if not hosted:
         if early is None:
             _run_stage("forecast", command, explain=explain, progress=progress,
-                       observer=observer)
+                       observer=observer, run_seconds=run_seconds)
             return
         # THIS STAGE DRAWS, so it owns working stores exactly as the
         # render stage does and is swept on the same terms.  The early
@@ -1807,7 +1808,7 @@ def _run_forecast(plan: dict, digests: dict, *, explain: bool,
         stage_prefix = stage_scratch_prefix()
         try:
             _run_stage("forecast", command, explain=explain, progress=progress,
-                       observer=observer,
+                       observer=observer, run_seconds=run_seconds,
                        env={SCRATCH_PREFIX_ENV: stage_prefix})
         except GoStageFailed:
             _close_stage_scratch(plan, prefix=stage_prefix, stage="forecast",
@@ -3005,6 +3006,20 @@ def _progress_note(progress: Path | None) -> str:
     return (", " + ", ".join(parts)) if parts else ""
 
 
+def _forecast_seconds(plan: dict) -> float | None:
+    """The forecast length the heartbeat's ETA counts down to, or None.
+
+    Read from the experiment, never guessed: a config this cannot load
+    gets a heartbeat with no ETA, not a wrong one.
+    """
+
+    try:
+        from woof.experiment import load_experiment
+        return float(load_experiment(plan["config"]).run_seconds)
+    except Exception:  # the heartbeat never dies on its ETA
+        return None
+
+
 def _utc_now():
     """go's clock (naive UTC); a test puts its own here."""
 
@@ -3278,7 +3293,8 @@ def _run_stage(label: str, command: list[str], *, explain: bool,
                env: dict | None = None,
                shown: list[str] | None = None,
                stopped: Callable[[], bool] | None = None,
-               secondary_failure: Callable[[], bool] | None = None) -> None:
+               secondary_failure: Callable[[], bool] | None = None,
+               run_seconds: float | None = None) -> None:
     """Run one stage; replay everything it said and stop if it failed.
 
     Output is captured so the default is one line per stage, and
@@ -3393,6 +3409,10 @@ def _run_stage(label: str, command: list[str], *, explain: bool,
                               daemon=True)
     worker.start()
     next_beat = started + heartbeat_seconds
+    # The forecast's heartbeat carries an ETA once it has a pace
+    # (``run_seconds`` is the forecast length; the woof estimate model).
+    from woof.runtime_calibration import LiveEta
+    eta = LiveEta(run_seconds)
     try:
         while worker.is_alive():
             worker.join(timeout=0.2)
@@ -3408,6 +3428,8 @@ def _run_stage(label: str, command: list[str], *, explain: bool,
                 note = _progress_note(progress)
                 if watchdog is not None and watchdog.last is not None:
                     note = _heartbeat_note(watchdog.last.status) or note
+                if eta.run_seconds is not None:
+                    note += eta.note(_progress_payload(progress), now)
                 print(f"     .. {label}, {_elapsed_words(now - started)}"
                       f"{note}", flush=True)
                 # The same beat the terminal gets, as fields.  The
