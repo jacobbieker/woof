@@ -1,6 +1,6 @@
 """Make a WRFPLUS 4.7.1 oracle fixture for one TL/AD routine.
 
-    python tools/wrfplus_oracle/fixture.py advance_uv|advance_w|calc_coef_w|advance_mu_t|small_step|rk_stage|advect|bigstep|rhsph|coriolis|w_damp|lbc|lbc_final|diffusion|hdiff|diffusion2|vdiffusion2 \
+    python tools/wrfplus_oracle/fixture.py advance_uv|advance_w|calc_coef_w|advance_mu_t|small_step|rk_stage|advect|bigstep|rhsph|coriolis|w_damp|lbc|lbc_final|diffusion|hdiff|diffusion2|vdiffusion2|pdadv \
         --exe /mnt/NVME2/.../wrfplus_advance_uv \
         --runner "docker run --rm -v /mnt/NVME2/woof-work:/mnt/NVME2/woof-work wrf-oracle:u2404" \
         --out tests/data/wrfplus/advance_uv.npz
@@ -2498,13 +2498,137 @@ def _h2_fixture(exe, runner, seed, table) -> dict:
     return out
 
 
+#: pdadv: advect_scalar_pd (moist_adv_opt 1) on periodic and specified
+#: axes, h orders 3-6, v orders 2, 3, 4 and 6, with and without map
+#: factors.  Each case runs WRFPLUS's G_/A_ADVECT_SCALAR_PD on non-hybrid
+#: levels (WRFPLUS linearises the pre-hybrid routine: c1 = 1, c2 = 0) and
+#: WRF 4.7.1's nonlinear advect_scalar_pd on hybrid levels at the base and
+#: at +-h, +-2h along the perturbation (the TL by a fourth-order central
+#: difference there).
+PD_CASES = {
+    "periodic": dict(),
+    "periodic_msf_h6_v6": dict(has_msf=1, horder=6, vorder=6),
+    "periodic_h4_v4": dict(horder=4, vorder=4),
+    "spec": dict(spec=1),
+    "spec_msf_h3_v2": dict(spec=1, has_msf=1, horder=3, vorder=2),
+    "spec_h6_v4": dict(spec=1, horder=6, vorder=4),
+}
+PD_DIMS = dict(nz=7, ny=9, nx=10)
+PD_STEP = 1e-5
+PD_NAMES = ("q", "q0e", "ru_m", "rv_m", "ww_m", "muts", "mup0")
+
+
+def _pd_record(mode, geom, tr, pe, seed):
+    L = AdvLayout(geom)
+    flags = int(not geom.spec) | (int(not geom.spec) << 1) | (int(geom.spec) << 2)
+    head = np.array([mode, geom.nx, geom.ny, geom.nz, flags, geom.horder, geom.vorder, 1,
+                     0, 0], dtype=np.int32)
+    blob = head.tobytes() + np.array([1.0 / geom.dx, 1.0 / geom.dy, geom.dt]).astype(
+        "<f8").tobytes()
+    a3 = [L.pad3(tr["q"], False), L.pad3(pe["q"], False), L.pad3(tr["q0e"], False),
+          L.pad3(pe["q0e"], False), L.pad3(tr["ru_m"]), L.pad3(pe["ru_m"]),
+          L.pad3(tr["rv_m"]), L.pad3(pe["rv_m"]), L.pad3(tr["ww_m"]), L.pad3(pe["ww_m"]),
+          L.place3(seed)]
+    for a in a3:
+        blob += np.asarray(a, dtype="<f8").tobytes(order="F")
+    m = L.pad2(tr["msft"])
+    a2 = [L.pad2(tr["muts"]), L.pad2(pe["muts"]), L.pad2(tr["mub2d"]), L.pad2(tr["mup0"]),
+          L.pad2(pe["mup0"]), m, m, m, m, m, m]
+    for a in a2:
+        blob += np.asarray(a, dtype="<f8").tobytes(order="F")
+    for x in (tr["fnm"], tr["fnp"], tr["rdnw"], tr["c1h"], tr["c2h"]):
+        blob += np.concatenate([x, [0.0]]).astype("<f8").tobytes()
+    return blob, L
+
+
+def _pd_fold2(L, x, shape):
+    _, yi, xi = L._maps((1,) + tuple(shape))
+    out = np.zeros(shape)
+    np.add.at(out, np.ix_(yi, xi), x.T)
+    return out
+
+
+def _pd_run(exe, runner, blob):
+    with tempfile.TemporaryDirectory(dir=Path(exe).parent) as tmp:
+        fin, fout = Path(tmp) / "in.bin", Path(tmp) / "out.bin"
+        fin.write_bytes(blob)
+        subprocess.run(runner + [exe, str(fin), str(fout)], check=True)
+        return np.frombuffer(fout.read_bytes(), dtype="<f8")
+
+
+def pdadv(exe: str, runner: list[str], seed: int = 20261127) -> dict:
+    from woof.grad.wrfplus.pdadv import pd_shapes
+    out = {}
+    for n, (name, over) in enumerate(PD_CASES.items()):
+        geom = cases.pd_geometry(**PD_DIMS, **over)
+        geom.validate()
+        sh = pd_shapes(geom)
+        rng = np.random.default_rng(seed + 10 * n + 2)
+        prefix = f"{name}/"
+        out[prefix + "geometry"] = np.array(json.dumps(dataclasses.asdict(geom)))
+        for hybrid, label in ((False, "plain"), (True, "hybrid")):
+            tr = cases.pa_trajectory(geom, seed + 10 * n, hybrid=hybrid)
+            pe = cases.pa_perturbation(geom, seed + 10 * n + 1, traj=tr)
+            if not hybrid:   # WRFPLUS's routine has no c1/c2
+                tr["c1h"][...] = 1.0
+                tr["c2h"][...] = 0.0
+            # a periodic axis reads its end-face mass flux through woof's
+            # column n and WRF's halo column 0: make them one value
+            for d in (tr, pe):
+                if not geom.spec:
+                    d["ru_m"][:, :, -1] = d["ru_m"][:, :, 0]
+                    d["rv_m"][:, -1, :] = d["rv_m"][:, 0, :]
+            at = rng.standard_normal(sh["q"])
+            for k, v in tr.items():
+                out[f"{prefix}{label}/traj/{k}"] = v
+            for k, v in pe.items():
+                out[f"{prefix}{label}/pert/{k}"] = v
+            out[f"{prefix}{label}/seed/tend"] = at
+            if not hybrid:
+                blob, L = _pd_record(1, geom, tr, pe, at)
+                vals = _pd_run(exe, runner, blob)
+                n3, n2 = int(np.prod(L.s3)), int(np.prod(L.s2))
+                assert vals.size == 7 * n3 + 2 * n2, (vals.size, n3, n2)
+                x = [vals[i * n3:(i + 1) * n3].reshape(L.s3, order="F") for i in range(7)]
+                y = [vals[7 * n3 + i * n2:7 * n3 + (i + 1) * n2].reshape(L.s2, order="F")
+                     for i in range(2)]
+                w = f"{prefix}{label}/wrfplus/"
+                out[w + "tl_tend"] = L.take3(x[0], sh["tend"])
+                out[w + "tl_d_tend"] = L.take3(x[1], sh["tend"])
+                out[w + "ad_q"] = L.fold3(x[2], sh["q"], False)
+                out[w + "ad_q0e"] = L.fold3(x[3], sh["q0e"], False)
+                out[w + "ad_ru_m"] = L.fold3(x[4], sh["ru_m"])
+                out[w + "ad_rv_m"] = L.fold3(x[5], sh["rv_m"])
+                out[w + "ad_ww_m"] = L.fold3(x[6], sh["ww_m"])
+                out[w + "ad_muts"] = _pd_fold2(L, y[0], sh["muts"])
+                out[w + "ad_mup0"] = _pd_fold2(L, y[1], sh["mup0"])
+                continue
+            # WRF 4.7.1's nonlinear routine at the base and along pe
+            zero = {k: np.zeros_like(v) for k, v in pe.items()}
+            nl = {}
+            for s in (0, 1, -1, 2, -2):
+                t = {k: (v + s * PD_STEP * pe[k] if k in pe else v) for k, v in tr.items()}
+                blob, L = _pd_record(2, geom, t, zero, at)
+                vals = _pd_run(exe, runner, blob)
+                assert vals.size == int(np.prod(L.s3)), vals.size
+                nl[s] = L.take3(vals.reshape(L.s3, order="F"), sh["tend"])
+            w = f"{prefix}{label}/wrf/"
+            out[w + "nl_tend"] = nl[0]
+            out[w + "fd_tend"] = (8.0 * (nl[1] - nl[-1]) - (nl[2] - nl[-2])) / (12.0 * PD_STEP)
+            for s in (1, -1, 2, -2):
+                out[w + f"nl_tend_{s:+d}"] = nl[s]
+            out[w + "step"] = np.array(PD_STEP)
+    return out
+
+
 ROUTINES = {"advance_uv": advance_uv, "advance_w": advance_w,
             "calc_coef_w": calc_coef_w, "advance_mu_t": advance_mu_t,
             "small_step": small_step, "rk_stage": rk_stage,
             "advect": advect, "bigstep": bigstep, "rhsph": rhsph,
             "coriolis": coriolis, "w_damp": w_damp,
             "lbc": lbc, "lbc_final": lbc_final, "diffusion": diffusion,
-            "hdiff": hdiff, "diffusion2": diffusion2, "vdiffusion2": vdiffusion2}
+            "hdiff": hdiff, "diffusion2": diffusion2, "vdiffusion2": vdiffusion2,
+            "pdadv": pdadv}
 
 
 def main(argv=None) -> int:

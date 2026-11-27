@@ -61,10 +61,12 @@ STRICT = dict(GPUWM_WRF_EXACT="1", WOOF_WRF_EXACT_DIAGNOSTICS="1",
 # ring, a cold chain whose last step ends on its (last) interval's end,
 # which the primal serves from that interval, and moist states (qv, qc and
 # qr with qv's tables: qv's held capture and spec_bdy_final, flow_dep_bdy
-# for qc and qr), warm and as a cold mapped chain.
+# for qc and qr), warm and as a cold mapped chain; moist 2 is the same
+# with moist_adv_opt 1 (the positive-definite final stage).
 HOUR = (0.0, 3600.0)
 CASES = [(2, 1, 0, 0.0, HOUR, 0), (0, 3, 0, 0.0, HOUR, 0), (2, 2, 1, 3.0, HOUR, 0),
-         (0, 2, 0, 0.0, (0.0, 6.0), 0), (2, 1, 0, 0.0, HOUR, 1), (0, 2, 1, 3.0, HOUR, 1)]
+         (0, 2, 0, 0.0, (0.0, 6.0), 0), (2, 1, 0, 0.0, HOUR, 1), (0, 2, 1, 3.0, HOUR, 1),
+         (2, 1, 0, 0.0, HOUR, 2), (0, 2, 1, 3.0, HOUR, 2)]
 
 
 def _run(backend, body, tmp_path):
@@ -83,7 +85,7 @@ def _run(backend, body, tmp_path):
         "def build(warm=2, msf=0, shift=0.0, nx=20, ny=18, nz=8, relax=4, hill=400.0,\n"
         "          times=(0.0, 3600.0), attach=True, moist=0, drop=(), **over):\n"
         "    if moist:\n"
-        "        over.update(moist=True, moist_adv_opt=0)\n"
+        "        over.update(moist=True, moist_adv_opt=int(moist == 2))\n"
         "    cfg = H.make_config(nx, ny, nz, h_sca_adv_order=5, terrain_opt=1, specified=True,\n"
         "                        spec_zone=1, relax_zone=relax, spec_bdy_width=relax + 1, **over)\n"
         "    jj, ii = np.meshgrid(np.arange(ny), np.arange(nx), indexing='ij')\n"
