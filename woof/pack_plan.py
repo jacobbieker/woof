@@ -131,8 +131,7 @@ def jobs_for(configs: Sequence[str | Path], runner: Runner, *,
 
     jobs: list[Job] = []
     bases = run_names(configs)
-    jobs_seen: list[str] = []
-    for config in configs:
+    for stem, config in zip(bases, configs):
         est = estimate_config(config, runner, detected=detected,
                               prepared=prepared)
         try:
@@ -141,8 +140,6 @@ def jobs_for(configs: Sequence[str | Path], runner: Runner, *,
             peak = priced_reservation_bytes(load_experiment(config))
         except Exception:  # noqa: BLE001 - unpriced is an answer
             peak = None
-        stem = bases[len(jobs_seen)]
-        jobs_seen.append(stem)
         for i in range(max(1, int(copies))):
             name = stem if copies <= 1 else f"{stem}-{i + 1}"
             jobs.append(job_from_estimate(name, str(config), est, peak))
@@ -648,7 +645,11 @@ def main(args) -> int:
               "every option; pass --card NAME (from the table) or --runner "
               "FILE with the card's memory", file=sys.stderr)
         return 2
-    if args.gpus:
+    if args.gpus is not None:
+        if args.gpus < 1:
+            print(f"woof pack-plan: --gpus must be at least 1, not {args.gpus}",
+                  file=sys.stderr)
+            return 2
         from dataclasses import replace
 
         runner = replace(runner, gpus=int(args.gpus))

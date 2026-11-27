@@ -421,6 +421,14 @@ def test_unknown_card_memory_is_refused_with_a_message(
     assert "memory is unknown" in err and "--card" in err
 
 
+@pytest.mark.parametrize("gpus", ["0", "-1"])
+def test_gpus_below_one_is_a_usage_error(tmp_path, capsys, gpus):
+    cfg = _config(tmp_path, name="ens")
+    args = _parse(str(cfg), "--card", "a6000", f"--gpus={gpus}")
+    assert args.func(args) == 2
+    assert "--gpus must be at least 1" in capsys.readouterr().err
+
+
 def test_printed_packed_commands_carry_a_non_default_margin(linear):
     import shlex
 
