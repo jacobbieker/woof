@@ -988,6 +988,119 @@ not price that.
 - The stock-WRF interoperability receipts (serial and 12/24-rank MPI)
   were produced on Linux nodes ([WRF-INTEROP.md](WRF-INTEROP.md)).
 
+## How long a run takes: `woof estimate`
+
+`woof estimate CONFIG` says how long a run will take on a runner, as a
+low-high wall clock with a line per phase: prepare, kernel compile,
+model steps, radiation steps, output, restart writes and, with `--da`,
+data assimilation.
+
+```bash
+woof estimate my-run.toml                  # this box (nvidia-smi or the Apple chip)
+woof estimate my-run.toml --gpu "RTX 4090" # a card from the table
+woof estimate my-run.toml --runner big.toml --json
+woof estimate --list-cards
+```
+
+The runner is this box by default. `--card NAME` picks a row of the
+built-in table: RTX A6000, A100 40/80 GB, H100 PCIe/SXM, L4, L40S, RTX
+3080/3090/4080/4090/5070 Ti/5090, RTX PRO 6000 and Apple M1-M4 Max/Ultra/Pro.
+Every row cites its datasheet. A `[runner]` TOML overrides any field:
+`card`, `backend`, `vram_gib`, `bandwidth_gbs`, `sm_count`, `fp32_tflops`,
+`pinned_gbps`, `host_ram_gib`, `cpu_cores`, `gpus`, `slots_per_gpu` and
+`mps`.
+
+What it reads from the configuration: every domain's columns, levels,
+time step and window (nests start late and step on their own clock),
+the radiation cadence (`radt`), the physics rung, the history interval,
+the restart interval, the adaptive clock and the route (`[model] engine =
+"hex"` prices from the hex anchors). Doubling the levels doubles the step;
+halving the time step doubles the steps but not the radiation calls.
+
+Each figure carries a label:
+
+- **measured**: an anchor on the same card. A forecast in
+  `woof.runtime_estimate.ANCHORS` names its card, grid, time step and
+  contention, and links a receipt.
+- **scaled**: an anchor on another card, carried by memory bandwidth to
+  the power 0.78-1.0. The 0.78 is the measured RTX 5090 to RTX 5070 Ti
+  ratio (1.72x time for 2.0x bandwidth,
+  [manual 08](../manual/08-operational-envelope.md)); 1.0 is the pure
+  bandwidth limit. Metal goes through the measured A6000-to-M3 Max ratio,
+  1.09-4.13x depending on the kernel mix.
+- **calibrated**: this box's own measurement (`--calibrate`, below).
+- **substituted**: no anchor covers it. A rung with no anchor is priced as
+  the slowest rung that has one, and a card with no bandwidth as the
+  slowest card of its backend. The note says which.
+
+A radiation step costs 3.40-9.99x an ordinary one. That is the measured
+range on an A6000 (3.40 on the LES case, 9.99 on a 200x200 HRRR domain);
+the 450x360 receipt below measured 4.97. The bracket also carries the
+session-to-session variance measured on one box (up to 1.30x).
+
+Rates per column differ either side of 100,000 columns: below it, launch
+overhead sets the step time. The estimator prefers anchors on the same
+side of that line as the domain, and anchors measured on this tree's code
+over older ones. The RTX 5090 CONUS and RTX 4090 rows predate this code:
+scaled to the A6000, they price the 450x360 step below at 0.54-1.31 s,
+against 0.21 s measured.
+
+### Measured against predicted (RTX A6000)
+
+All three runs were `woof go` from fetch to the end, with no other compute
+process on the card (nvidia-smi sampled every 15 s). Receipts are in
+[receipts/runtime-estimate](receipts/runtime-estimate/).
+
+| run | predicted | measured |
+|---|---|---|
+| 450x360x49, 3 km, dt 7.5 s, 6 h, before the A6000 had an anchor above 100,000 columns | 14-32 min | 11.3 min (outside: the 18,000-column anchors over-price a loaded card) |
+| 600x480x49, 3 km, dt 7.5 s, 3 h (held out) | 10.4-17.4 min | 10.3 min (0.5 % under the low end) |
+| 300x240x49, 9 km, dt 45 s, KF, 6 h (held out) | 1.7-5.3 min | 2.2 min (inside) |
+
+The first row's run became the A6000 anchor above the launch bound; the
+two held-out runs were predicted before they ran. Above the bound the
+step scaled with the columns: 1.29 microseconds per column-step at 162,000
+columns and 1.28 at 288,000. `--calibrate 100` on the first configuration
+extrapolated 9.5 min of steps against the full run's 10.1.
+
+### Calibrating on your box
+
+```bash
+woof estimate my-run.toml --calibrate 50
+```
+
+This runs the configuration on this box (`woof go --products none`). It
+stops after `--warmup` steps (default 5) plus 50, extrapolates the
+measured step to the whole forecast, and prints measured against
+predicted. The calibration is stored in
+`~/.cache/woof/runtime-calibration.json` (`$WOOF_RUNTIME_CALIBRATION`
+moves it). Later estimates on this card, route and physics rung are
+priced from it and labelled calibrated; `--no-calibration` ignores it.
+With `--prepared-root DIR` it skips the fetch and preparation.
+
+### The ETA while it runs
+
+`woof go` prints a heartbeat while the forecast runs. Once the run has a
+pace, that line carries the share done and an ETA, extrapolated the
+same way `--calibrate` does:
+
+```
+     .. forecast, 4m 40s, RUNNING, 9000 model seconds, 42% of the forecast, ETA ~6.1 min
+```
+
+### Pricing runs that share a card
+
+`--copies N` prices N identical runs sharing the card. Admission by priced
+memory (multi-run's rule) may lower N. Two streamed HRRR forecasts on an
+RTX 4090 each ran 1.94x slower; four small members on an RTX PRO 6000 each
+ran 1.08x slower. A copy count no row measured is quoted between the
+measured trend and pure time-slicing, and labelled UNMEASURED.
+
+What it does not price: host CPU and network during the fetch (the
+preparation fit is from one test host), cumulus cost apart from the
+anchors that include it, the hex door's preparation, and the
+observation preprocessing of data assimilation.
+
 ## Throughput reference points (all measured, RTX 5090)
 
 | workload | rate |
