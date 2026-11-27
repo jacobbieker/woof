@@ -615,10 +615,12 @@ def h2_ad(adj_state, traj, adj, geom: H2Geometry):
     if geom.vertical:
         _h2_vrow_ad(adj_state, traj, adj, T, A, geom, dtype)
     else:
-        _h2_launch("h2_row_ad", dtype, sz["s1"] + sz["s2"] + sz["zx"] + sz["zy"] + sz[rz],
-                   (adj_state["tend"], T["s1"], T["s2"], T["zx"], T["zy"], T[rz])
-                   + _h2_row_passive(traj) + (A["s1"], A["s2"], A["zx"], A["zy"], A[rz]),
-                   geom)
+        row = (T["s1"], T["s2"], T["zx"], T["zy"], T[rz]) + _h2_row_passive(traj)
+        P = _pieces(geom, 6, dtype)
+        _h2_launch("h2_row_lin", dtype, int(np.prod(h2_shapes(geom)["tend"])),
+                   (adj_state["tend"],) + row + (P,), geom)
+        _h2_launch("h2_rowp_ad", dtype, sz["s1"] + sz["s2"] + sz["zx"] + sz["zy"] + sz[rz],
+                   (P,) + row + (A["s1"], A["s2"], A["zx"], A["zy"], A[rz]), geom)
     m = sz["rho"]
     if c in (1, 2):
         da = "defor11" if c == 1 else "defor22"
