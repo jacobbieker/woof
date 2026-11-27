@@ -1054,11 +1054,14 @@ process on the card (nvidia-smi sampled every 15 s). Receipts are in
 | run | predicted | measured |
 |---|---|---|
 | 450x360x49, 3 km, dt 7.5 s, 6 h, before the A6000 had an anchor above 100,000 columns | 14-32 min | 11.3 min (outside: the 18,000-column anchors over-price a loaded card) |
-| 600x480x49, 3 km, dt 7.5 s, 3 h (held out) | PRED_IND | MEAS_IND |
-| 300x240x49, 9 km, dt 45 s, KF, 6 h (held out) | PRED_AUS | MEAS_AUS |
+| 600x480x49, 3 km, dt 7.5 s, 3 h (held out) | 10.4-17.4 min | 10.3 min (0.5 % under the low end) |
+| 300x240x49, 9 km, dt 45 s, KF, 6 h (held out) | 1.7-5.3 min | 2.2 min (inside) |
 
 The first row's run became the A6000 anchor above the launch bound; the
-two held-out runs were predicted before they ran.
+two held-out runs were predicted before they ran. Above the bound the
+step scaled with the columns: 1.29 microseconds per column-step at 162,000
+columns and 1.28 at 288,000. `--calibrate 100` on the first configuration
+extrapolated 9.5 min of steps against the full run's 10.1.
 
 ### Calibrating on your box
 
