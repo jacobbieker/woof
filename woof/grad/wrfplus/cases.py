@@ -1411,3 +1411,141 @@ def h2_perturbation(geom, seed: int, dtype=np.float64) -> dict:
              "field": 0.4 if geom.row in ("t", "vt") else 6e-4}
     return {n: np.ascontiguousarray(scale[n] * rng.standard_normal(sh[n]), dtype=dtype)
             for n in h2_active(geom)}
+
+
+def kc_geometry(nz=7, ny=8, nx=9, **overrides):
+    from .diffusion import KCGeometry
+    base = dict(nz=nz, ny=ny, nx=nx, rdx=1.0 / 3000.0, rdy=1.0 / 2500.0, dx=3000.0,
+                dy=2500.0, c_s=0.25, dt=10.0, mix_upper_bound=0.1)
+    base.update(overrides)
+    return KCGeometry(**base)
+
+
+def _kc_wrap(n, bounded):
+    """Mass-point neighbours i + 1 as wrf_ix / wrf_iy read them."""
+    i = np.arange(n) + 1
+    return np.minimum(i, n - 1) if bounded else i % n
+
+
+def _kc_strain(geom, d11, d22, d12):
+    jp, ip = _kc_wrap(geom.ny, geom.boundary_y), _kc_wrap(geom.nx, geom.boundary_x)
+    cross = 0.25 * (d12 + d12[:, jp, :] + d12[:, :, ip] + d12[:, jp][:, :, ip])
+    return np.sqrt(0.25 * (d11 - d22) ** 2 + cross ** 2)
+
+
+def _kc_slopes(geom, ph):
+    """|zx| and |zy| averaged as smag2d_km's slope limiter (sx, sy before
+    rdzw and dxm), and rdzw, in binary64."""
+    nz, ny, nx = geom.nz, geom.ny, geom.nx
+    z = ph / 9.81
+    zx = np.zeros((nz + 1, ny, nx + 1))
+    for f in range(nx + 1):
+        if geom.boundary_x and f <= 0:
+            continue
+        g = min(f, nx - 1) if geom.boundary_x else f
+        a, b = (g % nx), ((g - 1) % nx)
+        zx[:, :, f] = geom.rdx * (z[:, :, a] - z[:, :, b])
+        if not geom.boundary_x and geom.seam_cold and f % nx == 0:
+            zx[nz, :, f] = 0.0
+    zy = np.zeros((nz + 1, ny + 1, nx))
+    for f in range(ny + 1):
+        if geom.boundary_y and f <= 0:
+            continue
+        g = min(f, ny - 1) if geom.boundary_y else f
+        a, b = (g % ny), ((g - 1) % ny)
+        zy[:, f, :] = geom.rdy * (z[:, a, :] - z[:, b, :])
+        if not geom.boundary_y and geom.seam_cold and f % ny == 0:
+            zy[nz, f, :] = 0.0
+    ax, ay = np.abs(zx), np.abs(zy)
+    sx = 0.25 * (ax[:-1, :, :-1] + ax[:-1, :, 1:] + ax[1:, :, :-1] + ax[1:, :, 1:])
+    sy = 0.25 * (ay[:-1, :-1, :] + ay[:-1, 1:, :] + ay[1:, :-1, :] + ay[1:, 1:, :])
+    rdzw = 1.0 / np.diff(z, axis=0)
+    return sx, sy, rdzw
+
+
+def _kc_inner(geom, shape):
+    inner = np.ones(shape, dtype=bool)
+    if geom.boundary_x:
+        inner[..., 0] = inner[..., -1] = False
+    if geom.boundary_y:
+        inner[..., 0, :] = inner[..., -1, :] = False
+    return inner
+
+
+def kc_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False,
+                  steep: bool = False, stable: bool = False) -> dict:
+    """Host state of the diff_opt 2 coefficients (smag2d_km, calculate_N2,
+    smag_km): deformations spread over 1e-4 to 0.1 /s, winds of 10 m/s and
+    w of 0.5 m/s, a base geopotential rising 4e3 per level (``hybrid``
+    stretches it) over terrain (``steep``: slopes near 0.3, so smag2d_km's
+    alpha leaves its floor 1), ph' of 20, theta - 300 of 5 K over a base
+    rising 3 K per level, an unstable BN2 (so smag_km's max(0, .) never
+    clamps; ``stable`` makes about half the points strongly stable, BN2 =
+    1 /s2, so max(0, .) clamps there and smag_km's floor 1e-6 l^2 takes
+    over, well clear of either switch) and map factors near 1.  No point lies within 3% of smag2d_km's
+    10 mlen cap, its def_limit switch or alpha's floor."""
+    from .diffusion import K2_PASSIVE, K3_ACTIVE, K3_PASSIVE, N2_ACTIVE, kc_shapes
+    rng = np.random.default_rng(seed)
+    sh = kc_shapes(geom)
+    nz, ny, nx = geom.nz, geom.ny, geom.nx
+    out = {}
+    for n in ("defor11", "defor22", "defor12"):
+        out[n] = 10.0 ** rng.uniform(-4.0, -1.0, sh[n]) * rng.standard_normal(sh[n])
+    out["u"] = 10.0 + 5.0 * rng.standard_normal(sh["u"])
+    out["v"] = -4.0 + 5.0 * rng.standard_normal(sh["v"])
+    out["w"] = 0.5 * rng.standard_normal(sh["w"])
+    dz = 4.0e3 * (1.0 + (0.3 * rng.uniform(-1, 1, nz + 1) if hybrid else 0.0))
+    k = np.cumsum(np.concatenate([[0.0], np.broadcast_to(dz, (nz + 1,))[:nz]]))
+    jj, ii = np.meshgrid(np.arange(ny), np.arange(nx), indexing="ij")
+    amp = 9.81 * (300.0 if steep else 10.0)
+    terrain = amp * (np.sin(2 * np.pi * ii / max(nx, 1) + rng.uniform(0, 6))
+                     + np.cos(2 * np.pi * jj / max(ny, 1) + rng.uniform(0, 6))
+                     + 0.5 * rng.standard_normal((ny, nx)))
+    taper = (1.0 - np.arange(nz + 1) / (nz + 1))[:, None, None]
+    out["phb"] = k[:, None, None] + taper * terrain[None] + 50.0 * rng.standard_normal(sh["phb"])
+    out["php"] = 20.0 * rng.standard_normal(sh["php"])
+    for n in ("msft", "msfu", "msfv"):
+        out[n] = 1.0 + 0.02 * rng.standard_normal(sh[n])
+    out["thb"] = 300.0 + 3.0 * np.arange(nz)[:, None, None] + 0.5 * rng.standard_normal(sh["thb"])
+    out["thp"] = (out["thb"] - 300.0) + 5.0 + 2.0 * rng.standard_normal(sh["thp"])
+    out["thb"] = np.full(sh["thb"], 300.0) if not hybrid else out["thb"]
+    out["bn2"] = -(1e-5 + 1e-4 * rng.uniform(size=sh["bn2"]))
+    if stable:
+        out["bn2"] = np.where(rng.uniform(size=sh["bn2"]) < 0.5, 1.0, out["bn2"])
+    inner = _kc_inner(geom, sh["bn2"])
+    msft = out["msft"]
+    mlen = np.sqrt(geom.dx / msft * geom.dy / msft)
+    cap = 10.0 * mlen
+    lim = np.maximum(10.0 / mlen, 1e-3)
+    for _ in range(400):
+        sx, sy, rdzw = _kc_slopes(geom, out["phb"] + out["php"])
+        root = np.sqrt((sx * rdzw * geom.dx / msft) ** 2 + (sy * rdzw * geom.dy / msft) ** 2)
+        strain = _kc_strain(geom, out["defor11"], out["defor22"], out["defor12"])
+        km = geom.c_s ** 2 * mlen ** 2 * strain
+        near = inner & ((np.abs(km / cap - 1) < 0.03) | (np.abs(strain / lim - 1) < 0.03))
+        steep_near = inner & (np.abs(root - 1) < 0.03)
+        if not near.any() and not steep_near.any():
+            break
+        for n in ("defor11", "defor22"):
+            out[n] = np.where(near, out[n] * 1.3, out[n])
+        if steep_near.any():
+            out["php"] = out["php"] + np.where(
+                np.concatenate([steep_near, steep_near[-1:]]), 300.0, 0.0) \
+                * rng.standard_normal(sh["php"])
+    else:
+        raise RuntimeError("kc_trajectory: could not clear the switches' neighbourhoods")
+    keep = K3_ACTIVE + K3_PASSIVE + K2_PASSIVE + N2_ACTIVE + ("thb",) + \
+        ("xkmh", "xkhh", "xkmv", "xkhv")
+    for n in ("xkmh", "xkhh", "xkmv", "xkhv"):
+        out[n] = np.zeros(sh[n])
+    return {n: np.ascontiguousarray(out[n], dtype=dtype) for n in dict.fromkeys(keep)}
+
+
+def kc_perturbation(geom, seed: int, dtype=np.float64) -> dict:
+    from .diffusion import K3_ACTIVE, kc_shapes
+    rng = np.random.default_rng(seed)
+    sh = kc_shapes(geom)
+    scale = {"defor11": 2e-4, "defor22": 2e-4, "defor12": 2e-4, "u": 1.0, "v": 1.0,
+             "w": 0.1, "php": 5.0, "bn2": 1e-5, "thp": 0.4}
+    return {n: np.ascontiguousarray(scale[n] * rng.standard_normal(sh[n]), dtype=dtype)
+            for n in K3_ACTIVE + ("thp",)}

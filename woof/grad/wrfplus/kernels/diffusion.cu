@@ -11,6 +11,12 @@
 //                WRF smag2d_km at diff_opt 1 (no slope limiter), with the
 //                cold-zero outer row of a bounded axis.
 //
+// and of the diff_opt 2 stages (P3a items 2b-1 to 2b-3; the h2_* kernels):
+// horizontal_diffusion_2's rows, vertical_diffusion_2 with the isfflx 0-2
+// surface fluxes, and the coefficients wrf_smag2d_km (km_opt 4 with the
+// terrain-slope limiter), the dry wrf_calc_n2 and wrf_smag3d_km (km_opt 3),
+// each followed by wrf_smag_km_bc as the model runs them.
+//
 // The oracle is WRFPLUS 4.7.1 g_/a_compute_diff_metrics +
 // g_/a_cal_deform_and_div and G_/A_SMAG2D_KM; see
 // docs/dev/P3A-WRF-DRYCORE-ADJOINT.md.
@@ -914,6 +920,9 @@ extern "C" __global__ void hd_ad(const wreal* __restrict__ atend, const wreal* _
 #define H2_RZ 14
 #define H2_S1 15
 #define H2_S2 16
+#define H2_D22 17
+#define H2_RW 18
+#define H2_BN 19
 
 #define H2O_ZX 1
 #define H2O_ZY 2
@@ -927,6 +936,11 @@ extern "C" __global__ void hd_ad(const wreal* __restrict__ atend, const wreal* _
 #define H2O_H1 10
 #define H2O_H2 11
 #define H2O_TEND 12
+#define H2O_KMH 13
+#define H2O_KHH 14
+#define H2O_KMV 15
+#define H2O_KHV 16
+#define H2O_BN2 17
 
 #define H2S_MET 1
 #define H2S_RHO 2
@@ -935,6 +949,9 @@ extern "C" __global__ void hd_ad(const wreal* __restrict__ atend, const wreal* _
 #define H2S_HS 5
 #define H2S_ROW 6
 #define H2S_VROW 7
+#define H2S_KM2 8     // smag2d_km (diff_opt 2, km_opt 4)
+#define H2S_N2 9      // calculate_N2 (dry)
+#define H2S_KM3 10    // smag_km (km_opt 3)
 
 // rows: 1 u, 2 v, 3 w, 0 a scalar (theta is strict thp = theta - 300);
 // vertical_diffusion_2's rows: 4 u, 5 v, 6 w, 7 a scalar
@@ -992,10 +1009,19 @@ struct H2Src {
     const wreal* hfx;
     const wreal* qfx;
     const wreal* thb;
+    const wreal* db;      // the coefficients' defor22
+    const wreal* dbd;
+    const wreal* rw;      // the coefficients' stored rdzw (s.rz is then rdz)
+    const wreal* rwd;
+    const wreal* bn;      // smag_km's BN2
+    const wreal* bnd;
     wreal cd0, hflux;
-    int sfc, heat, full, qflux;
+    int sfc, heat, full, qflux, vint;
+    wreal dxs, dys, cs, pr, dt, mub;   // the coefficients' scalars
+    int iso;
     wreal rdx, rdy, cf1, cf2, cf3;
     int nz, ny, nx, bx, by, row, moist;
+    int seam_x, seam_y;   // WRF's cold seam slope at the top w level
     int mode;     // 1: tangents from the *d arrays; 0: the seed's; 2: none
     int which;    // the seeded input (H2_*)
     size_t at;    // and its word
@@ -1013,10 +1039,17 @@ static __device__ H2Src h2_src(wreal rdx, wreal rdy, wreal cf1, wreal cf2, wreal
     s.s1 = s.s1d = s.s2 = s.s2d = nullptr;
     s.msft = s.msfu = s.msfv = s.fnm = s.fnp = s.dn = s.dnw = nullptr;
     s.ustm = s.hfx = s.qfx = s.thb = nullptr;
+    s.db = s.dbd = s.rw = s.rwd = s.bn = s.bnd = nullptr;
     s.cd0 = s.hflux = (wreal)0;
     s.sfc = s.heat = s.full = s.qflux = 0;
+    s.vint = 1;
+    s.dxs = s.dys = s.cs = s.pr = s.dt = s.mub = (wreal)0;
+    s.iso = 0;
     s.rdx = rdx; s.rdy = rdy; s.cf1 = cf1; s.cf2 = cf2; s.cf3 = cf3;
-    s.bx = bx; s.by = by; s.nz = nz; s.ny = ny; s.nx = nx; s.row = row; s.moist = moist;
+    // the primal's boundary flags (smag2d.cu wrf_grid): 2 is a periodic
+    // axis with WRF's cold seam slope at the top w level
+    s.bx = bx & 1; s.by = by & 1; s.seam_x = bx == 2; s.seam_y = by == 2;
+    s.nz = nz; s.ny = ny; s.nx = nx; s.row = row; s.moist = moist;
     s.mode = mode; s.which = 0; s.at = 0;
     return s;
 }
@@ -1073,6 +1106,9 @@ static __device__ Dl h2_zx_ev(const H2Src& s, int kw, int j, int iface)
 {
     if (s.bx && iface <= 0) return dl((wreal)0, (wreal)0);
     if (s.bx && iface >= s.nx) iface = s.nx - 1;
+    // smag2d.cu wrf_zx: a periodic seam's top w level keeps WRF's cold zero
+    // (RunConfig.diff_metrics_seam_slope off)
+    if (s.seam_x && kw >= s.nz && df_per(iface, s.nx) == 0) return dl((wreal)0, (wreal)0);
     int jc = h2_iy(s, j), ip = h2_ix(s, iface), im = h2_ix(s, iface - 1);
     kw = max(0, min(kw, s.nz));
     size_t a = R3(kw, jc, ip, s.ny, s.nx), b = R3(kw, jc, im, s.ny, s.nx);
@@ -1086,6 +1122,7 @@ static __device__ Dl h2_zy_ev(const H2Src& s, int kw, int jface, int i)
 {
     if (s.by && jface <= 0) return dl((wreal)0, (wreal)0);
     if (s.by && jface >= s.ny) jface = s.ny - 1;
+    if (s.seam_y && kw >= s.nz && df_per(jface, s.ny) == 0) return dl((wreal)0, (wreal)0);
     int ic = h2_ix(s, i), jp = h2_iy(s, jface), jm = h2_iy(s, jface - 1);
     kw = max(0, min(kw, s.nz));
     size_t a = R3(kw, jp, ic, s.ny, s.nx), b = R3(kw, jm, ic, s.ny, s.nx);
@@ -1529,7 +1566,10 @@ static __device__ Dl h2_vh3(const H2Src& s, int kw, int j, int i)
 
 static __device__ Dl h2_vrow_s(const H2Src& s, int k, int j, int i, Dl t)
 {
-    t = t + ((DF_G * (h2_vh3(s, k + 1, j, i) - h2_vh3(s, k, j, i))) / s.dnw[k]);
+    // vint 0: km_opt 4's theta row, the surface heat flux alone
+    // (smag2d_km leaves xkhv = 0 and launch_wrf_smag2d_vertical runs no
+    // interior scalar row)
+    if (s.vint) t = t + ((DF_G * (h2_vh3(s, k + 1, j, i) - h2_vh3(s, k, j, i))) / s.dnw[k]);
     if (k != 0) return t;
     size_t h = (size_t)j * s.nx + i;
     if (s.heat == 1) {          // hflux CASE(0,2): the prescribed kinematic flux
@@ -1553,6 +1593,207 @@ static __device__ Dl h2_vrow(const H2Src& s, int k, int j, int i, Dl t)
     return h2_vrow_s(s, k, j, i, t);
 }
 
+
+// ---- the diff_opt 2 coefficients (smag2d.cu wrf_smag2d_km, wrf_calc_n2 and
+// wrf_smag3d_km, then wrf_smag_km_bc), on the stored metrics of stage met:
+// zx, zy, rdz (s.rz) and rdzw (s.rw).
+
+static __device__ __forceinline__ float wabs(float a) { return fabsf(a); }
+static __device__ __forceinline__ double wabs(double a) { return fabs(a); }
+static __device__ __forceinline__ float wmax(float a, float b) { return fmaxf(a, b); }
+static __device__ __forceinline__ double wmax(double a, double b) { return fmax(a, b); }
+// REAL**REAL: the float build takes the primal's libm words (gfk_pow,
+// glibc_flt32.cuh, prepended to this unit by the loader)
+static __device__ __forceinline__ float wpow(float a, float b) { return gfk_pow(a, b); }
+static __device__ __forceinline__ double wpow(double a, double b) { return pow(a, b); }
+
+// |a|: derivative 0 at 0 (a subgradient choice, as WRFPLUS's ABS)
+static __device__ __forceinline__ Dl h2_abs(Dl a)
+{
+    return dl(wabs(a.v), a.v > (wreal)0 ? a.d : (a.v < (wreal)0 ? -a.d : (wreal)0));
+}
+// a**p (a >= 0): derivative 0 at 0
+static __device__ __forceinline__ Dl h2_pow(Dl a, wreal p)
+{
+    wreal y = wpow(a.v, p);
+    return dl(y, a.v > (wreal)0 ? wdiv((p * y) * a.d, a.v) : (wreal)0);
+}
+// fmaxf / fminf: the clamped side carries its own tangent
+static __device__ __forceinline__ Dl h2_max(Dl a, Dl b)
+{
+    return (a.v >= b.v || b.v != b.v) ? a : b;
+}
+static __device__ __forceinline__ Dl h2_min(Dl a, Dl b)
+{
+    return (a.v <= b.v || b.v != b.v) ? a : b;
+}
+static __device__ __forceinline__ Dl h2_min(Dl a, wreal b)
+{
+    return (a.v <= b || b != b) ? a : dl(b, (wreal)0);
+}
+
+static __device__ __forceinline__ bool h2_outer(const H2Src& s, int j, int i)
+{
+    return (s.bx && (i == 0 || i == s.nx - 1)) || (s.by && (j == 0 || j == s.ny - 1));
+}
+// a mass field read as smag2d.cu wrf_d (clamped or periodic)
+static __device__ __forceinline__ Dl h2_mass(const H2Src& s, int id, const wreal* a,
+                                             const wreal* ad, int k, int j, int i)
+{
+    return h2_in(s, id, a, ad, R3(k, h2_iy(s, j), h2_ix(s, i), s.ny, s.nx));
+}
+static __device__ __forceinline__ Dl h2_rw(const H2Src& s, int k, int j, int i)
+{
+    return h2_mass(s, H2_RW, s.rw, s.rwd, max(0, min(k, s.nz - 1)), j, i);
+}
+// D12 at the mass point: the four-corner average
+static __device__ __forceinline__ Dl h2_d12m(const H2Src& s, int k, int j, int i)
+{
+    return (wreal)0.25f * (((h2_mass(s, H2_D12, s.d12, s.d12d, k, j, i)
+                             + h2_mass(s, H2_D12, s.d12, s.d12d, k, j + 1, i))
+                            + h2_mass(s, H2_D12, s.d12, s.d12d, k, j, i + 1))
+                           + h2_mass(s, H2_D12, s.d12, s.d12d, k, j + 1, i + 1));
+}
+
+// wrf_smag2d_km (diff_opt 2: the slope limiter) then wrf_smag_km_bc.
+// Kink conventions (woof's, in the style of WRFPLUS's generated code; the
+// oracle is FD of WRF's nonlinear routine, which grades off the kinks
+// only): no derivative where the coefficient takes the 10 * mlen cap or
+// alpha its floor 1; sqrt' and |.|' = 0 at 0 (so a rest base state with
+// zero deformation has a zero TL); the def_limit switch is a branch, not
+// differentiated.
+static __device__ int h2_km2(const H2Src& s, int k, int j, int i, Dl* out)
+{
+    if (h2_outer(s, j, i)) {
+        out[0] = out[1] = dl((wreal)0, (wreal)0);
+        return 2;
+    }
+    Dl d11 = h2_mass(s, H2_DA, s.da, s.dad, k, j, i);
+    Dl d22 = h2_mass(s, H2_D22, s.db, s.dbd, k, j, i);
+    Dl d12 = h2_d12m(s, k, j, i);
+    Dl dd = d11 - d22;
+    Dl strain = h2_sqrt((wreal)0.25f * (dd * dd) + d12 * d12);
+    wreal map = s.msft[(size_t)j * s.nx + i];
+    wreal dxm = wdiv(s.dxs, map), dym = wdiv(s.dys, map);
+    wreal mlen = wsqrt(wdiv(dxm * s.dys, map));
+    Dl km = (((s.cs * s.cs) * mlen) * mlen) * strain;
+    wreal cap = (wreal)10.0f * mlen;
+    if (km.v > cap) km = dl(cap, (wreal)0);
+    Dl rw = h2_rw(s, k, j, i);
+    Dl sx = (((wreal)0.25f * (((h2_abs(h2_zx(s, k, j, i)) + h2_abs(h2_zx(s, k, j, i + 1)))
+                               + h2_abs(h2_zx(s, k + 1, j, i)))
+                              + h2_abs(h2_zx(s, k + 1, j, i + 1))))
+             * rw) * dxm;
+    Dl sy = (((wreal)0.25f * (((h2_abs(h2_zy(s, k, j, i)) + h2_abs(h2_zy(s, k, j + 1, i)))
+                               + h2_abs(h2_zy(s, k + 1, j, i)))
+                              + h2_abs(h2_zy(s, k + 1, j + 1, i))))
+             * rw) * dym;
+    Dl root = h2_sqrt(sx * sx + sy * sy);
+    Dl alpha = root.v > (wreal)1 ? root : dl((wreal)1, (wreal)0);
+    wreal def_limit = wmax(wdiv((wreal)10.0f, mlen), (wreal)1.0e-3);
+    km = strain.v > def_limit ? km / (alpha * alpha) : km / alpha;
+    out[0] = km;
+    out[1] = km / s.pr;
+    return 2;
+}
+
+// wrf_n2_theta (use_theta_m 0): the 3-D base plus thp
+static __device__ __forceinline__ Dl h2_theta(const H2Src& s, int k, int j, int i)
+{
+    size_t h = R3(k, h2_iy(s, j), h2_ix(s, i), s.ny, s.nx);
+    return s.thb[h] + h2_in(s, H2_F, s.f, s.fd, h);
+}
+
+// wrf_calc_n2, dry (no saturated branch, qv = qtot = 0, their zero terms
+// kept as the primal forms them): the centred interior, the MARTA surface
+// form and BN2(ktf) = BN2(ktf-1); zero on a bounded axis's outer row.
+static __device__ Dl h2_n2(const H2Src& s, int k, int j, int i)
+{
+    if (h2_outer(s, j, i)) return dl((wreal)0, (wreal)0);
+    int ke = (k == s.nz - 1 && s.nz > 1) ? s.nz - 2 : k;
+    Dl th_c = h2_theta(s, ke, j, i);
+    Dl zero = dl((wreal)0, (wreal)0);
+    if (ke > 0) {
+        Dl tmpdz = (wreal)1.0f / h2_rdz(s, ke, j, i) + (wreal)1.0f / h2_rdz(s, ke + 1, j, i);
+        Dl th_p = h2_theta(s, ke + 1, j, i);
+        Dl th_m = h2_theta(s, ke - 1, j, i);
+        return DF_G * (((((th_p - th_m) / th_c) / tmpdz)
+                        + (((wreal)1.61 * (zero - zero)) / tmpdz))
+                       - ((zero - zero) / tmpdz));
+    }
+    Dl th_p = h2_theta(s, 1, j, i);
+    wreal z = (wreal)0;
+    wreal qvsfc = ((s.cf1 * z) + (s.cf2 * z)) + (s.cf3 * z);
+    Dl tmpdz = (wreal)1.0f / h2_rw(s, 0, j, i);
+    return DF_G * (((((th_p - th_c) / th_c) / tmpdz)
+                    + (((wreal)1.61 * dl(z - qvsfc, (wreal)0)) / tmpdz))
+                   - ((zero - zero) / tmpdz));
+}
+
+// wrf_smag3d_km (the GPUWM_WRF_EXACT_C_DIFFUSION statements) then
+// wrf_smag_km_bc on both pairs.  Kink conventions (woof's; see
+// h2_km2): none where
+// max(0, D^2 - N^2/Pr) clamps, at a floor (1e-6 l^2) or cap
+// (mix_upper_bound l^2 / dt) the coefficient takes; pow' = 0 at 0.
+static __device__ int h2_km3(const H2Src& s, int k, int j, int i, Dl* out)
+{
+    if (h2_outer(s, j, i)) {
+        out[0] = out[1] = out[2] = out[3] = dl((wreal)0, (wreal)0);
+        return 4;
+    }
+    Dl d11 = h2_mass(s, H2_DA, s.da, s.dad, k, j, i);
+    Dl d22 = h2_mass(s, H2_D22, s.db, s.dbd, k, j, i);
+    Dl rw = h2_rw(s, k, j, i);
+    Dl d33 = ((wreal)2.0f * (h2_in(s, H2_W, s.w, s.wd, R3(k + 1, j, i, s.ny, s.nx))
+                             - h2_in(s, H2_W, s.w, s.wd, R3(k, j, i, s.ny, s.nx)))) * rw;
+    Dl d12 = h2_d12m(s, k, j, i);
+    Dl d13 = (wreal)0.25f * (((h2_defor13(s, k + 1, j, i) + h2_defor13(s, k, j, i))
+                              + h2_defor13(s, k + 1, j, i + 1)) + h2_defor13(s, k, j, i + 1));
+    Dl d23 = (wreal)0.25f * (((h2_defor23(s, k + 1, j, i) + h2_defor23(s, k, j, i))
+                              + h2_defor23(s, k + 1, j + 1, i)) + h2_defor23(s, k, j + 1, i));
+    Dl def2 = (((((wreal)0.5f * (((d11 * d11) + (d22 * d22)) + (d33 * d33))) + (d12 * d12))
+                + (d13 * d13)) + (d23 * d23));
+    Dl x = def2 - h2_mass(s, H2_BN, s.bn, s.bnd, k, j, i) / s.pr;
+    Dl tmp = h2_pow(x.v > (wreal)0 ? x : dl((wreal)0, (wreal)0), (wreal)0.5f);
+    wreal map = s.msft[(size_t)h2_iy(s, j) * s.nx + h2_ix(s, i)];
+    wreal area = wdiv(wdiv(s.dxs, map) * s.dys, map);
+    wreal cs2 = s.cs * s.cs;
+    Dl kmh, kmv, khh, khv;
+    if (s.iso == 0) {
+        wreal mh = wsqrt(area);
+        Dl mv = (wreal)1.0f / rw;
+        wreal caph = wdiv((s.mub * mh) * mh, s.dt);
+        kmh = h2_max(((cs2 * mh) * mh) * tmp, dl(((wreal)1.0e-6 * mh) * mh, (wreal)0));
+        kmh = h2_min(kmh, caph);
+        kmv = h2_max(((cs2 * mv) * mv) * tmp, ((wreal)1.0e-6 * mv) * mv);
+        Dl capv = ((s.mub * mv) * mv) / s.dt;
+        kmv = h2_min(kmv, capv);
+        khh = h2_min(kmh / s.pr, caph);
+        khv = h2_min(kmv / s.pr, capv);
+    } else {
+        Dl deltas = h2_pow(area / rw, (wreal)0.33333333);
+        kmh = h2_max(((cs2 * deltas) * deltas) * tmp, ((wreal)1.0e-6 * deltas) * deltas);
+        wreal caph = wdiv(wdiv(wdiv(s.mub * s.dxs, map) * s.dys, map), s.dt);
+        kmh = h2_min(kmh, caph);
+        Dl capv = ((s.mub / rw) / rw) / s.dt;
+        kmv = h2_min(kmh, capv);
+        khh = h2_min(kmh / s.pr, caph);
+        khv = h2_min(kmv / s.pr, capv);
+    }
+    out[0] = kmh;
+    out[1] = khh;
+    out[2] = kmv;
+    out[3] = khv;
+    return 4;
+}
+
+static __device__ __forceinline__ int h2_coef(const H2Src& s, int stage, int k, int j, int i,
+                                              Dl* out)
+{
+    if (stage == H2S_KM2) return h2_km2(s, k, j, i, out);
+    return h2_km3(s, k, j, i, out);
+}
+
 // ---- dispatch
 
 static __device__ Dl h2_eval(const H2Src& s, int o, int k, int j, int i)
@@ -1569,6 +1810,7 @@ static __device__ Dl h2_eval(const H2Src& s, int o, int k, int j, int i)
     case H2O_T23: return h2_t23_ev(s, k, j, i);
     case H2O_H1: return h2_h1_ev(s, k, j, i);
     case H2O_H2: return h2_h2_ev(s, k, j, i);
+    case H2O_BN2: return h2_n2(s, k, j, i);
     default: break;
     }
     if (s.row == 1) return h2_row_u(s, k, j, i);
@@ -1611,6 +1853,10 @@ static __device__ int h2_outputs(const H2Src& s, int stage, int* outs)
     case H2S_TUV: outs[0] = H2O_TA; outs[1] = H2O_T12; return 2;
     case H2S_TW: outs[0] = H2O_T13; outs[1] = H2O_T23; return 2;
     case H2S_HS: outs[0] = H2O_H1; outs[1] = H2O_H2; return 2;
+    case H2S_KM2: outs[0] = H2O_KMH; outs[1] = H2O_KHH; return 2;
+    case H2S_N2: outs[0] = H2O_BN2; return 1;
+    case H2S_KM3: outs[0] = H2O_KMH; outs[1] = H2O_KHH; outs[2] = H2O_KMV; outs[3] = H2O_KHV;
+        return 4;
     default: outs[0] = H2O_TEND; return 1;
     }
 }
@@ -1630,6 +1876,16 @@ static __device__ int h2_inputs(const H2Src& s, int stage, int* ids)
         ids[0] = H2_F; ids[1] = H2_K; ids[2] = H2_RHO; ids[3] = H2_ZX; ids[4] = H2_ZY;
         ids[5] = H2_RZ;
         return 6;
+    case H2S_KM2:
+        ids[0] = H2_DA; ids[1] = H2_D22; ids[2] = H2_D12; ids[3] = H2_ZX; ids[4] = H2_ZY;
+        ids[5] = H2_RW;
+        return 6;
+    case H2S_N2: ids[0] = H2_F; ids[1] = H2_RZ; ids[2] = H2_RW; return 3;
+    case H2S_KM3:
+        ids[0] = H2_DA; ids[1] = H2_D22; ids[2] = H2_D12; ids[3] = H2_U; ids[4] = H2_V;
+        ids[5] = H2_W; ids[6] = H2_ZX; ids[7] = H2_ZY; ids[8] = H2_RZ; ids[9] = H2_RW;
+        ids[10] = H2_BN;
+        return 11;
     case H2S_VROW:
         if (s.row == 4 || s.row == 5) {
             ids[0] = s.row == 4 ? H2_S1 : H2_S2;
@@ -1640,6 +1896,10 @@ static __device__ int h2_inputs(const H2Src& s, int stage, int* ids)
         if (s.row == 6) {
             ids[0] = H2_W; ids[1] = H2_RZ; ids[2] = H2_RHO; ids[3] = H2_K;
             return 4;
+        }
+        if (!s.vint) {
+            ids[0] = H2_RHO; ids[1] = H2_QV;
+            return (s.moist && s.heat == 2) ? 2 : 1;
         }
         ids[0] = H2_F; ids[1] = H2_K; ids[2] = H2_RHO; ids[3] = H2_RZ; ids[4] = H2_QV;
         return (s.moist && s.heat == 2) ? 5 : 4;
@@ -1661,7 +1921,8 @@ static __device__ void h2_idims(const H2Src& s, int stage, int id, int* nl, int*
     case H2_ZY: L = s.nz + 1; y = 1; break;
     case H2_RZ:   // rdz on w levels for the w stresses and row, else rdzw
         if (stage == H2S_TW || (stage == H2S_ROW && s.row == 3)
-            || (stage == H2S_VROW && s.row == 7)) L = s.nz + 1;
+            || (stage == H2S_VROW && s.row == 7) || stage == H2S_N2 || stage == H2S_KM3)
+            L = s.nz + 1;
         break;
     case H2_S1: case H2_S2:
         if (s.row >= 3) { L = s.nz + 1; if (id == H2_S1) x = 1; else y = 1; }
@@ -1730,6 +1991,25 @@ static __device__ int h2_pairs(const H2Src& s, int stage, int id, int* slot, int
             H2_PAIR(0, 0, 0, 0, 0, 0, 1);
             H2_PAIR(1, 0, 0, 0, 1, 0, 0);
             break;
+        }
+    } else if (stage == H2S_N2) {
+        switch (id) {
+        case H2_F: H2_PAIR(0, -1, 2, 0, 0, 0, 0); break;     // ke - 1 .. ke + 1, ktf's copy
+        case H2_RZ: H2_PAIR(0, -1, 1, 0, 0, 0, 0); break;
+        default: H2_PAIR(0, 0, 0, 0, 0, 0, 0); break;        // rdzw: the surface level
+        }
+    } else if (stage == H2S_KM2 || stage == H2S_KM3) {
+        // one window per input over every output point that reads it (the
+        // coefficient gather evaluates all outputs of a point at once)
+        switch (id) {
+        case H2_D12: H2_PAIR(0, 0, 0, -1, 0, -1, 0); break;
+        case H2_ZX: H2_PAIR(0, -1, 0, 0, 0, -1, 0); break;
+        case H2_ZY: H2_PAIR(0, -1, 0, -1, 0, 0, 0); break;
+        case H2_U: H2_PAIR(0, -1, 1, 0, 0, -1, 0); break;
+        case H2_V: H2_PAIR(0, -1, 1, -1, 0, 0, 0); break;
+        case H2_W: H2_PAIR(0, -2, 1, -1, 1, -1, 1); break;
+        case H2_RZ: H2_PAIR(0, -1, 0, -1, 1, -1, 1); break;
+        default: H2_PAIR(0, 0, 0, 0, 0, 0, 0); break;        // d11, d22, rdzw, BN2
         }
     } else if (stage == H2S_VROW) {
         switch (s.row * 32 + id) {
@@ -1813,6 +2093,29 @@ static __device__ wreal h2_gather(const H2Src& s, int stage, int id, int k, int 
                                   const wreal* a3)
 {
     int outs[4], slot[4], win[24];
+    if (stage == H2S_KM2 || stage == H2S_KM3) {
+        // every output of a point from one forward
+        h2_pairs(s, stage, id, slot, win);
+        const wreal* a[4] = {a0, a1, a2, a3};
+        int no = stage == H2S_KM2 ? 2 : 4;
+        int ks[8], js[8], is[8];
+        int mk = h2_cand(k, win[0], win[1], s.nz, 0, 1, ks);
+        int mj = h2_cand(j, win[2], win[3], s.ny, 0, s.by, js);
+        int mi = h2_cand(i, win[4], win[5], s.nx, 0, s.bx, is);
+        wreal acc = (wreal)0;
+        for (int c = 0; c < mk; ++c)
+            for (int b = 0; b < mj; ++b)
+                for (int q = 0; q < mi; ++q) {
+                    size_t at = R3(ks[c], js[b], is[q], s.ny, s.nx);
+                    bool any = false;
+                    for (int o = 0; o < no; ++o) any = any || a[o][at] != (wreal)0;
+                    if (!any) continue;
+                    Dl out[4];
+                    h2_coef(s, stage, ks[c], js[b], is[q], out);
+                    for (int o = 0; o < no; ++o) acc = acc + a[o][at] * out[o].d;
+                }
+        return acc;
+    }
     // the vertical rows' surface-only inputs feed the bottom level alone
     if (stage == H2S_VROW && k > 0
         && ((s.row <= 5 && id != H2_S1 && id != H2_S2) || id == H2_QV))
@@ -1846,7 +2149,7 @@ static __device__ bool h2_ad_word(H2Src& s, int stage, size_t t, const wreal* a0
                                   const wreal* a1, const wreal* a2, const wreal* a3,
                                   int* slot_out, size_t* at_out, wreal* acc)
 {
-    int ids[8];
+    int ids[12];
     int ni = h2_inputs(s, stage, ids);
     for (int q = 0; q < ni; ++q) {
         int nl, sy, sx;
@@ -2197,16 +2500,17 @@ extern "C" __global__ void h2_row_ad(const wreal* __restrict__ atend,
     const wreal* __restrict__ dn, const wreal* __restrict__ dnw, \
     const wreal* __restrict__ ustm, const wreal* __restrict__ hfx, \
     const wreal* __restrict__ qfx, const wreal* __restrict__ thb, wreal cd0, wreal hflux, \
-    int sfc, int heat, int full, int qflux
+    int sfc, int heat, int full, int qflux, int vint
 
 static __device__ void h2_vset(H2Src& s, const wreal* fnm, const wreal* fnp, const wreal* dn,
                                const wreal* dnw, const wreal* ustm, const wreal* hfx,
                                const wreal* qfx, const wreal* thb, wreal cd0, wreal hflux,
-                               int sfc, int heat, int full, int qflux)
+                               int sfc, int heat, int full, int qflux, int vint)
 {
     s.fnm = fnm; s.fnp = fnp; s.dn = dn; s.dnw = dnw;
     s.ustm = ustm; s.hfx = hfx; s.qfx = qfx; s.thb = thb;
     s.cd0 = cd0; s.hflux = hflux; s.sfc = sfc; s.heat = heat; s.full = full; s.qflux = qflux;
+    s.vint = vint;
 }
 
 // TL: one thread per word of the row; interior then surface increments.
@@ -2232,7 +2536,8 @@ extern "C" __global__ void h2_vrow_tl(wreal* __restrict__ tend, wreal* __restric
     s.u = u; s.ud = ud; s.v = v; s.vd = vd; s.w = w; s.wd = wd; s.f = f; s.fd = fd;
     s.rho = rho; s.rhod = rhod; s.km = km; s.kmd = kmd; s.rz = rz; s.rzd = rzd;
     s.qv = qv; s.qvd = qvd;
-    h2_vset(s, fnm, fnp, dn, dnw, ustm, hfx, qfx, thb, cd0, hflux, sfc, heat, full, qflux);
+    h2_vset(s, fnm, fnp, dn, dnw, ustm, hfx, qfx, thb, cd0, hflux, sfc, heat, full, qflux,
+            vint);
     size_t t = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
     int nzs = nz + (row == 6), nys = ny + (row == 5), nxs = nx + (row == 4);
     if (t >= (size_t)nzs * nys * nxs) return;
@@ -2264,13 +2569,14 @@ extern "C" __global__ void h2_vrow_ad(const wreal* __restrict__ atend,
     s.u = u; s.ud = u; s.v = v; s.vd = v; s.w = w; s.wd = w; s.f = f; s.fd = f;
     s.rho = rho; s.rhod = rho; s.km = km; s.kmd = km; s.rz = rz; s.rzd = rz;
     s.qv = qv; s.qvd = qv;
-    h2_vset(s, fnm, fnp, dn, dnw, ustm, hfx, qfx, thb, cd0, hflux, sfc, heat, full, qflux);
+    h2_vset(s, fnm, fnp, dn, dnw, ustm, hfx, qfx, thb, cd0, hflux, sfc, heat, full, qflux,
+            vint);
     size_t t = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
     int q;
     size_t at;
     wreal acc;
     if (!h2_ad_word(s, H2S_VROW, t, atend, atend, atend, atend, &q, &at, &acc)) return;
-    int ids[8];
+    int ids[12];
     h2_inputs(s, H2S_VROW, ids);
     wreal* out;
     switch (ids[q]) {
@@ -2285,4 +2591,211 @@ extern "C" __global__ void h2_vrow_ad(const wreal* __restrict__ atend,
     default: out = ast; break;
     }
     out[at] = out[at] + acc;
+}
+
+// ---- the coefficients' kernels.  The coefficients overwrite: the TL writes
+// the values with ``nl`` and the tangents; the AD adds into the inputs'
+// adjoints (the stored metrics' then go through h2_met_ad) and the wrapper
+// consumes the outputs' adjoints.
+
+#define KC_GEOM H2_GEOM, wreal dxs, wreal dys, wreal cs, wreal pr, wreal dt, wreal mub, int iso
+
+static __device__ __forceinline__ void kc_set(H2Src& s, wreal dxs, wreal dys, wreal cs, wreal pr,
+                                              wreal dt, wreal mub, int iso)
+{
+    s.dxs = dxs; s.dys = dys; s.cs = cs; s.pr = pr; s.dt = dt; s.mub = mub; s.iso = iso;
+}
+#define KC_SET(s) kc_set(s, dxs, dys, cs, pr, dt, mub, iso)
+
+extern "C" __global__ void h2_km2_tl(const wreal* __restrict__ d11,
+                                     const wreal* __restrict__ d11d,
+                                     const wreal* __restrict__ d22,
+                                     const wreal* __restrict__ d22d,
+                                     const wreal* __restrict__ d12,
+                                     const wreal* __restrict__ d12d,
+                                     const wreal* __restrict__ zx, const wreal* __restrict__ zxd,
+                                     const wreal* __restrict__ zy, const wreal* __restrict__ zyd,
+                                     const wreal* __restrict__ rdzw,
+                                     const wreal* __restrict__ rdzwd,
+                                     const wreal* __restrict__ msft, wreal* __restrict__ kmh,
+                                     wreal* __restrict__ kmhd, wreal* __restrict__ khh,
+                                     wreal* __restrict__ khhd, int nl, KC_GEOM)
+{
+    H2Src s = h2_src(H2_GARGS, 1);
+    KC_SET(s);
+    s.da = d11; s.dad = d11d; s.db = d22; s.dbd = d22d; s.d12 = d12; s.d12d = d12d;
+    s.zx = zx; s.zxd = zxd; s.zy = zy; s.zyd = zyd; s.rw = rdzw; s.rwd = rdzwd; s.msft = msft;
+    size_t t = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (t >= (size_t)nz * ny * nx) return;
+    int i = (int)(t % nx), j = (int)((t / nx) % ny), k = (int)(t / ((size_t)nx * ny));
+    Dl out[4];
+    h2_km2(s, k, j, i, out);
+    if (nl) {
+        kmh[t] = out[0].v;
+        khh[t] = out[1].v;
+    }
+    if (WRFPLUS_TL) {
+        kmhd[t] = out[0].d;
+        khhd[t] = out[1].d;
+    }
+}
+
+extern "C" __global__ void h2_km2_ad(const wreal* __restrict__ akmh,
+                                     const wreal* __restrict__ akhh,
+                                     const wreal* __restrict__ d11,
+                                     const wreal* __restrict__ d22,
+                                     const wreal* __restrict__ d12,
+                                     const wreal* __restrict__ zx, const wreal* __restrict__ zy,
+                                     const wreal* __restrict__ rdzw,
+                                     const wreal* __restrict__ msft, wreal* __restrict__ a11,
+                                     wreal* __restrict__ a22, wreal* __restrict__ a12,
+                                     wreal* __restrict__ azx, wreal* __restrict__ azy,
+                                     wreal* __restrict__ ardzw, KC_GEOM)
+{
+    H2Src s = h2_src(H2_GARGS, 0);
+    KC_SET(s);
+    s.da = s.dad = d11; s.db = s.dbd = d22; s.d12 = s.d12d = d12;
+    s.zx = s.zxd = zx; s.zy = s.zyd = zy; s.rw = s.rwd = rdzw; s.msft = msft;
+    size_t t = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    int q;
+    size_t at;
+    wreal acc;
+    if (!h2_ad_word(s, H2S_KM2, t, akmh, akhh, akmh, akmh, &q, &at, &acc)) return;
+    wreal* out = q == 0 ? a11 : q == 1 ? a22 : q == 2 ? a12 : q == 3 ? azx : q == 4 ? azy : ardzw;
+    out[at] = out[at] + acc;
+}
+
+extern "C" __global__ void h2_n2_tl(const wreal* __restrict__ thp,
+                                    const wreal* __restrict__ thpd,
+                                    const wreal* __restrict__ thb,
+                                    const wreal* __restrict__ rdz, const wreal* __restrict__ rdzd,
+                                    const wreal* __restrict__ rdzw,
+                                    const wreal* __restrict__ rdzwd, wreal* __restrict__ bn2,
+                                    wreal* __restrict__ bn2d, int nl, H2_GEOM)
+{
+    H2Src s = h2_src(H2_GARGS, 1);
+    s.f = thp; s.fd = thpd; s.thb = thb; s.rz = rdz; s.rzd = rdzd; s.rw = rdzw; s.rwd = rdzwd;
+    size_t t = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (t >= (size_t)nz * ny * nx) return;
+    int i = (int)(t % nx), j = (int)((t / nx) % ny), k = (int)(t / ((size_t)nx * ny));
+    Dl r = h2_n2(s, k, j, i);
+    if (nl) bn2[t] = r.v;
+    if (WRFPLUS_TL) bn2d[t] = r.d;
+}
+
+extern "C" __global__ void h2_n2_ad(const wreal* __restrict__ abn2,
+                                    const wreal* __restrict__ thp,
+                                    const wreal* __restrict__ thb,
+                                    const wreal* __restrict__ rdz,
+                                    const wreal* __restrict__ rdzw, wreal* __restrict__ athp,
+                                    wreal* __restrict__ ardz, wreal* __restrict__ ardzw, H2_GEOM)
+{
+    H2Src s = h2_src(H2_GARGS, 0);
+    s.f = s.fd = thp; s.thb = thb; s.rz = s.rzd = rdz; s.rw = s.rwd = rdzw;
+    size_t t = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    int q;
+    size_t at;
+    wreal acc;
+    if (!h2_ad_word(s, H2S_N2, t, abn2, abn2, abn2, abn2, &q, &at, &acc)) return;
+    wreal* out = q == 0 ? athp : q == 1 ? ardz : ardzw;
+    out[at] = out[at] + acc;
+}
+
+#define KC3_PASSIVE const wreal* __restrict__ msft, const wreal* __restrict__ msfu, \
+    const wreal* __restrict__ msfv
+
+extern "C" __global__ void h2_km3_tl(const wreal* __restrict__ d11,
+                                     const wreal* __restrict__ d11d,
+                                     const wreal* __restrict__ d22,
+                                     const wreal* __restrict__ d22d,
+                                     const wreal* __restrict__ d12,
+                                     const wreal* __restrict__ d12d,
+                                     const wreal* __restrict__ u, const wreal* __restrict__ ud,
+                                     const wreal* __restrict__ v, const wreal* __restrict__ vd,
+                                     const wreal* __restrict__ w, const wreal* __restrict__ wd,
+                                     const wreal* __restrict__ zx, const wreal* __restrict__ zxd,
+                                     const wreal* __restrict__ zy, const wreal* __restrict__ zyd,
+                                     const wreal* __restrict__ rdz,
+                                     const wreal* __restrict__ rdzd,
+                                     const wreal* __restrict__ rdzw,
+                                     const wreal* __restrict__ rdzwd,
+                                     const wreal* __restrict__ bn2,
+                                     const wreal* __restrict__ bn2d, KC3_PASSIVE,
+                                     wreal* __restrict__ kmh, wreal* __restrict__ kmhd,
+                                     wreal* __restrict__ khh, wreal* __restrict__ khhd,
+                                     wreal* __restrict__ kmv, wreal* __restrict__ kmvd,
+                                     wreal* __restrict__ khv, wreal* __restrict__ khvd, int nl,
+                                     KC_GEOM)
+{
+    H2Src s = h2_src(H2_GARGS, 1);
+    KC_SET(s);
+    s.da = d11; s.dad = d11d; s.db = d22; s.dbd = d22d; s.d12 = d12; s.d12d = d12d;
+    s.u = u; s.ud = ud; s.v = v; s.vd = vd; s.w = w; s.wd = wd;
+    s.zx = zx; s.zxd = zxd; s.zy = zy; s.zyd = zyd; s.rz = rdz; s.rzd = rdzd;
+    s.rw = rdzw; s.rwd = rdzwd; s.bn = bn2; s.bnd = bn2d;
+    s.msft = msft; s.msfu = msfu; s.msfv = msfv;
+    size_t t = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (t >= (size_t)nz * ny * nx) return;
+    int i = (int)(t % nx), j = (int)((t / nx) % ny), k = (int)(t / ((size_t)nx * ny));
+    Dl out[4];
+    h2_km3(s, k, j, i, out);
+    if (nl) {
+        kmh[t] = out[0].v;
+        khh[t] = out[1].v;
+        kmv[t] = out[2].v;
+        khv[t] = out[3].v;
+    }
+    if (WRFPLUS_TL) {
+        kmhd[t] = out[0].d;
+        khhd[t] = out[1].d;
+        kmvd[t] = out[2].d;
+        khvd[t] = out[3].d;
+    }
+}
+
+extern "C" __global__ void h2_km3_ad(const wreal* __restrict__ akmh,
+                                     const wreal* __restrict__ akhh,
+                                     const wreal* __restrict__ akmv,
+                                     const wreal* __restrict__ akhv,
+                                     const wreal* __restrict__ d11,
+                                     const wreal* __restrict__ d22,
+                                     const wreal* __restrict__ d12,
+                                     const wreal* __restrict__ u, const wreal* __restrict__ v,
+                                     const wreal* __restrict__ w, const wreal* __restrict__ zx,
+                                     const wreal* __restrict__ zy,
+                                     const wreal* __restrict__ rdz,
+                                     const wreal* __restrict__ rdzw,
+                                     const wreal* __restrict__ bn2, KC3_PASSIVE,
+                                     wreal* __restrict__ a11, wreal* __restrict__ a22,
+                                     wreal* __restrict__ a12, wreal* __restrict__ au,
+                                     wreal* __restrict__ av, wreal* __restrict__ aw,
+                                     wreal* __restrict__ azx, wreal* __restrict__ azy,
+                                     wreal* __restrict__ ardz, wreal* __restrict__ ardzw,
+                                     wreal* __restrict__ abn2, KC_GEOM)
+{
+    H2Src s = h2_src(H2_GARGS, 0);
+    KC_SET(s);
+    s.da = s.dad = d11; s.db = s.dbd = d22; s.d12 = s.d12d = d12;
+    s.u = s.ud = u; s.v = s.vd = v; s.w = s.wd = w;
+    s.zx = s.zxd = zx; s.zy = s.zyd = zy; s.rz = s.rzd = rdz; s.rw = s.rwd = rdzw;
+    s.bn = s.bnd = bn2;
+    s.msft = msft; s.msfu = msfu; s.msfv = msfv;
+    size_t t = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    int q;
+    size_t at;
+    wreal acc;
+    if (!h2_ad_word(s, H2S_KM3, t, akmh, akhh, akmv, akhv, &q, &at, &acc)) return;
+    wreal* outs[11] = {a11, a22, a12, au, av, aw, azx, azy, ardz, ardzw, abn2};
+    outs[q][at] = outs[q][at] + acc;
+}
+
+extern "C" __global__ void kc_zero4(wreal* __restrict__ a, wreal* __restrict__ b,
+                                    wreal* __restrict__ c, wreal* __restrict__ d, int n, int m)
+{
+    size_t t = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    if (t >= (size_t)n) return;
+    a[t] = (wreal)0;
+    if (m > 1) b[t] = (wreal)0;
+    if (m > 2) c[t] = (wreal)0;
+    if (m > 3) d[t] = (wreal)0;
 }
