@@ -268,6 +268,15 @@ name = "woof"
 channels = ["conda-forge"]
 platforms = ["linux-64", { platform = "osx-arm64", macos = "14.0" }]
 
+# prefix.dev's conda-to-PyPI hash mapping holds empty records for conda-forge's
+# free-threaded (cp314t) builds of these packages, so without an overlay the
+# *-ft environments would install the PyPI copy over the conda one (an sdist
+# build of rasterio and netCDF4 on macOS).  Overlay mode: every other package,
+# and every GIL build, keeps the default mapping.
+[tool.pixi.workspace.conda-pypi-map.conda-forge]
+mapping-mode = "overlay"
+mapping = { cftime = "cftime", google-crc32c = "google-crc32c", msgpack-python = "msgpack", msgspec = "msgspec", netcdf4 = "netcdf4", numcodecs = "numcodecs", numpy = "numpy", pandas = "pandas", pyproj = "pyproj", pyyaml = "pyyaml", rasterio = "rasterio" }
+
 [tool.pixi.feature.base.dependencies]
 python = "3.14.*"
 pip = "*"
@@ -361,6 +370,22 @@ ninja = "*"
 make = "*"
 git = "*"
 
+# Free-threaded CPython 3.14t (PEP 703), for the environments named *-ft.
+# conda-forge's python-freethreading metapackage pins python_abi to cp314t,
+# so every conda package resolves to its free-threaded build and pixi's PyPI
+# resolution takes cp314t wheels (or builds the sdist).
+[tool.pixi.feature.freethreaded.dependencies]
+python-freethreading = "3.14.*"
+
+# mlx-ft only: hold MLX at the release the mlx environment locks.  0.32.5
+# renamed mlx/backend/common/metal_kernel.h, which woof.backend.metal.ext's
+# launch.cpp includes, so the Metal launcher does not build against it.
+[tool.pixi.feature.mlx-freethreaded]
+platforms = ["osx-arm64-macos-14-0"]
+
+[tool.pixi.feature.mlx-freethreaded.pypi-dependencies]
+mlx = "==0.32.4"
+
 [tool.pixi.environments]
 default = { features = ["base", "cu13"], no-default-feature = true }
 cuda12 = { features = ["base", "cu12"], no-default-feature = true }
@@ -368,6 +393,10 @@ mlx = { features = ["base", "mlx"], no-default-feature = true }
 cpu = { features = ["base", "cpu"], no-default-feature = true }
 libradtran = { features = ["libradtran"], no-default-feature = true }
 mpas-oracle = { features = ["mpas-oracle"], no-default-feature = true }
+default-ft = { features = ["base", "cu13", "freethreaded"], no-default-feature = true }
+cuda12-ft = { features = ["base", "cu12", "freethreaded"], no-default-feature = true }
+mlx-ft = { features = ["base", "mlx", "freethreaded", "mlx-freethreaded"], no-default-feature = true }
+cpu-ft = { features = ["base", "cpu", "freethreaded"], no-default-feature = true }
 
 [tool.pixi.feature.base.tasks]
 doctor = "woof doctor"

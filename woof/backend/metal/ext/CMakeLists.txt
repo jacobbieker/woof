@@ -20,7 +20,11 @@ if(NOT MLX_BUILD_METAL)
 endif()
 
 # NB_DOMAIN mlx: share mlx.core's type registrations so mx.array crosses.
-nanobind_add_module(_woof_metal_launch NB_STATIC NOMINSIZE NB_DOMAIN mlx launch.cpp)
+# FREE_THREADED: on a free-threaded (3.14t) interpreter the module declares it
+# runs without the GIL (launch.cpp guards its shared state), and it takes
+# nanobind's free-threaded internals, the ones mlx's cp314t wheel is built
+# with, without which mx.array does not cross.  Ignored on a GIL build.
+nanobind_add_module(_woof_metal_launch NB_STATIC NOMINSIZE FREE_THREADED NB_DOMAIN mlx launch.cpp)
 target_link_libraries(_woof_metal_launch PRIVATE mlx)
 if(WOOF_EXT_OUTPUT_DIR)
   set_target_properties(_woof_metal_launch PROPERTIES

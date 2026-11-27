@@ -106,7 +106,10 @@ struct GpuTime {
 static std::mutex& g_gpu_times_mutex = *new std::mutex;
 static std::unordered_map<std::string, GpuTime>& g_gpu_time_totals =
     *new std::unordered_map<std::string, GpuTime>;
-static std::string g_gpu_label;
+// Per calling thread: set_gpu_label and the launch it labels run on one
+// thread, so free-threaded callers (no GIL) neither race on it nor key their
+// launches by another thread's label.
+static thread_local std::string g_gpu_label;
 
 static void count_gpu_time(const std::string& key, double seconds) {
   std::lock_guard<std::mutex> lock(g_gpu_times_mutex);
@@ -194,7 +197,23 @@ static MTL::CompileOptions* compile_options(int math_mode) {
 // where it used to compile the whole unit whenever the OS shader cache had
 // lost it.  A unit with no split, or whose body does not build, is compiled
 // whole as before.
+// The library and archive directories are set from Python (ext.load) while
+// prefetch threads may already compile without the GIL; read them as copies.
+static std::mutex g_dirs_mutex;
 static std::string g_library_dir;
+static std::string g_archive_dir;
+static std::string library_dir() {
+  std::lock_guard<std::mutex> lock(g_dirs_mutex);
+  return g_library_dir;
+}
+static std::string archive_dir() {
+  std::lock_guard<std::mutex> lock(g_dirs_mutex);
+  return g_archive_dir;
+}
+static void set_dir(std::string& dir, const std::string& path) {
+  std::lock_guard<std::mutex> lock(g_dirs_mutex);
+  dir = path;
+}
 static std::mutex g_split_mutex;
 static std::unordered_map<std::string, std::pair<std::string, std::string>> g_splits;
 static std::unordered_map<std::string, NS::SharedPtr<MTL::DynamicLibrary>> g_dylibs;
@@ -233,7 +252,7 @@ static std::string file_stem(const std::string& key) {
 }
 
 static std::string library_path(MTL::Device* device, const std::string& library_key) {
-  return g_library_dir + "/" + file_stem(library_key) + "." + device_tag(device) + ".metallib";
+  return library_dir() + "/" + file_stem(library_key) + "." + device_tag(device) + ".metallib";
 }
 
 // The unit's body as a dynamic library: loaded from disk, or built and
@@ -334,7 +353,7 @@ static MTL::Library* library_for(const std::string& library_key, const std::stri
   {
     std::lock_guard<std::mutex> split_lock(g_split_mutex);
     auto found = g_splits.find(library_key);
-    if (found != g_splits.end() && !g_library_dir.empty()) split = found->second;
+    if (found != g_splits.end() && !library_dir().empty()) split = found->second;
   }
   if (!split.first.empty()) {
     auto* dynamic = dynamic_library_for(device, library_key, split.first, math_mode);
@@ -385,10 +404,8 @@ static MTL::Library* library_for(const std::string& library_key, const std::stri
 // hours after its first build.  A cold pipeline is compiled once, into a
 // fresh archive (addComputePipelineFunctions), which is written to disk and
 // then supplies the pipeline itself (FailOnBinaryArchiveMiss).
-static std::string g_archive_dir;
-
 static std::string archive_path(const std::string& library_key, const std::string& kernel) {
-  return g_archive_dir + "/" + file_stem(library_key + "__" + kernel) + ".metalarchive";
+  return archive_dir() + "/" + file_stem(library_key + "__" + kernel) + ".metalarchive";
 }
 
 // One archive written at a time per process: the compile prefetch builds
@@ -439,7 +456,7 @@ static MTL::ComputePipelineState* pipeline_for(MTL::Library* lib, const std::str
   NS::Error* error = nullptr;
   MTL::ComputePipelineState* state = nullptr;
   auto began = std::chrono::steady_clock::now();
-  if (!g_archive_dir.empty() && dynamic == nullptr) {
+  if (!archive_dir().empty() && dynamic == nullptr) {
     std::string path = archive_path(library_key, kernel);
     auto* stored = access(path.c_str(), R_OK) == 0 ? open_archive(device, path) : nullptr;
     if (stored == nullptr) stored = open_archive(device, std::string());   // none, or another OS's
@@ -840,9 +857,9 @@ NB_MODULE(_woof_metal_launch, m) {
       nb::arg("null_slots") = std::vector<int>{},
       nb::arg("null_table") = std::vector<int>{});
   m.def("gpu_address", &gpu_address, nb::arg("array"));
-  m.def("set_pipeline_archive_dir", [](const std::string& path) { g_archive_dir = path; },
+  m.def("set_pipeline_archive_dir", [](const std::string& path) { set_dir(g_archive_dir, path); },
         nb::arg("path"));
-  m.def("set_library_dir", [](const std::string& path) { g_library_dir = path; }, nb::arg("path"));
+  m.def("set_library_dir", [](const std::string& path) { set_dir(g_library_dir, path); }, nb::arg("path"));
   m.def("set_library_split", [](const std::string& library_key, const std::string& body,
                                 const std::string& thin) {
           std::lock_guard<std::mutex> lock(g_split_mutex);
