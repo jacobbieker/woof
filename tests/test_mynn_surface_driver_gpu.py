@@ -574,6 +574,8 @@ def test_physics_driver_routes_exact_fields_to_mynn_surface_kernel():
         ustm=fields["ustm"].copy(),
         # correct mode's FQ3 (on by default, off in exact mode)
         psih_zolzt=run_reads(cfg, "mynn_sfclay_psih_zolzt"),
+        # correct mode's FQ10 (the Q2 cap over land only)
+        q2_land_cap=run_reads(cfg, "mynn_sfclay_q2_land_cap"),
     )
 
     driver.compute(state, cfg)

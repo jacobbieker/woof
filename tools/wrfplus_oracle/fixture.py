@@ -1,6 +1,6 @@
 """Make a WRFPLUS 4.7.1 oracle fixture for one TL/AD routine.
 
-    python tools/wrfplus_oracle/fixture.py advance_uv|advance_w|calc_coef_w|advance_mu_t|small_step|rk_stage|advect|bigstep|rhsph|coriolis|w_damp|lbc|lbc_final|diffusion|hdiff \
+    python tools/wrfplus_oracle/fixture.py advance_uv|advance_w|calc_coef_w|advance_mu_t|small_step|rk_stage|advect|bigstep|rhsph|coriolis|w_damp|lbc|lbc_final|diffusion|hdiff|diffusion2|vdiffusion2 \
         --exe /mnt/NVME2/.../wrfplus_advance_uv \
         --runner "docker run --rm -v /mnt/NVME2/woof-work:/mnt/NVME2/woof-work wrf-oracle:u2404" \
         --out tests/data/wrfplus/advance_uv.npz
@@ -2103,26 +2103,6 @@ DIFF_CASES = {
 DIFF_DIMS = dict(nz=7, ny=8, nx=9)
 
 
-def _df_masks(geom):
-    """The deformation words WRF and woof both define.  WRF's
-    compute_diff_metrics fills a periodic axis's seam slope (zx at ids and
-    ide, zy at jds and jde) for levels 1..ktf only: at the top w level the
-    seam keeps its cold zero, where woof takes the true slope.  So the top
-    level's defor11 (columns 0 and nx-1) and defor12 (column 0) of a
-    periodic x, and defor22 (rows 0 and ny-1) and defor12 (row 0) of a
-    periodic y, are left out, and their adjoint seeds are 0 (so the seam
-    slope's adjoint is 0 on both sides)."""
-    nz, ny, nx = geom.nz, geom.ny, geom.nx
-    m = {n: np.ones((nz, ny, nx), dtype=bool) for n in ("defor11", "defor22", "defor12")}
-    if not geom.boundary_x:
-        m["defor11"][nz - 1][:, [0, nx - 1]] = False
-        m["defor12"][nz - 1][:, 0] = False
-    if not geom.boundary_y:
-        m["defor22"][nz - 1][[0, ny - 1], :] = False
-        m["defor12"][nz - 1][0, :] = False
-    return m
-
-
 def _df_layout(geom):
     from types import SimpleNamespace as NS
     return AdvLayout(NS(nz=geom.nz, ny=geom.ny, nx=geom.nx, open_x=geom.boundary_x,
@@ -2214,16 +2194,15 @@ def diffusion(exe: str, runner: list[str], seed: int = 20261130) -> dict:
         dims.update(over)
         rng = np.random.default_rng(seed + 10 * n + 2)
         if op == "df":
-            geom = cases.df_geometry(**dims)
+            # WRF's compute_diff_metrics keeps a periodic seam's top-level
+            # slope at its cold zero (woof's seam_cold, RunConfig.
+            # diff_metrics_seam_slope off), so every word is compared
+            geom = cases.df_geometry(**dims, seam_cold=1)
             geom.validate()
             tr = cases.df_trajectory(geom, seed + 10 * n)
             pe = cases.df_perturbation(geom, seed + 10 * n + 1)
             sh = D.df_shapes(geom)
             seeds = {s: rng.standard_normal(sh[s]) for s in D.DF_STATE}
-            masks = _df_masks(geom)
-            for s, m in masks.items():
-                seeds[s] = np.where(m, seeds[s], 0.0)
-                out[f"{name}/mask/{s}"] = m
             blob, L = _df_record(geom, tr, pe, seeds, tl_only)
             expected = lambda r, g=geom, L=L: _df_expected(g, r, L)  # noqa: E731
         else:
@@ -2338,13 +2317,194 @@ def hdiff(exe: str, runner: list[str], seed: int = 20261201) -> dict:
     return out
 
 
+#: diffusion2: the diff_opt 2 horizontal-diffusion rows (diffusion2.F90,
+#: WRF 4.7.1's nonlinear horizontal_diffusion_u_2/_v_2/_w_2/_s with
+#: compute_diff_metrics, rho and cal_deform_and_div), every row on
+#: periodic, specified and channel (periodic x, specified y) axes plus a
+#: moist case per row.  The TL and AD are fourth-order central
+#: differences of the WRF rows over every active woof word (its halo
+#: images move with it), so they hold to about 1e-9 of the scale.
+H2_ROW_CODE = {"u": 1, "v": 2, "w": 3, "t": 5, "s": 5, "vu": 6, "vv": 6, "vw": 6, "vt": 6,
+               "vs": 6}
+H2_FIELD_IDS = {"php": 1, "alt": 2, "qv": 3, "xk": 4, "defor11": 5, "defor22": 6,
+                "defor12": 7, "u": 8, "v": 9, "w": 10, "field": 11}
+H2_DIMS = dict(nz=4, ny=4, nx=5)
+DIFF2_CASES = {f"h2_{row}_{kind}": dict(row=row, **over)
+               for row in ("u", "v", "w", "s")
+               for kind, over in (("periodic", {}),
+                                  ("spec", dict(boundary_x=1, boundary_y=1)),
+                                  ("spec_y", dict(boundary_y=1)),
+                                  ("moist", dict(boundary_x=1, moist=1)))}
+DIFF2_CASES["h2_t_periodic"] = dict(row="t")
+
+#: vdiffusion2: vertical_diffusion_2 (diffusion2.F90 row 6) with its
+#: isfflx surface fluxes, every row on periodic, specified and channel
+#: axes and moist, with the surface options of each row (USTM, cd0; the
+#: prescribed heat flux, HFX, mix_full_fields; the qv row's QFX).
+VDIFF2_CASES = {}
+for _row, _kinds in (
+        ("vu", (("periodic", {}), ("spec_ustm", dict(boundary_x=1, boundary_y=1, surface="ustm")),
+                ("spec_y_cd0", dict(boundary_y=1, surface="cd0", cd0=2e-3)),
+                ("moist_ustm", dict(boundary_x=1, moist=1, surface="ustm")))),
+        ("vv", (("periodic", {}), ("spec_ustm", dict(boundary_x=1, boundary_y=1, surface="ustm")),
+                ("spec_y_cd0", dict(boundary_y=1, surface="cd0", cd0=2e-3)),
+                ("moist_ustm", dict(boundary_x=1, moist=1, surface="ustm")))),
+        ("vw", (("periodic", {}), ("spec", dict(boundary_x=1, boundary_y=1)),
+                ("spec_y", dict(boundary_y=1)), ("moist", dict(boundary_x=1, moist=1)))),
+        ("vt", (("periodic", {}), ("spec_const", dict(boundary_x=1, boundary_y=1, heat="const",
+                                                      heat_flux=0.1)),
+                ("spec_y_hfx", dict(boundary_y=1, heat="hfx")),
+                ("moist_hfx", dict(boundary_x=1, moist=1, heat="hfx")),
+                ("periodic_full", dict(heat="hfx", full_theta=1)))),
+        ("vs", (("periodic", {}), ("spec", dict(boundary_x=1, boundary_y=1)),
+                ("moist_qfx", dict(boundary_x=1, moist=1, qflux=1)),
+                ("spec_y_qfx", dict(boundary_y=1, moist=1, qflux=1))))):
+    for _kind, _over in _kinds:
+        VDIFF2_CASES[f"h2_{_row}_{_kind}"] = dict(row=_row, **_over)
+
+
+def _h2_end(name):
+    # woof reads a periodic staggered end face as face 0
+    return name not in ("u", "v", "msfu", "msfv")
+
+
+def _h2_record_head(geom, tr, nrec):
+    L = _df_layout(geom)
+    bx, by = geom.boundary_x, geom.boundary_y
+    flags = (int(not bx) | (int(not by) << 1) | (int(bool(bx or by)) << 2)
+             | (int(bool(geom.moist)) << 3) | (H2_ROW_CODE[geom.row] << 4))
+    blob = np.array([geom.nx, geom.ny, geom.nz, flags, nrec], dtype=np.int32).tobytes()
+    blob += np.asarray([geom.rdx, geom.rdy, geom.cf1, geom.cf2, geom.cf3], dtype="<f8").tobytes()
+    for n in ("fnm", "fnp", "dn", "dnw"):
+        blob += np.concatenate([tr[n], [0.0]]).astype("<f8").tobytes()
+    for n in ("msfu", "msfv"):
+        blob += np.asarray(_rp_pad2(L, tr[n], False), dtype="<f8").tobytes(order="F")
+    blob += np.asarray(L.pad2(tr["msft"]), dtype="<f8").tobytes(order="F")
+    blob += np.asarray(L.pad3(tr["phb"]), dtype="<f8").tobytes(order="F")
+    act = np.zeros(L.s3 + (len(H2_FIELD_IDS),), order="F")
+    act[..., H2_FIELD_IDS["alt"] - 1] = 1.0
+    for n, f in H2_FIELD_IDS.items():
+        if n in tr:
+            act[..., f - 1] = L.pad3(tr[n], end=_h2_end(n))
+    blob += np.asarray(act, dtype="<f8").tobytes(order="F")
+    # -0.0 marks the words the row leaves alone (-0.0 + x is x)
+    blob += np.full(L.s3, -0.0, dtype="<f8").tobytes(order="F")
+    if geom.vertical:
+        vrow = {"vu": 1, "vv": 2, "vw": 3, "vt": 4}.get(geom.row, 5 if geom.qflux else 6)
+        isfflx = 0 if geom.surface == "cd0" or geom.heat == "const" else 1
+        blob += np.array([vrow, isfflx, int(geom.full_theta)], dtype=np.int32).tobytes()
+        blob += np.asarray([geom.cd0, geom.heat_flux], dtype="<f8").tobytes()
+        zero2 = np.zeros((geom.ny, geom.nx))
+        use = {"ustm": geom.surface == "ustm", "hfx": geom.heat == "hfx", "qfx": bool(geom.qflux)}
+        for n in ("ustm", "hfx", "qfx"):
+            blob += np.asarray(L.pad2(tr[n] if use[n] else zero2), dtype="<f8").tobytes(order="F")
+        thb = tr["thb"] if geom.full_theta else np.zeros((geom.nz, geom.ny, geom.nx))
+        blob += np.asarray(L.pad3(thb), dtype="<f8").tobytes(order="F")
+    return blob, L
+
+
+def _h2_images(L, shape, end):
+    """For each woof word of ``shape``, its 1-based linear Fortran words."""
+    kz, yi, xi = L._maps(shape, end)
+    word = np.ravel_multi_index(np.ix_(kz, yi, xi), shape)          # (K, J, I) woof word
+    lin = np.arange(int(np.prod(L.s3))).reshape(L.s3, order="F")     # (I, K, J)
+    lin = np.transpose(lin, (1, 2, 0))                                # (K, J, I)
+    out = [[] for _ in range(int(np.prod(shape)))]
+    for w, m in zip(word.ravel(), lin.ravel()):
+        out[w].append(int(m) + 1)
+    return out
+
+
+def diffusion2(exe: str, runner: list[str], seed: int = 20261210) -> dict:
+    return _h2_fixture(exe, runner, seed, DIFF2_CASES)
+
+
+def vdiffusion2(exe: str, runner: list[str], seed: int = 20261220) -> dict:
+    return _h2_fixture(exe, runner, seed, VDIFF2_CASES)
+
+
+def _h2_fixture(exe, runner, seed, table) -> dict:
+    from woof.grad.wrfplus import diffusion as D
+    out = {}
+    for n, (name, over) in enumerate(table.items()):
+        dims = dict(H2_DIMS)
+        dims.update(over)
+        geom = cases.h2_geometry(**dims)
+        geom.validate()
+        tr = cases.h2_trajectory(geom, seed + 10 * n)
+        pe = cases.h2_perturbation(geom, seed + 10 * n + 1)
+        rng = np.random.default_rng(seed + 10 * n + 2)
+        sh = D.h2_shapes(geom)
+        active = D.h2_active(geom)
+        recs, cols = [], []
+        for a in active:
+            imgs = _h2_images(_df_layout(geom), sh[a], _h2_end(a))
+            x = tr[a].ravel()
+            scale = float(np.sqrt(np.mean(tr[a] ** 2)))
+            for w, mem in enumerate(imgs):
+                h = 1e-3 * max(abs(float(x[w])), scale)
+                cols.append((a, w, h))
+                for m in (1, -1, 2, -2):
+                    recs.append((m * h, [H2_FIELD_IDS[a]] * len(mem), mem))
+        head, L = _h2_record_head(geom, tr, len(recs) + 1)
+        body = [np.array([0], np.int32).tobytes() + np.array([0.0], "<f8").tobytes()]
+        for h, ids, mem in recs:
+            body.append(np.array([len(ids)], np.int32).tobytes()
+                        + np.array([h], "<f8").tobytes()
+                        + np.array(ids, np.int32).tobytes() + np.array(mem, np.int32).tobytes())
+        with tempfile.TemporaryDirectory(dir=Path(exe).parent) as tmp:
+            fin, fout = Path(tmp) / "in.bin", Path(tmp) / "out.bin"
+            fin.write_bytes(head + b"".join(body))
+            subprocess.run(runner + [exe, str(fin), str(fout)], check=True)
+            result = fout.read_bytes()
+        n3 = int(np.prod(L.s3))
+        vals = np.frombuffer(result, dtype="<f8").reshape(len(recs) + 1, n3)
+        base = L.take3(vals[0].reshape(L.s3, order="F"), sh["tend"])
+        touched = ~((base == 0.0) & np.signbit(base))
+        if geom.code in (1, 4) and not geom.boundary_x:
+            touched[:, :, -1] = False
+        if geom.code in (2, 5) and not geom.boundary_y:
+            touched[:, -1, :] = False
+        if geom.vertical:
+            # vertical_diffusion_2's surface loops run on every column, its
+            # interior rows on WRF's loop region: grade the columns the
+            # interior reaches (level 1, interior for every row)
+            touched &= touched[1:2]
+        f = lambda r: L.take3(vals[r].reshape(L.s3, order="F"), sh["tend"])[touched]  # noqa: E731
+        jac = np.empty((int(touched.sum()), len(cols)))
+        for c, (_, _, h) in enumerate(cols):
+            r = 1 + 4 * c
+            jac[:, c] = (8.0 * (f(r) - f(r + 1)) - (f(r + 2) - f(r + 3))) / (12.0 * h)
+        dx = np.concatenate([pe[a].ravel() for a in active])
+        seeds = {"tend": rng.standard_normal(sh["tend"]) * touched}
+        tl = np.zeros(sh["tend"])
+        tl[touched] = jac @ dx
+        adj = jac.T @ seeds["tend"][touched]
+        prefix = f"{name}/"
+        out[prefix + "geometry"] = np.array(json.dumps(dataclasses.asdict(geom)))
+        for kind, d in (("seed", seeds), ("traj", tr), ("pert", pe)):
+            for k, v in d.items():
+                out[prefix + kind + "/" + k] = v
+        nl = tr["tend"].copy()
+        nl[touched] = nl[touched] + base[touched]
+        out[prefix + "wrfplus/mask"] = touched
+        out[prefix + "wrfplus/nl_tend"] = nl
+        out[prefix + "wrfplus/tl_d_tend"] = tl
+        at = 0
+        for a in active:
+            size = int(np.prod(sh[a]))
+            out[prefix + "wrfplus/ad_" + a] = adj[at:at + size].reshape(sh[a])
+            at += size
+    return out
+
+
 ROUTINES = {"advance_uv": advance_uv, "advance_w": advance_w,
             "calc_coef_w": calc_coef_w, "advance_mu_t": advance_mu_t,
             "small_step": small_step, "rk_stage": rk_stage,
             "advect": advect, "bigstep": bigstep, "rhsph": rhsph,
             "coriolis": coriolis, "w_damp": w_damp,
             "lbc": lbc, "lbc_final": lbc_final, "diffusion": diffusion,
-            "hdiff": hdiff}
+            "hdiff": hdiff, "diffusion2": diffusion2, "vdiffusion2": vdiffusion2}
 
 
 def main(argv=None) -> int:
@@ -2357,7 +2517,9 @@ def main(argv=None) -> int:
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args(argv)
     data = ROUTINES[args.routine](args.exe, shlex.split(args.runner))
-    driver = ROOT / "tools/wrfplus_oracle" / f"{args.routine}.F90"
+    # vdiffusion2 runs diffusion2.F90's vertical_diffusion_2 row
+    stem = {"vdiffusion2": "diffusion2"}.get(args.routine, args.routine)
+    driver = ROOT / "tools/wrfplus_oracle" / f"{stem}.F90"
     data["provenance"] = np.array(
         f"WRFPLUS 4.7.1 (configure wrfplus 17, real*8, -O0 -ffp-contract=off); "
         f"source sha256 {args.wrfplus_digest}; driver sha256 "

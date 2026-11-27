@@ -4446,6 +4446,7 @@ class PhysicsDriver:
                 variant=cfg.mynn_sfclay_variant,
                 ocean_z0=(self.ocean.feedback_z0 if getattr(self, "ocean", None) is not None else None),
                 psih_zolzt=_run_reads(cfg, "mynn_sfclay_psih_zolzt"),
+                q2_land_cap=_run_reads(cfg, "mynn_sfclay_q2_land_cap"),
             )
             if fractional_ruc:
                 # module_surface_driver.F:5441-5506.  Force the second call
@@ -4486,6 +4487,7 @@ class PhysicsDriver:
                     variant=cfg.mynn_sfclay_variant,
                     ocean_z0=(self.ocean.feedback_z0 if getattr(self, "ocean", None) is not None else None),
                     psih_zolzt=_run_reads(cfg, "mynn_sfclay_psih_zolzt"),
+                    q2_land_cap=_run_reads(cfg, "mynn_sfclay_q2_land_cap"),
                 )
 
                 # :5508-5554.  These diagnostics become grid-cell values
@@ -5340,7 +5342,9 @@ class PhysicsDriver:
                            solar=(self.urban_coupler.state.solar if self.urban_coupler is not None else None),
                            use_wudapt_lcz=int(getattr(cfg, "use_wudapt_lcz", 0)),
                            urban_water_balance=getattr(cfg, "urban_water_balance", None),
-                           smc_floor_booking=_run_reads(cfg, "noah_smc_floor_booking"))
+                           smc_floor_booking=_run_reads(cfg, "noah_smc_floor_booking"),
+                           land_ice_rain_runoff=_run_reads(cfg, "noah_land_ice_rain_runoff"),
+                           snow_series_conductivity=_run_reads(cfg, "noah_snow_series_conductivity"))
         self._run_noah_seaice(cfg, use_scheme_sr,
                               xice_threshold=setup.xice_threshold)
         if active(cfg): after_lsm(f)
@@ -5476,6 +5480,8 @@ class PhysicsDriver:
                     urban=(None if coupler is None
                            else coupler.noah_kernel_args()),
                     smc_floor_booking=_noah_smc_floor_booking(cfg, hydro),
+                    land_ice_rain_runoff=_run_reads(cfg, "noah_land_ice_rain_runoff"),
+                    snow_series_conductivity=_run_reads(cfg, "noah_snow_series_conductivity"),
                     **hydro)
         if self.noah_myj:
             noah_chklowq_myj(f)

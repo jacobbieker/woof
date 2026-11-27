@@ -82,6 +82,8 @@ def test_fixture_covers_the_branches(precision):
 @pytest.mark.parametrize("overrides, knob", [
     ({"config_time_integrator": "RK4"}, "config_time_integrator"),
     ({"config_use_freq_filtered_thickness": True}, "config_use_freq_filtered_thickness"),
+    ({"config_use_cvmix": True}, "config_use_cvmix"),
+    ({"config_cvmix_kpp_nonlocal_with_implicit_mix": True}, "config_cvmix_kpp_nonlocal_with_implicit_mix"),
 ])
 def test_what_the_step_does_not_carry_is_refused_by_name(overrides, knob):
     from woof.hex.mpas_ocean import split_step_v842 as ss

@@ -8,10 +8,11 @@ v4.6.1 wrote for them (deformation D11/D22/D12/D13/D23, xkmh/xkmv/xkhh and
 the u, v, w, theta and eight water-species horizontal-diffusion tendencies).
 
 The GPU test runs the production launchers under the strict build and asserts
-0 differing words.  Periodic cases are held to a second reference, the WRF
-build with one WRF defect corrected (compute_diff_metrics leaves the model-top
-terrain slope at the periodic seam unwritten); against unmodified WRF they may
-differ only at the top two mass levels, where that defect acts.
+0 differing words against unmodified WRF (diff_metrics_seam_slope off, FQ12),
+and 0 against the control build with WRF's periodic-seam defect fixed
+(compute_diff_metrics leaves the model-top terrain slope at the periodic seam
+unwritten) when FQ12 is on; the two differ only at the top two mass levels of
+periodic cases, where that defect acts.
 """
 from __future__ import annotations
 
@@ -99,18 +100,22 @@ def test_strict_build_matches_every_compiled_wrf_461_word(tmp_path):
     receipt = json.loads((tmp_path / "wrf.json").read_text())
     assert receipt["arithmetic"]["strict_build"] and receipt["arithmetic"]["diffusion_order_selected"]
     assert "-DGPUWM_WRF_EXACT_C_DIFFUSION=1" in receipt["arithmetic"]["strict_options"]
+    # Exact mode (FQ12 off) is unmodified WRF word for word, the seam included.
+    assert receipt["total_different_words"] == 0
     engine = np.load(tmp_path / "wrf.npz")
+    filled = np.load(tmp_path / "wrfctl.npz")
     periodic_words = 0
     for row in MANIFEST["cases"]:
-        result = receipt["cases"][row["case"]]
-        if row["boundary"] != "periodic":
-            assert all(m["different_words"] == 0 for k, m in result.items() if not k.startswith("_")), row["case"]
-            continue
         with np.load(DATA / row["file"]) as data:
             for field in MANIFEST["compared_fields"]:
                 got = engine[f"{row['case']}__{field}"]
-                assert np.array_equal(got.view(np.uint32), data["wrfctl__" + field].view(np.uint32)), (row["case"], field)
-                bad = np.argwhere(got.view(np.uint32) != data["wrf__" + field].view(np.uint32))
+                assert np.array_equal(got.view(np.uint32), data["wrf__" + field].view(np.uint32)), (row["case"], field)
+                # FQ12 on: the control's filled seam, moving only the top two mass levels.
+                seam = filled[f"{row['case']}__{field}"]
+                bad = np.argwhere(got.view(np.uint32) != seam.view(np.uint32))
+                if row["boundary"] != "periodic":
+                    assert len(bad) == 0, (row["case"], field)
+                    continue
                 periodic_words += len(bad)
                 top = got.shape[0] - (2 if field == "tw" else 1)
                 assert (bad[:, 0] >= top - 1).all(), (row["case"], field, sorted(set(bad[:, 0])))

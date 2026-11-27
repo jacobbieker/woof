@@ -1801,7 +1801,7 @@
     "call_sha256": "90ee68ec1190f87be3c520f8762df32418ca5be8e0eb5925f78a8a265b1c59b5",
     "constructor": "compile_using_nvrtc",
     "factory": "_hail_module",
-    "factory_sha256": "3f3a3acce900b90550984886053344a28a172bc843b27e559f4ae613203fcb90",
+    "factory_sha256": "b179f05af75c599d21eb2a01d4800de308064ecb71d6a7d92758d8da00fb5c5d",
     "file": "woof/core/thompson_aerosol_launch.py",
     "status": "unresolved"
    },
@@ -2198,6 +2198,14 @@
     "status": "unresolved"
    },
    {
+    "call_sha256": "b7eb6fd7bd794e7055d3dd3d63689ca435ada5b1ee43cb067562d291f2d87a15",
+    "constructor": "compile_using_nvrtc",
+    "factory": "_module_on",
+    "factory_sha256": "fd5bc2c32f54ce8b1beb660d1fc348736ded4283b53bb05fa23d60f2fa54e232",
+    "file": "woof/hex/mpas_ocean/cvmix_v842.py",
+    "status": "unresolved"
+   },
+   {
     "call_sha256": "b9f25a729de3ffe7cd6ccf18342bd9e35fd673544bafe68d87fc3713caea4ced",
     "constructor": "RawModule",
     "factory": "diagnose",
@@ -2241,7 +2249,7 @@
     "call_sha256": "bc97ef0ac9d4187fe203db9e86eb73dcacbbe76cb68fbf60b1388d6098f98439",
     "constructor": "compile_using_nvrtc",
     "factory": "_kf_module",
-    "factory_sha256": "9240c5d5fe9c73177185a0511eb80a088517bebee9d63a95039e0877a5fad084",
+    "factory_sha256": "06186c732d2d4e5c0d5f68acb1575f6fc74c2f3026359f490c9f3ef3d68f7810",
     "file": "woof/core/kf.py",
     "status": "unresolved"
    },
@@ -2289,7 +2297,7 @@
     "call_sha256": "c3ef8579eec398570a5cee984638c5edd27c68110e177018a0cac487166e3664",
     "constructor": "compile_using_nvrtc",
     "factory": "_module",
-    "factory_sha256": "b0108ce0c468d687808f4fc87b5fddf698046cf5b8ce340d7154ebe4bac6e1d3",
+    "factory_sha256": "98bd507dec3e076a8105fbca9d7b643794c3955dd22eb43c9a67623bb37dcf86",
     "file": "woof/core/thompson_fork.py",
     "status": "unresolved"
    },
@@ -2609,7 +2617,7 @@
     "call_sha256": "e93297b3ce305dea51a60e2317af2ff1f23df7dd4f0b16b9e545452c21cc16e7",
     "constructor": "RawModule",
     "factory": "_mosaic_module",
-    "factory_sha256": "1141ed37b1cdfde26c955453dd27dcc531eb26edf527451a4742ad38738317df",
+    "factory_sha256": "daf363497ad25f797b183e5338c1623f01b78c0313742244c8cfb971c88f0474",
     "file": "woof/core/noah_mosaic.py",
     "status": "unresolved"
    },
@@ -2617,7 +2625,7 @@
     "call_sha256": "e93297b3ce305dea51a60e2317af2ff1f23df7dd4f0b16b9e545452c21cc16e7",
     "constructor": "RawModule",
     "factory": "_mosaic_ucm_module",
-    "factory_sha256": "87a333e1f179e08422b2c463658e9c3a30cdd8529678f7821078dc77b4afe938",
+    "factory_sha256": "a98e7ea0d13a703e4d91e6e5c277b3a87f50b46ff73c94eadfe010594f51107d",
     "file": "woof/core/noah_mosaic.py",
     "status": "unresolved"
    },
@@ -3673,7 +3681,7 @@
    },
    {
     "file": "woof/core/kernels/kf.cu",
-    "sha256": "d5d3e83ef1094a0202b68b297dd1aad357604327ce607a9aad87fc0772fb2db0"
+    "sha256": "b98a64d1c8c8c414cd7100b63f792e8c2504f2719f243f01b6e42d6fa3d78f60"
    },
    {
     "file": "woof/core/kernels/kf_old.cu",
@@ -3685,7 +3693,7 @@
    },
    {
     "file": "woof/core/kernels/kfcup.cu",
-    "sha256": "2a77ac6f1bbaf0f3704c7a4d6813774cfe7b19525649c528cdae21134d702dae"
+    "sha256": "0de29106a1ecef3f6e63416b449108859a22a0dc2c39d90ec936319fb2c6e08f"
    },
    {
     "file": "woof/core/kernels/km5.cu",
@@ -3801,7 +3809,7 @@
    },
    {
     "file": "woof/core/kernels/mskf.cu",
-    "sha256": "28d338515dacf93c1b2664547feca66ae70f4f7083fb97c14b9fb0ef117a4708"
+    "sha256": "fd4cc745a7b6962eaa1e61a9459085b2979b9069a796e64ce0b3073b0d14c893"
    },
    {
     "file": "woof/core/kernels/mskf_aerosol.cuh",
@@ -3837,7 +3845,7 @@
    },
    {
     "file": "woof/core/kernels/mynn_surface.cu",
-    "sha256": "2e8b7cb344da2eb74e68893f8921d7140c534d3ed311f471abca8c6580b7a7c0"
+    "sha256": "c0ae59ecfca4e54c49d7e141168bcc274ac60eddb6d2f4067d9867891cbd7490"
    },
    {
     "file": "woof/core/kernels/mynn_surface_libm.cuh",
@@ -3889,7 +3897,7 @@
    },
    {
     "file": "woof/core/kernels/noah.cu",
-    "sha256": "3736ba8f07a6ff915255159e6fec8b29a617e76465364d99d276c0795470e17d"
+    "sha256": "8c82ad5398c0defabd5c672dc848d1e902416d4cf53dc6c86dcc502b0ab7fdec"
    },
    {
     "file": "woof/core/kernels/noah_fractional.cu",
@@ -3901,7 +3909,7 @@
    },
    {
     "file": "woof/core/kernels/noah_mosaic.cu",
-    "sha256": "5c09214c29f2c9f6b01bec651281778b8d759facfc6c755cbb9cd02bd7237b00"
+    "sha256": "aeb8c2de7a04c73f2c828c0bf6581e8d414f9c2f75cd398d6e59bda2f87e381c"
    },
    {
     "file": "woof/core/kernels/noah_mosaic_ua.cu",
@@ -4561,7 +4569,7 @@
    },
    {
     "file": "woof/core/kernels/sfs_output.cu",
-    "sha256": "f8df238d672aae46bfbe83e71fdd322feced36a8bda503544f9a9c2701236da9"
+    "sha256": "ccd9df3122703ac600d46a1840120e18581e98b090959f14d1a82fa6518f61bc"
    },
    {
     "file": "woof/core/kernels/shcu_deng.cu",
@@ -4593,7 +4601,7 @@
    },
    {
     "file": "woof/core/kernels/smag2d.cu",
-    "sha256": "379c2013faaaa3df1ae7fbdbc68cc15cf9f6334d55bf2511083287d126b88b0f"
+    "sha256": "854ee250c242baa7d9fd6aba459d6e5f460261f51070d61a420fc9442c6d9dc1"
    },
    {
     "file": "woof/core/kernels/smag2d_theta_m.cu",
@@ -4601,7 +4609,7 @@
    },
    {
     "file": "woof/core/kernels/smag2d_tke_faces.cu",
-    "sha256": "421c718311e7724d3fd5ba733bfd3c59eca0cf828a753d284bac6e3142128f59"
+    "sha256": "36b322176076c25c1d14bb2512af740c635fe21a820495be183c39642f067d8e"
    },
    {
     "file": "woof/core/kernels/smag2d_uv_faces.cu",
@@ -4797,7 +4805,7 @@
    },
    {
     "file": "woof/core/kernels/thompson_aerosol_warm.cu",
-    "sha256": "900e26aa8314c8687173078353ef413052c2f888c2638234600bb9c10e70e765"
+    "sha256": "6339fdd602cdf97b86ac2219e90c7d8ef7880872bf11d69c672633ff8767b467"
    },
    {
     "file": "woof/core/kernels/thompson_classic.cu",
@@ -4837,7 +4845,7 @@
    },
    {
     "file": "woof/core/kernels/thompson_fork.cu",
-    "sha256": "a916ede73fd7cf39ff585b6889e7e90f04338f6c2b097b638d63a09a11cd9ef4"
+    "sha256": "3f3c7f12faa3f42d125b442c6ee72906c70baf642e55c66ca9a7c1f3f2fed4be"
    },
    {
     "file": "woof/core/kernels/thompson_fork_constants.cuh",
@@ -4865,7 +4873,7 @@
    },
    {
     "file": "woof/core/kernels/topo_radiation.cu",
-    "sha256": "145a2b00987962a221488b17dd3dfba9fdd26a3d809a208e8aea86340a146102"
+    "sha256": "eed766ccaa9cd8e856423c407750cffb829a9e8e01c0b28c5ef91b9d16861de8"
    },
    {
     "file": "woof/core/kernels/tracer_pblmix.cu",
@@ -5181,7 +5189,7 @@
    },
    {
     "file": "woof/grad/wrfplus/kernels/diffusion.cu",
-    "sha256": "9e1bb2643bf94b015db6beeba44dda08d151dc6380e0da9483abba05a1921018"
+    "sha256": "f684af23b9cedc70061028dd3e00e46b3b1a3943bc29ed016564bbbb724ce129"
    },
    {
     "file": "woof/grad/wrfplus/kernels/lbc.cu",
@@ -5332,6 +5340,10 @@
     "sha256": "973ebe26587d52e22a82510afdb987d9412185145081fd01f475f611bc3c2d0e"
    },
    {
+    "file": "woof/hex/mpas_ocean/cvmix_v842.cu",
+    "sha256": "ddee3cc4e21f58a016e9337afc2ed7bcc53e527d40b38f6efa6a5ea20700ac79"
+   },
+   {
     "file": "woof/hex/mpas_ocean/diagnostics_v842.cu",
     "sha256": "b20745616595ec56a8b7c3658ef57c0c7271d68f4266afc8f2a296327d1f468f"
    },
@@ -5389,7 +5401,7 @@
    },
    {
     "file": "woof/hex/mpas_ocean/vmix_v842.cu",
-    "sha256": "cd656248fb02f0690c8435e3d9027f2f54efbe99806cdcfc1f7c10bbf807a898"
+    "sha256": "b385cda7db0ac93730c868e544be51aad8b5a7c084b554d35e8b9b562204c9c3"
    },
    {
     "file": "woof/hex/mpas_seaice/column_bgc_v842.cu",
@@ -5623,7 +5635,7 @@
    },
    {
     "file": "woof/backend/translate/__init__.py",
-    "sha256": "98bcc4104f8f4115f57697a29c87a14035f10c3c126dbd4583856cb47258e8e2"
+    "sha256": "602a65e938c6e4a4360bd6561e832c92ccad35f68afb893dd5c68b6cbee8ca3f"
    },
    {
     "file": "woof/chem_micm.py",
@@ -5683,7 +5695,7 @@
    },
    {
     "file": "woof/core/dycore.py",
-    "sha256": "c4bae2df8f3514f56a483fd9d7f85dfc2d96aa9bf9f0f3bf079f7183f28ad886"
+    "sha256": "fd0ba35d57b5b40a6cf631a7abbb981c007dcc0d52782c3ab18f928333a58195"
    },
    {
     "file": "woof/core/etanew.py",
@@ -5703,15 +5715,15 @@
    },
    {
     "file": "woof/core/gfl.py",
-    "sha256": "f17d2c0f39f71646b1fdd7750c19781b0b09472f2d6b56dbaac5842b74408bc6"
+    "sha256": "2bff47b6e759416add71a0461428e4bf1af7cfa8a62ac43448972e25eda01c38"
    },
    {
     "file": "woof/core/gfl_873b414.py",
-    "sha256": "c6d278a67fef9fd1b2b01bfb71aeec735a0b02afe541fab75ea8d5deed1365aa"
+    "sha256": "9cfb22bf0b5d2a50de10728ac280c5c287d4071d66268a427eb423953503bda5"
    },
    {
     "file": "woof/core/gfl_lanes.py",
-    "sha256": "78d03443c618140b7286e7563417d40b7ec33bfb1b32b06d832b4d4b10c16437"
+    "sha256": "c6e02d408051aeff2675c0fb2d06d300db49763819759083517c5ddab24fc289"
    },
    {
     "file": "woof/core/health_ledger.py",
@@ -5743,7 +5755,7 @@
    },
    {
     "file": "woof/core/kf.py",
-    "sha256": "9580c7938b5a6f2498a33adbdc99494d10776116eb4970b72eae53bec9ce620f"
+    "sha256": "572de9414a0f524aa4e3f6df237dff25b21208099bb9d709ea709a14ec15b25c"
    },
    {
     "file": "woof/core/microphysics.py",
@@ -5795,7 +5807,7 @@
    },
    {
     "file": "woof/core/noah_mosaic.py",
-    "sha256": "d3f99e05cfc4755e952045707d2ec8de4c70674b6834281a41cedcaa9262ba21"
+    "sha256": "f8e8a7ba0fe5e0d45557ad88714f2eeb90afe3680b944e2cd2011c7e41d2141c"
    },
    {
     "file": "woof/core/noah_sfcdiags.py",
@@ -5867,11 +5879,11 @@
    },
    {
     "file": "woof/core/physics.py",
-    "sha256": "077449e5f358f280d1d51999b9f60e7beaacb1388cd24a90ab8cacd8ed813267"
+    "sha256": "26c6e7789e3ea1b5040072bdc9c2b2b3f2b1469897c5e8e9c872e29a4a32f041"
    },
    {
     "file": "woof/core/preflight.py",
-    "sha256": "2fb7d57f7ec89e24d1270368339c8ab289c56e28ad0d46a46cead4473ba75439"
+    "sha256": "6f113a98a9449a748a0ef268e936c74da85dc44a83090569d3ac0e47a9e28cd2"
    },
    {
     "file": "woof/core/refl.py",
@@ -5967,7 +5979,7 @@
    },
    {
     "file": "woof/core/spp_kernel_sources.py",
-    "sha256": "949c752131a7fbb6e69ccf48ee72c31e5cb213c85b6182f7258fec00846de646"
+    "sha256": "0f057bfe9f825a6b2237cfa4e63960b311d8d90fa6ac930f0da5ec2dc50e17c8"
    },
    {
     "file": "woof/core/storm_tracking.py",
@@ -5999,11 +6011,11 @@
    },
    {
     "file": "woof/core/thompson_aerosol_launch.py",
-    "sha256": "fd5a9f98d88db35ab27ab07bef6a0f77bef2864759ff05c9a11afcc40882e010"
+    "sha256": "8648031cf55a6451b86235ae452b7d3886917e34dd8521b07f50542757fed69d"
    },
    {
     "file": "woof/core/thompson_fork.py",
-    "sha256": "ef2e77071a909f41abb1d48740b2bb387c51e9ebd77b492ded2f92a81ac92454"
+    "sha256": "cd01836b2647c07ee9e4a310e699c9d50e34c5cdc5dedc48c31b581352498fd5"
    },
    {
     "file": "woof/core/urban_bem.py",
@@ -6079,7 +6091,7 @@
    },
    {
     "file": "woof/ensemble/batch_physics.py",
-    "sha256": "b008f1d25d53db023f688792770d3989124ff2fdb606298cb7b7cb5396795918"
+    "sha256": "87d7b47ed61b6e9897f6104c54240769f6b6d3d926d188a7bc6d28986710fda1"
    },
    {
     "file": "woof/ensemble/batch_physics_init.py",
@@ -6494,6 +6506,10 @@
     "sha256": "386eb67c63be10d0d72642b433fd1bb0f796430dd9b21414aeba23ddda629c8e"
    },
    {
+    "file": "woof/hex/mpas_ocean/cvmix_v842.py",
+    "sha256": "90be3b4f63bbb9cd8dfd47f5ca696bf9e183defd54fe2d76ea1c9ad749f80f96"
+   },
+   {
     "file": "woof/hex/mpas_ocean/diagnostics_v842.py",
     "sha256": "c89dcf300d6fc491e570693fe49a380c5a262a70a0f6787c6666de62d90b97b1"
    },
@@ -6527,7 +6543,7 @@
    },
    {
     "file": "woof/hex/mpas_ocean/split_step_v842.py",
-    "sha256": "e534d86036088a1ed181b8396cf630fca55bb0d96af52f3a6aed6dc8c08ea541"
+    "sha256": "48a2cb1d7c936cbad687197fe00dd648ca9905bf8a65c9fdbc122e9284dd67d0"
    },
    {
     "file": "woof/hex/mpas_ocean/tend_tracer_v842.py",
@@ -6551,7 +6567,7 @@
    },
    {
     "file": "woof/hex/mpas_ocean/vmix_v842.py",
-    "sha256": "aa8a53faf50f9006cc3e81a95b83e3b36dcf356328a7f263727bdc4cfde55ff3"
+    "sha256": "54188bbff276111d88be4e7974a9a64886867d0761524e48c02ed52e8a172000"
    },
    {
     "file": "woof/hex/mpas_seaice/column_bgc_v842.py",
@@ -6927,7 +6943,7 @@
    },
    {
     "file": "woof/hex/obs_nudging.py",
-    "sha256": "59e6814d0c54ed84b074e5152a8209b3eb5c361cfc16fba66940ef089c61430a"
+    "sha256": "2d701015dd7f2e885c002838a15fc0d4226451af16fd1ca24b232653def10ec8"
    },
    {
     "file": "woof/hex/obstacles.py",
@@ -7397,7 +7413,11 @@
    },
    {
     "file": "woof/core/gfl_lanes.py",
-    "sha256": "8ac9e6ca0e8d6488f6b5da7092d58ba9c16ec4639b980cd9a6018f35a96527cd"
+    "sha256": "51e750bd472452e2a578995c1e300a2684b889f852b16aad93982b64040bc35e"
+   },
+   {
+    "file": "woof/core/gfl_lanes.py",
+    "sha256": "632129c483482236cf2be90f69d27584fd7c413503c101827ea0e39b0c65c1c7"
    },
    {
     "file": "woof/core/gfl_lanes.py",
@@ -7405,11 +7425,11 @@
    },
    {
     "file": "woof/core/gfl_lanes.py",
-    "sha256": "9c6e21b5bf8f6c68ab35da916ba9f69b5d6b64b2b4b19363ce2002cb64abb23a"
+    "sha256": "c07db58b7a48483a23857bc025594080b469010fd7ce5c445691ada9eaf37d23"
    },
    {
     "file": "woof/core/gfl_lanes.py",
-    "sha256": "c07db58b7a48483a23857bc025594080b469010fd7ce5c445691ada9eaf37d23"
+    "sha256": "e4cd07cadee056dfa4cd8270581b9eafbf783a85f3da526dbe3c9b223ac7ca5f"
    },
    {
     "file": "woof/core/health_ledger.py",
@@ -10219,13 +10239,13 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "76aba294286ce84116502315b749242b4fda002c8b90edea2f1dabafcea629f7",
+    "sha256": "2a6b963a057d97fa02ba4c63aea08ab797129903db51bf02112462076235ab85",
     "sites": {
      "100": 805
     }
    },
    "native_differences": {
-    "sha256": "2a1d549583c18d97f2662f8b313b4c455317b8934d3082c9ae1273886ffa647e",
+    "sha256": "e966748b0cd109d3f0ef003dcbe01d4178e8707bdb646deeb3846bb8d35ac0d7",
     "sites": {
      "100": 60
     }
@@ -10249,9 +10269,9 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "0139651af0c0c43347f92567d5cec4dee069050d22a570a53149c8ce84d0df91"
+   "source_sha256": "ee52d8dfeb091ca8ae694dbe6dbdf509efe724155abe1efbb7af67d88e1f0789"
   },
-  "composed:noah_mosaic[NOAH_SMC_FLOOR_BOOKING=1]": {
+  "composed:noah_mosaic[NOAH_LAND_ICE_RAIN_RUNOFF=1]": {
    "assessment": "static_diagnostic_only",
    "coverage": "compiled",
    "dataflow_differences": {
@@ -10268,13 +10288,62 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "599b65dd2b81b0455ec2896bafbbc715a003e3728fd2bdbfafd909f28011efb0",
+    "sha256": "9f866c2af0bc1f9fec5823a1b5575ec5de3ac7a1c71addd652749d68528d259a",
     "sites": {
-     "100": 806
+     "100": 809
     }
    },
    "native_differences": {
-    "sha256": "b65159637dd5083868ce80fec3201e7fff4ae02c13338f80da39d4421c06c7ae",
+    "sha256": "3eb2d376c840727e3fe978896fcdfb4ec2d36acefd8339013788949d56f8fdcc",
+    "sites": {
+     "100": 60
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "--fmad=false",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "--fmad=false",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "ff21c6acd9d626600bb1eb66b2f336f2986d61dd607fd7c969a08ba094cffe12"
+  },
+  "composed:noah_mosaic[NOAH_SMC_FLOOR_BOOKING=1,NOAH_LAND_ICE_RAIN_RUNOFF=1,NOAH_SNOW_SERIES_CONDUCTIVITY=1]": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "fa0d7abf1fd187077e9f646d054f717293baaf10d70397144444653c661c1746",
+    "sites": {
+     "100": 813
+    }
+   },
+   "native_differences": {
+    "sha256": "c5430067d2aaa45336c56f59c4ceef589122c1e85667baa98aa5c996b5cb018d",
     "sites": {
      "100": 59
     }
@@ -10298,7 +10367,154 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "6c3f2e8835fad52ec27bc7fb66d6d342a9dbf2e873880a100d7ec78fbee7c1bd"
+   "source_sha256": "d275cf9bb8cd49b9ea223eec875e42d42a4c78f132e0eaf4ca52c424ae7cf8ed"
+  },
+  "composed:noah_mosaic[NOAH_SMC_FLOOR_BOOKING=1,NOAH_LAND_ICE_RAIN_RUNOFF=1]": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "7965768ac7109e7a377fadb186e0d26f0fb1d3ecee8fb40c5558ab87fd7824d7",
+    "sites": {
+     "100": 807
+    }
+   },
+   "native_differences": {
+    "sha256": "6b91a1237ed8a621badcc7163c15c8f76e628a54fe5c366fef7b8467620e5775",
+    "sites": {
+     "100": 59
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "--fmad=false",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "--fmad=false",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "fdbcd0245ca0f12b61a47ccce19a4f6590a668612a74d7c9ef7d218c48968fbd"
+  },
+  "composed:noah_mosaic[NOAH_SMC_FLOOR_BOOKING=1]": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "507f1c91bc63feaf84b664804d063b3098bbcc41dc1082a91d2c3570ec33b964",
+    "sites": {
+     "100": 806
+    }
+   },
+   "native_differences": {
+    "sha256": "3a1736cd63ce2572c370f58943543ab51ad57412081cf14750697c6d9a6f9960",
+    "sites": {
+     "100": 59
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "--fmad=false",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "--fmad=false",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "9a5bd0b23196e134567aefcae0456165c0576ff5c552432dcbeef1ba1ae89c09"
+  },
+  "composed:noah_mosaic[NOAH_SNOW_SERIES_CONDUCTIVITY=1]": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "56f590ba41ba2c7b4d4dc89f3ebab39f487c1f5a32de0f71283a13cf79453bb0",
+    "sites": {
+     "100": 810
+    }
+   },
+   "native_differences": {
+    "sha256": "3eb2d376c840727e3fe978896fcdfb4ec2d36acefd8339013788949d56f8fdcc",
+    "sites": {
+     "100": 60
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "--fmad=false",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "--fmad=false",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "625f46e99743a4c44e57267674f4d8d34e6ee77faabb039fc7fb16046a2fdf82"
   },
   "composed:noah_mosaic_ucm": {
    "assessment": "static_diagnostic_only",
@@ -10317,13 +10533,13 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "b735596c488d356a70671f3cb4eca0bb476119aab09058dec1ffca6662a7d430",
+    "sha256": "f340b65f5795fb0d7fa0e51c88e132ff89ed041277376b25683cd9190c783f30",
     "sites": {
      "100": 2585
     }
    },
    "native_differences": {
-    "sha256": "88f49b03c727ed208e0442fa87714d43003b3bcef24bdb1f6f806b022540ef1b",
+    "sha256": "58912441d2ce2de680319ae5391b8d634d493adfb945f18ee58d81987b85f240",
     "sites": {
      "100": 468
     }
@@ -10349,7 +10565,160 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "5138ec7814e19a0680e9cfd6ff29aba5fc18c3aaa894d3e3b09a3295ccc6c807"
+   "source_sha256": "9dd67a4488f07e934d12ba56b31994bf807bdfbeb0d39d069836d80e207ec008"
+  },
+  "composed:noah_mosaic_ucm[NOAH_LAND_ICE_RAIN_RUNOFF=1]": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "15bf6c19abd50cb1e68d3268887223c5422bf6ebac59b488b0ae731fa14ec0b9",
+    "sites": {
+     "100": 2585
+    }
+   },
+   "native_differences": {
+    "sha256": "fec09e3b05eb54ef5b23033cdba340a4978913d351fb8865ae9eb3729b2d8ee5",
+    "sites": {
+     "100": 468
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "--fmad=false",
+     "-DGPUWM_RETAIN_SUBNORMALS_KEY=1",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "--fmad=false",
+     "-DGPUWM_RETAIN_SUBNORMALS_KEY=1",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "662c68d0b3e04945314d2607061950816ad711a3b14e210b28313dbeb7b8d2a0"
+  },
+  "composed:noah_mosaic_ucm[NOAH_SMC_FLOOR_BOOKING=1,NOAH_LAND_ICE_RAIN_RUNOFF=1,NOAH_SNOW_SERIES_CONDUCTIVITY=1]": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "7b4844f06f135f3570f178f6fe26feee3941a7c3855c70f0544676a2d1268cdb",
+    "sites": {
+     "100": 2584
+    }
+   },
+   "native_differences": {
+    "sha256": "739bd372dc5b72c3ee44dd5c7e288480fcce4a011195fa13747dac06e1cc7af9",
+    "sites": {
+     "100": 468
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "--fmad=false",
+     "-DGPUWM_RETAIN_SUBNORMALS_KEY=1",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "--fmad=false",
+     "-DGPUWM_RETAIN_SUBNORMALS_KEY=1",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "b67d5571a1282659d1c6b51de6cd7c63e922224c5fdc215954b42ebadcc7cd7b"
+  },
+  "composed:noah_mosaic_ucm[NOAH_SMC_FLOOR_BOOKING=1,NOAH_LAND_ICE_RAIN_RUNOFF=1]": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "d7119324a8c40f5fdaf91fb8e8b053a65a318fd63c69569ccac0ec0eead13112",
+    "sites": {
+     "100": 2585
+    }
+   },
+   "native_differences": {
+    "sha256": "0257eb025b0b2f4ecaed424c14a2d8dea479ced981f72b82b0a26dc36adca1ac",
+    "sites": {
+     "100": 468
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "--fmad=false",
+     "-DGPUWM_RETAIN_SUBNORMALS_KEY=1",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "--fmad=false",
+     "-DGPUWM_RETAIN_SUBNORMALS_KEY=1",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "c884501b40fbbccbc9ed28859c96f54cdf1bfbb4a9f94d8c40bc2d5930dc3c91"
   },
   "composed:noah_mosaic_ucm[NOAH_SMC_FLOOR_BOOKING=1]": {
    "assessment": "static_diagnostic_only",
@@ -10368,13 +10737,13 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "32a20ae05ae0768811443f8956c5223b59651e5378b9014c5a017cf701a4ad65",
+    "sha256": "eb5dc78455e556c3c1f81f7c489dff35c44b916a2ae1b438d258d80932ee8e56",
     "sites": {
      "100": 2585
     }
    },
    "native_differences": {
-    "sha256": "d36e1dec15f37bb53a56c8d58e120057fbc3ffa6da68596eb393f4fd7e8175c9",
+    "sha256": "fec09e3b05eb54ef5b23033cdba340a4978913d351fb8865ae9eb3729b2d8ee5",
     "sites": {
      "100": 468
     }
@@ -10400,7 +10769,58 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "c1102dc6f68f0730c071f6abdd5a44e00576c344c9a207f200e300315b30ce80"
+   "source_sha256": "c81eed87cb31ac8702b7a96beda1e441b2465e5eb9e6f7e103286fb5bb332e4d"
+  },
+  "composed:noah_mosaic_ucm[NOAH_SNOW_SERIES_CONDUCTIVITY=1]": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "8a40e7caadc0a5096e33333af519168305542e369e11b90cc5732e01ced5c2f4",
+    "sites": {
+     "100": 2584
+    }
+   },
+   "native_differences": {
+    "sha256": "fec09e3b05eb54ef5b23033cdba340a4978913d351fb8865ae9eb3729b2d8ee5",
+    "sites": {
+     "100": 468
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "--fmad=false",
+     "-DGPUWM_RETAIN_SUBNORMALS_KEY=1",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "--fmad=false",
+     "-DGPUWM_RETAIN_SUBNORMALS_KEY=1",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "3b8e0692219ac5fc6d79a6f3a3907e173ba1edf4e111a1a4627bd7cd4a0a9c53"
   },
   "composed:noah_sfcdiags": {
    "assessment": "static_diagnostic_only",
@@ -16672,13 +17092,13 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "f291551023d1d9874fb616b54a672519e8a229761efaa0f18f3dc4488dbfe758",
+    "sha256": "106d996e8f1817070d3bff8cc4e5f69617ea3565177a8695534771726a6fdbcc",
     "sites": {
      "100": 1313
     }
    },
    "native_differences": {
-    "sha256": "3abdbeea2345fdfdb39abdfa4b9fd9c48fe5615ad5b07a834f9f05972df6e623",
+    "sha256": "d229a5485a18f06d9b75c008050bba01a5886e03733fa9eab3e6c955b050b404",
     "sites": {
      "100": 91
     }
@@ -16700,7 +17120,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "a6e0d660ddfe9a7be6ad6795be9196eaed398e813562e1efcde8e81f1ba0686f"
+   "source_sha256": "8405bc406a7a5e108f34d39cb54b9edc2132e57e257ead88db16d31d554ae765"
   },
   "kernels:gsfcgce": {
    "assessment": "static_diagnostic_only",
@@ -17720,7 +18140,7 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "0892f486547dbd9e25cb58eec0599ad089b08eb819e361aba3bf756b5f7a03c6",
+    "sha256": "9810b6dece01a9e6e7d5a34d01992485abe358ba7ef59cfcabdf1f724b1609f8",
     "sites": {
      "100": 261
     }
@@ -17750,7 +18170,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "387f2e0d20c9820963853e606a88f71484c3096f3ae0a4a43f29828607ef1b76"
+   "source_sha256": "a48a1a4b3293cc46af03361d5f9877a829c3ef1b11233fe17d35f2e55f20bd13"
   },
   "kernels:kf_old": {
    "assessment": "static_diagnostic_only",
@@ -17865,13 +18285,13 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "aad1b9861301a2fddbb97445eef55660069a420cbfa25ab6a959ba98e3e4f595",
+    "sha256": "043cb0482f9f4d983a24ad0558c64b9eae97d771e59f764c415cdf727e6c53ca",
     "sites": {
      "100": 649
     }
    },
    "native_differences": {
-    "sha256": "f24b10e47da9e28cb522e16dd32a2ae690c2b5391ab99469a531b83c3cba7ca2",
+    "sha256": "9389ad901129d39826a296f4f8f1af224e118454c3286dbf4aa058f50d129139",
     "sites": {
      "100": 49
     }
@@ -17895,7 +18315,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "78083893d169c5e6d6d2621718166742b34ddccb7b515e0f5a11cce782f49a8b"
+   "source_sha256": "7ede1157f4ba1a611710898414ef2d57acaf560f07266d1102c05724ed6f301a"
   },
   "kernels:km5": {
    "assessment": "static_diagnostic_only",
@@ -17969,15 +18389,15 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "db0cf53d546c02a0fe410cc296bc57bd70226b1f057928980460d254dbeb2705",
+    "sha256": "f7683ae0de21977843e9743bdc00ebf62b5ef8531e7e37b987ffd3b1e26bd4f3",
     "sites": {
      "100": 510
     }
    },
    "native_differences": {
-    "sha256": "b1b7cd2aebcde8eb5891ed65ebd66c10ba493a18177abdf76177d709a9a6a4a4",
+    "sha256": "bbe2cf727356e82389c06717bb8b3e81d07e2c8ef09545c5386f9bb1dc5ada88",
     "sites": {
-     "100": 186
+     "100": 189
     }
    },
    "native_errors": {},
@@ -18005,7 +18425,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "7d154190fa5c92c46d24c6505a1803ac7324b0c5273a98c49b0f329cde309ce0"
+   "source_sha256": "bab262aaf5b39410062a60ccbc5dd30a4516595ca03b6ef719131e79cbaf2894"
   },
   "kernels:lake": {
    "assessment": "static_diagnostic_only",
@@ -18923,13 +19343,13 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "f8bc304c8617ec9979d3bf3bf06c464c6288f753944e9e58a0cbebdd1bece769",
+    "sha256": "dbb054088a7ded0c69272fbfba71e8c7a621c9bda0977851fe7fe50c062de290",
     "sites": {
      "100": 724
     }
    },
    "native_differences": {
-    "sha256": "ecfc9bcb5dc26c88d4408cc1d35115c8cc930d452a104851b4e77936d4b88355",
+    "sha256": "c5dad6a5cd9d7a2106eba9e176f4e280d66de9c18d6143d066a264cd16375877",
     "sites": {
      "100": 53
     }
@@ -18955,7 +19375,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "31a67aeb18faaa6bd37d4df7b09b65016373a70668f09230a13e7ddba82d4e0f"
+   "source_sha256": "1a8082f6441f137685343faa8af57a83f6a505e83a19eaadace1f81a48b8adc4"
   },
   "kernels:mskf_aerosol_replay": {
    "assessment": "static_diagnostic_only",
@@ -19315,7 +19735,7 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "e0a540d87472166d49092c03bfa258f39cd91374a6a43fb57efc6aac20069410",
+    "sha256": "0c44c08cff1ae1841f4c50c83b79b8bd0de8e19e0e221b0cd3b2210479de3911",
     "sites": {
      "100": 494
     }
@@ -19345,7 +19765,56 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "179711d725891b0ab4b4431b7e788d0fa372cde253a1a36760c545296c01f6c1"
+   "source_sha256": "1f61b4c1a35190151579e0599882f8021498e2bff645e8329fb969356742ae7b"
+  },
+  "kernels:mynn_surface[MYNN_SL_PSIH_ZOLZT=1,MYNN_SL_Q2_LAND_CAP=1]": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "b340ac30c2ef9eeed75e7a4fdbf689da50dc74296be13be5a22773363829d637",
+    "sites": {
+     "100": 494
+    }
+   },
+   "native_differences": {
+    "sha256": "30312c26cbd93436b7a40cd5f0ff87a84e7d70b7b6541982130c29ec4bfaad52",
+    "sites": {
+     "100": 378
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "--fmad=false",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "--fmad=false",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "455597d59ab1028e3ccb9b43ab46287c88d4bf79b9316da11ce9a8cab501b562"
   },
   "kernels:mynn_surface[MYNN_SL_PSIH_ZOLZT=1]": {
    "assessment": "static_diagnostic_only",
@@ -19364,7 +19833,7 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "924fdb4903a3ef8325193799cbd513742b4674b42cd093b4f420ab03f44502fc",
+    "sha256": "70260082ee658a4863c065b1d7401a0be4715af72aed0c02f662f4cef54e49bb",
     "sites": {
      "100": 494
     }
@@ -19394,7 +19863,56 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "c3618cbba3fb6a0befb3ac9bb8358bb1e4995ea0ad5d1bf4e7b0e89989abd378"
+   "source_sha256": "f09d0a4755b062f49f4b5540e5f7515492959422040694e31a31113df8afce93"
+  },
+  "kernels:mynn_surface[MYNN_SL_Q2_LAND_CAP=1]": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "eb7042c50a94a18fc5e27cbae0aa9e298274c124b0fe855fc809f85dd98287ca",
+    "sites": {
+     "100": 494
+    }
+   },
+   "native_differences": {
+    "sha256": "f13f9e3bdb7a68f65c207a8c95c50c53574c86e44ca07f840ecac8b8b3069510",
+    "sites": {
+     "100": 378
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "--fmad=false",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "--fmad=false",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "30e17fa7922a7c35c34bb91140096dbdd27075ce2581613bb3f0f06abf1312e7"
   },
   "kernels:native_surface_diagnostics": {
    "assessment": "static_diagnostic_only",
@@ -19695,13 +20213,13 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "d72e16636e377bc516ff84f1175662d0702bcd8de7553ba2f39b337cf662ff7f",
+    "sha256": "a8f64cf673f130577de11b3a1810e980ade8adeb730fe4f04bab0c4ae890b555",
     "sites": {
      "100": 4716
     }
    },
    "native_differences": {
-    "sha256": "180fbf7b356ad427279a925df59801df58ce472b614ebff34a56ca47a82e9172",
+    "sha256": "57234c488e901441a17ae9f0fc96077ab0da17ed05d91365ba977216af1da560",
     "sites": {
      "100": 253
     }
@@ -19725,7 +20243,154 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "d97d7894899756adbae9cfbc6e388c6fedc9e95292ae9515111f7819c3675aa2"
+   "source_sha256": "69c41184f86c3b7c73426700a4611239a6401ae710ca9123ef11e15293e2f2cd"
+  },
+  "kernels:noah[NOAH_LAND_ICE_RAIN_RUNOFF=1]": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "c0a620ad3881c8589a6a2d9ac09e66d50fdce2e0e3f4de881f2673338a321ecb",
+    "sites": {
+     "100": 4717
+    }
+   },
+   "native_differences": {
+    "sha256": "0f66d1e9af8f04d0a1b45311103d5d94001ea990ce5685233f4e2b2f824637a3",
+    "sites": {
+     "100": 253
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "--fmad=false",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "--fmad=false",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "672a9c9399ecb8df583d595ed5366142bb8e179d9566a5d30bb7bbdc31f84bd1"
+  },
+  "kernels:noah[NOAH_SMC_FLOOR_BOOKING=1,NOAH_LAND_ICE_RAIN_RUNOFF=1,NOAH_SNOW_SERIES_CONDUCTIVITY=1]": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "21cc91c8f35641eceab6c59386399bbfb147ad39a96ee6392bc1c0e89a487231",
+    "sites": {
+     "100": 4722
+    }
+   },
+   "native_differences": {
+    "sha256": "c5993563eb15925312539f15381af38a972e32f8c582f2b5c05eceea1f7910fd",
+    "sites": {
+     "100": 253
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "--fmad=false",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "--fmad=false",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "ee374fb930098b9e4b0b17ef72e075e056807fe67ccb82727c3a3fbcc61dc95a"
+  },
+  "kernels:noah[NOAH_SMC_FLOOR_BOOKING=1,NOAH_LAND_ICE_RAIN_RUNOFF=1]": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "98ec8f9878f17ed4e59f36f2b3aafc13ef3d2ed23490b7fd37a169da43366e5b",
+    "sites": {
+     "100": 4712
+    }
+   },
+   "native_differences": {
+    "sha256": "5c38d0e7feff97cae0b200ad893259ce45c37aec3f8e2fce44ed5b43012c787e",
+    "sites": {
+     "100": 253
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "--fmad=false",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "--fmad=false",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "70fc948c80466972d4fc89fbf73bfce0567bee53237cdbba301bd52d917636ba"
   },
   "kernels:noah[NOAH_SMC_FLOOR_BOOKING=1]": {
    "assessment": "static_diagnostic_only",
@@ -19744,13 +20409,13 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "67269f0858f538da76dc33947b3eba782d17b9c4ffc8a9053f688af4bece9654",
+    "sha256": "0912920369f564790eebca1a237ff6b6889a25cc0cc2401aaaa6b0aa94c530cb",
     "sites": {
      "100": 4724
     }
    },
    "native_differences": {
-    "sha256": "413f8cfe7710a24e75ec2a5cd59ce672d2a9f461414cd98d861dbeb4874ab83e",
+    "sha256": "0f66d1e9af8f04d0a1b45311103d5d94001ea990ce5685233f4e2b2f824637a3",
     "sites": {
      "100": 253
     }
@@ -19774,7 +20439,56 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "e6d7e75c45c29f6cb0d85d55bb5b95efa5168e9f2603853c23d730765f2f0e72"
+   "source_sha256": "135c9ac54630b864d00ed5207faa7126ff569fec4cfcd4be0d5fecd39f1fd544"
+  },
+  "kernels:noah[NOAH_SNOW_SERIES_CONDUCTIVITY=1]": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "9022beb2e71443d0cc9bdf65984592ab56b7496cfaee278e5e3e1bcf1fc9b84d",
+    "sites": {
+     "100": 4728
+    }
+   },
+   "native_differences": {
+    "sha256": "0f66d1e9af8f04d0a1b45311103d5d94001ea990ce5685233f4e2b2f824637a3",
+    "sites": {
+     "100": 253
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "--fmad=false",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "--fmad=false",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "b97178c026e7a1e084891d7d59782cd2eeb0d5d58620a1f2920b8d21f6241e67"
   },
   "kernels:noah_fractional": {
    "assessment": "static_diagnostic_only",
@@ -19842,13 +20556,13 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "175057325606a96710abd9bf0130e9214827baff285ee668092c65305b629d9b",
+    "sha256": "5684a4db414a72f7de28dc914efd849dc56bafe548dcff34a0ec6e145be05791",
     "sites": {
      "100": 5790
     }
    },
    "native_differences": {
-    "sha256": "aef58f4c93678e44bd01c5f39ed0e36bedbec833d13b4fb6ce8ab18dce84fd57",
+    "sha256": "4a00de8f053e75f5d7c114f1d7058130eb496de9985e233e299e338310f407b2",
     "sites": {
      "100": 254
     }
@@ -19870,7 +20584,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "18bc83d93a1bd6c335a166de39f66b3e01d37c05bdb5485012e863fa3d57ea32"
+   "source_sha256": "2cd9f36e6ecb4a1fab35f6010ad6b69a1de2e48178195b4378dbd9cd6928f0bd"
   },
   "kernels:noah_mosaic": {
    "assessment": "static_diagnostic_only",
@@ -19889,13 +20603,13 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "22d3d85b2e465365c547127e86c604fd70399a96c49c654dadcd342e9264274d",
+    "sha256": "32b36a4b0cd365d0ff7bdad8a502a983ab877f9a48ba81df44fa45bd9acccafd",
     "sites": {
      "100": 889
     }
    },
    "native_differences": {
-    "sha256": "2a1d549583c18d97f2662f8b313b4c455317b8934d3082c9ae1273886ffa647e",
+    "sha256": "e966748b0cd109d3f0ef003dcbe01d4178e8707bdb646deeb3846bb8d35ac0d7",
     "sites": {
      "100": 60
     }
@@ -19917,7 +20631,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "0139651af0c0c43347f92567d5cec4dee069050d22a570a53149c8ce84d0df91"
+   "source_sha256": "ee52d8dfeb091ca8ae694dbe6dbdf509efe724155abe1efbb7af67d88e1f0789"
   },
   "kernels:noah_mosaic_ua": {
    "assessment": "static_diagnostic_only",
@@ -19936,13 +20650,13 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "d112438fba7f0e2efffdfa9593a6d5ef0e8c86cdba0fbe3621732fbc37d1fe45",
+    "sha256": "20030d6f957f76875bc0e67253c6098ceaee769be2f1ce6a351cd05f0d93a453",
     "sites": {
      "100": 831
     }
    },
    "native_differences": {
-    "sha256": "48677be9a1c9b9e6ff49c4d00c46a40baac51f0b8086b6c2033529378b6bb0ad",
+    "sha256": "16cba16c8fb5f34e68fa3a4640ee503acc18f753bd3eecd2dae2a37e63b419fb",
     "sites": {
      "100": 59
     }
@@ -19966,9 +20680,9 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "41a68033ac6d7bd58f4835167796b980966f4d7ef5f94f02539f37bf054ab20d"
+   "source_sha256": "8135e241f22ca47c2251a62fb92430a520a17c082ddfb7af40172fe36bb444ff"
   },
-  "kernels:noah_mosaic_ua[NOAH_SMC_FLOOR_BOOKING=1]": {
+  "kernels:noah_mosaic_ua[NOAH_LAND_ICE_RAIN_RUNOFF=1]": {
    "assessment": "static_diagnostic_only",
    "coverage": "compiled",
    "dataflow_differences": {
@@ -19985,13 +20699,62 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "f71371b5921da840db3e34dc65c335faf4183546c3f2d0479c96640256d14d4b",
+    "sha256": "fd0bb32bfc7f2c848b86c8ee7e96cd51ca8c86e78c3865390dd296c4ed508465",
     "sites": {
-     "100": 831
+     "100": 818
     }
    },
    "native_differences": {
-    "sha256": "c9703b7846bc7716a0c9865173fe3a9ab9977a88bb4a0fed3a1cb78b24ede55c",
+    "sha256": "09b3c4d747e8850e4a3d61f000082abb868fb4f12699bb363599d1e53cc7208e",
+    "sites": {
+     "100": 59
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "--fmad=false",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "--fmad=false",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "8b4b11b5dee79587510ab52a7737096f5b48ac6346bdb3ca81a354785f886c5c"
+  },
+  "kernels:noah_mosaic_ua[NOAH_SMC_FLOOR_BOOKING=1,NOAH_LAND_ICE_RAIN_RUNOFF=1,NOAH_SNOW_SERIES_CONDUCTIVITY=1]": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "7324c28e3548527e38fe4510c45d89e04392f2d150a59430a332a9114ed1dc6d",
+    "sites": {
+     "100": 832
+    }
+   },
+   "native_differences": {
+    "sha256": "3361ef89888c69ba99f6bd431e482ad86b2e5f77a4c3061932809247dcea02f0",
     "sites": {
      "100": 64
     }
@@ -20015,7 +20778,154 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "8126631eabac7501e702ffbd276226ee252256c7469c357c96761dd9e8312074"
+   "source_sha256": "8700268c1a2da9a4f02fd0d4b1a8e4dfdd7c75d9908c2a01bafd4e765019832f"
+  },
+  "kernels:noah_mosaic_ua[NOAH_SMC_FLOOR_BOOKING=1,NOAH_LAND_ICE_RAIN_RUNOFF=1]": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "295b05f5d73b74e887ae90cfd2dabc1f7bdc1a9f7569a5ae0ab44a279585d19a",
+    "sites": {
+     "100": 831
+    }
+   },
+   "native_differences": {
+    "sha256": "7b4013f0f0fa83c68a4fde1d0c0edb0aa8f345b0ce70700ae54905ad9ffb05f2",
+    "sites": {
+     "100": 64
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "--fmad=false",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "--fmad=false",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "facaac2f1fc98fd99bc5ef5e74923e2da58bb74002b903d90f2391c48f7395ad"
+  },
+  "kernels:noah_mosaic_ua[NOAH_SMC_FLOOR_BOOKING=1]": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "441d2e4a87f097f5bc9344ae2704b392bde9ff7ec350cadcdff2fca9fd6655bd",
+    "sites": {
+     "100": 831
+    }
+   },
+   "native_differences": {
+    "sha256": "c91c9d35b36993c962fa2adbdf818ff5f8ca3746b5b0335b016ee81be582e746",
+    "sites": {
+     "100": 64
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "--fmad=false",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "--fmad=false",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "5cf9c364bb291785d88e3a912d914332fd2d4e64bd41da9683075330e12c197c"
+  },
+  "kernels:noah_mosaic_ua[NOAH_SNOW_SERIES_CONDUCTIVITY=1]": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "e857810bd768881ea3c7af3f304ca23339ed140876689946bb41b5b5b97ff7f2",
+    "sites": {
+     "100": 832
+    }
+   },
+   "native_differences": {
+    "sha256": "09b3c4d747e8850e4a3d61f000082abb868fb4f12699bb363599d1e53cc7208e",
+    "sites": {
+     "100": 59
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "--fmad=false",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "--fmad=false",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "ec54b9aaae7bb149f7c27e7c3118217da19f16e0e9d1af7a1123d4e9455ca338"
   },
   "kernels:noah_seaice_options": {
    "assessment": "static_diagnostic_only",
@@ -20034,13 +20944,13 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "0eb22fca9bd1f43bcb813163fa49c2cf054bb60a711c27a983786f5453c937bf",
+    "sha256": "f122a485ca65124d389df4faf39e75a641e84a27f02e5b2de6ac9519c9bde853",
     "sites": {
      "100": 4755
     }
    },
    "native_differences": {
-    "sha256": "d5dd6b312de6f9f433ce2523c287c91edfdc8e00d64d3ba7fbec34f754d4f06f",
+    "sha256": "d37ff4de9bb5979d4628e1be68f60a9aa2b123e084f223818740d189e683ac2b",
     "sites": {
      "100": 296
     }
@@ -20064,7 +20974,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "3fea10dc4d8443f753b4a599964ce54e76c0261e4a7a7454cd39c2728392bbd9"
+   "source_sha256": "78cd1f6b7c9632ebe1af510c77b82cb1e65f10a6d81b07702e97257937d0fc77"
   },
   "kernels:noah_ua": {
    "assessment": "static_diagnostic_only",
@@ -20083,13 +20993,13 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "a6e80e86c5dfb4df3d929c641c3f8f1c409322c9d0c60a71f958b43a94a5496a",
+    "sha256": "d32357e77a69ff40ae7bb8f78372a89eba528ac3b61a6d86660b86d69b5f8a90",
     "sites": {
      "100": 4861
     }
    },
    "native_differences": {
-    "sha256": "889ed0a6e94bfeb1d6fb155e2fcd22b65200c3fad9ad954849bf57187df11dda",
+    "sha256": "7e548df9a8f7160a863b81e590d80bbefe07b1a69d06271a830c09bba974135a",
     "sites": {
      "100": 353
     }
@@ -20113,9 +21023,9 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "f938125c35aac081d68334e35eff3b63ef9c8bf721d3f3d74fe94ed855d003cf"
+   "source_sha256": "353e9a42d7ee85717cac1c37ef2b3f7419574b0d83d1950764333031651fc257"
   },
-  "kernels:noah_ua[NOAH_SMC_FLOOR_BOOKING=1]": {
+  "kernels:noah_ua[NOAH_LAND_ICE_RAIN_RUNOFF=1]": {
    "assessment": "static_diagnostic_only",
    "coverage": "compiled",
    "dataflow_differences": {
@@ -20132,13 +21042,62 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "49195034eedfec06311e1e72aebb59831cd0c538d03a78030636f8abb7580a05",
+    "sha256": "6b4c4e9b5311745553a3c56e0240c31ecdaf234223699ce6c1a1cda795d0de10",
     "sites": {
-     "100": 4868
+     "100": 4875
     }
    },
    "native_differences": {
-    "sha256": "5f51e799ec63204fd1be0fe76c1215e0faa1f83c72bad98fcc8d2e5efd053cea",
+    "sha256": "66d6f47f4c2341bc4b22e4d77d2af738b8403b67152afb6f11e6de8950ac2d46",
+    "sites": {
+     "100": 353
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "--fmad=false",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "--fmad=false",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "24f380287d0011c1e6bbd3b3247294e8a2c3979ec68017c2a41fbec6d5200199"
+  },
+  "kernels:noah_ua[NOAH_SMC_FLOOR_BOOKING=1,NOAH_LAND_ICE_RAIN_RUNOFF=1,NOAH_SNOW_SERIES_CONDUCTIVITY=1]": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "4d2f8d3b2693c50e7bce87ed3506bae6e278d8ab8092a8c834fc0627fc08eae7",
+    "sites": {
+     "100": 4879
+    }
+   },
+   "native_differences": {
+    "sha256": "9674a52c9f166525f157df2fe97827926f1ab808b0428190aea4ff88eb509132",
     "sites": {
      "100": 355
     }
@@ -20162,7 +21121,154 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "a99ec698ada2f14cb748caa7532693431acba0db15cbf1a047c3c2b186f016e7"
+   "source_sha256": "670545ddade7eaa8a33facd7b439cb6ef3f49243ccfbcd2269e77a8064175a2b"
+  },
+  "kernels:noah_ua[NOAH_SMC_FLOOR_BOOKING=1,NOAH_LAND_ICE_RAIN_RUNOFF=1]": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "dd47f64f3f1de461b78a9ab3cd75b78c1e1116bc2799ca4c53cd829bb47377a8",
+    "sites": {
+     "100": 4873
+    }
+   },
+   "native_differences": {
+    "sha256": "efb97dae24a01cd6f0e7d93abf63879764abfc73bdbdbb9c5dd0d0add2031538",
+    "sites": {
+     "100": 355
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "--fmad=false",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "--fmad=false",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "8dd56a9d9100d7b342833108ae251f3226d0a4740fbc4db31dfb7b29fbf36644"
+  },
+  "kernels:noah_ua[NOAH_SMC_FLOOR_BOOKING=1]": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "5b4c15c6febaa652c78032ae038d361554bc11cf99a19c95ff4ff685b70e6e69",
+    "sites": {
+     "100": 4868
+    }
+   },
+   "native_differences": {
+    "sha256": "cde0ba68faa88c57308086615e7e447ed6693dc266b2aa5a396f9d2db2639bd4",
+    "sites": {
+     "100": 355
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "--fmad=false",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "--fmad=false",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "ec8a5103ebcb39c4e9db19ea99da4b5aefa8af3c64b36a5cac89d2df6c551518"
+  },
+  "kernels:noah_ua[NOAH_SNOW_SERIES_CONDUCTIVITY=1]": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "6263ede9b0f90acfd2fb989ca742311746a64cf7556fed9e1044b3290433d716",
+    "sites": {
+     "100": 4876
+    }
+   },
+   "native_differences": {
+    "sha256": "1336dcb68abbe24867ec1db8a5a344de5961a4d939ea8d395a5088eb2b56ffe4",
+    "sites": {
+     "100": 353
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "--fmad=false",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "--fmad=false",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "7793bf4674db9b512704b36e186f5328c0991c3a458dbf05785b59a12b8c6c1e"
   },
   "kernels:noah_ua_sfcdiags": {
    "assessment": "static_diagnostic_only",
@@ -21552,13 +22658,13 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "589fc013acd97b94c7a631d9eba76b09f0e660ee67d980a8ad583028a04fcbae",
+    "sha256": "6a0845d434ca08ce1c1a51e509372889a08a28b516ebcc608889941a7a4d58bb",
     "sites": {
      "100": 5792
     }
    },
    "native_differences": {
-    "sha256": "71781082f8557616bdd9fcb0926222b97f89ac558f56d54acfd17e2a3a3cde23",
+    "sha256": "75901f37fbb5a733a7a95067fc5e4d588530de06b3ae45ba52393dc244c1b46c",
     "sites": {
      "100": 254
     }
@@ -21580,7 +22686,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "dcb89b5ada610a80737f03d3224ab48196f2e72ec1699c33011774a285557c4c"
+   "source_sha256": "dad23b1f3bdcd97b25645241f21b664b3960e2cfbe6d227ac8b3c6851d0f5236"
   },
   "kernels:pxsfclay": {
    "assessment": "static_diagnostic_only",
@@ -23462,15 +24568,15 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "9929b947f126292214e8dc6c8603c8d0351767e46b306d17639736fb06fcfb8c",
+    "sha256": "749a30314e98d8be9ce6c60b20b28cadc233661df02b0640b253b65f70628f40",
     "sites": {
      "100": 69
     }
    },
    "native_differences": {
-    "sha256": "7f5c23ffa65679fd4ef1177055b544bbcc3854594d2ee96a407dee5fcdaef8d5",
+    "sha256": "c7d0db6b997a58fca006cb827d29b8a72622b71313083c463c86305587f75d27",
     "sites": {
-     "100": 2
+     "100": 19
     }
    },
    "native_errors": {},
@@ -23498,7 +24604,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "7ce2db750d878b30d909effb04e1e5417f12c4623cea662cf54338e18e385d05"
+   "source_sha256": "9639f4fc991ee61b00f85b28e28e6f421c8aeccef882185bf1d27f9b0c3ecb89"
   },
   "kernels:shcu_deng": {
    "assessment": "static_diagnostic_only",
@@ -23805,15 +24911,15 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "f0e6cf2097d1741eee570d63b63ce3c52ad15245ca9b7b6653ade792d3739e10",
+    "sha256": "142d01257c339dda6d6554ec43e44511fe914364ac211af341da410100945ce9",
     "sites": {
      "100": 437
     }
    },
    "native_differences": {
-    "sha256": "b059deb9f8a610efc1b310b37298e69a3f4346a6eec6ff34ce024bb3c5cd8d0b",
+    "sha256": "6c9aa182c42cd9cbfd833327bb9f7239a52e55d45904079130bc8f5813676a00",
     "sites": {
-     "100": 167
+     "100": 170
     }
    },
    "native_errors": {},
@@ -23841,7 +24947,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "31b03d4dae7e29b0aa327c2b7d016f18d8eb5a47e0449f2896bfcb2d5efb5d0e"
+   "source_sha256": "5d1a1e57828f23f3f1f2d9bc16c57e892746f9c48aed5f54df4fbd7b01a5ac83"
   },
   "kernels:smag2d_theta_m": {
    "assessment": "static_diagnostic_only",
@@ -23860,15 +24966,15 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "5332ba591e3bedcd27d1ffa6b02179408293c89a6cb18091c35aa31861093142",
+    "sha256": "6af68097a23ee036143a17918c73f48ea55ea63ce7adf06d3cece8940c1e315e",
     "sites": {
      "100": 481
     }
    },
    "native_differences": {
-    "sha256": "32d6e66a061488ed6cd88cb34991cb46ec71f76f8ef423ace584e15d13aa65c4",
+    "sha256": "1a8c9053a98251b460abef22e4a1832e2bf56298e75ca5c5939e691f417ccb1c",
     "sites": {
-     "100": 168
+     "100": 171
     }
    },
    "native_errors": {},
@@ -23896,7 +25002,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "c7e9ef30a1af297f51c1ea60014fa6e5558a411b9fabac37982f17c491e18a8e"
+   "source_sha256": "5addb8c3022dc1293a0195260ed230f3a094834a73a5a935c6615f1a37587031"
   },
   "kernels:smag2d_tke_faces": {
    "assessment": "static_diagnostic_only",
@@ -23915,123 +25021,13 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "7e3b9c0e8695f7f3a4be7e7a7ac1465ae511eb2f3d0c3002202c18bd553fca9e",
+    "sha256": "f844f330157951c5502079903bf7a0a91bbdd9d5dbcdd5273ee1d66a11dbc992",
     "sites": {
      "100": 500
     }
    },
    "native_differences": {
-    "sha256": "29ac362901c9d3a3c628693f5f8cee8921c06b233b2fc5c53145117b1865e34f",
-    "sites": {
-     "100": 177
-    }
-   },
-   "native_errors": {},
-   "options": {
-    "100": [
-     "-std=c++17",
-     "--fmad=false",
-     "--ftz=false",
-     "--prec-div=true",
-     "--prec-sqrt=true",
-     "-DGPUWM_WRF_EXACT_C_DIFFUSION=1",
-     "--device-as-default-execution-space",
-     "-lineinfo",
-     "-arch=compute_100"
-    ],
-    "120": [
-     "-std=c++17",
-     "--fmad=false",
-     "--ftz=false",
-     "--prec-div=true",
-     "--prec-sqrt=true",
-     "-DGPUWM_WRF_EXACT_C_DIFFUSION=1",
-     "--device-as-default-execution-space",
-     "-lineinfo",
-     "-arch=compute_120"
-    ]
-   },
-   "source_sha256": "3604f59a1cf5489b8a124c9f435dad934f82782db39aa30ef297a5c5be3ff7e1"
-  },
-  "kernels:smag2d_uv_faces": {
-   "assessment": "static_diagnostic_only",
-   "coverage": "compiled",
-   "dataflow_differences": {
-    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
-    "sites": {
-     "100": 0
-    }
-   },
-   "differences": {
-    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
-    "sites": {
-     "100": 0
-    }
-   },
-   "errors": {},
-   "native_dataflow_differences": {
-    "sha256": "8c26d4159b892ecb90b506b406375afe573f3942ea01b189a3f48c652eb81e8c",
-    "sites": {
-     "100": 497
-    }
-   },
-   "native_differences": {
-    "sha256": "6e6bf435d933ba25cf25a21a5318c21f2c8874c4a497375411d572a56d578bf4",
-    "sites": {
-     "100": 177
-    }
-   },
-   "native_errors": {},
-   "options": {
-    "100": [
-     "-std=c++17",
-     "--fmad=false",
-     "--ftz=false",
-     "--prec-div=true",
-     "--prec-sqrt=true",
-     "-DGPUWM_WRF_EXACT_C_DIFFUSION=1",
-     "--device-as-default-execution-space",
-     "-lineinfo",
-     "-arch=compute_100"
-    ],
-    "120": [
-     "-std=c++17",
-     "--fmad=false",
-     "--ftz=false",
-     "--prec-div=true",
-     "--prec-sqrt=true",
-     "-DGPUWM_WRF_EXACT_C_DIFFUSION=1",
-     "--device-as-default-execution-space",
-     "-lineinfo",
-     "-arch=compute_120"
-    ]
-   },
-   "source_sha256": "5bea8ad7848c4d7b1378f1ccad51dad840549a8656b53f27eaad6c70530db3df"
-  },
-  "kernels:smag2d_w_faces": {
-   "assessment": "static_diagnostic_only",
-   "coverage": "compiled",
-   "dataflow_differences": {
-    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
-    "sites": {
-     "100": 0
-    }
-   },
-   "differences": {
-    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
-    "sites": {
-     "100": 0
-    }
-   },
-   "errors": {},
-   "native_dataflow_differences": {
-    "sha256": "fb1f7271534b0ea1ce79bf5644922311ed59eb88da72a9214117b6b86ec2401d",
-    "sites": {
-     "100": 497
-    }
-   },
-   "native_differences": {
-    "sha256": "6180d8fd5f967fbc464f5d62dd0c543b14e6c3233709837cc4b172571f416fa3",
+    "sha256": "10de26fdb01ae52ca0fc7009a63aa4334d505f8b6e730aec5b90f5f8f6ecc2b2",
     "sites": {
      "100": 178
     }
@@ -24061,7 +25057,117 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "df9d7ac7d744545f0fc664b7a1b819a6e07a2c45d3eea2013319f7ee0c95b2af"
+   "source_sha256": "6e8e99bdd3b2bfe552f1aafeed2ba8ab811e60bc271b65f4f1d56b8f52250440"
+  },
+  "kernels:smag2d_uv_faces": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "86a05aa9a91654b68ac5447a337d292e345486618de3065804156fb8b538861f",
+    "sites": {
+     "100": 497
+    }
+   },
+   "native_differences": {
+    "sha256": "dc1bea09c9c531344757b8f37269d47457ea3ac7db1ef75296fa96d91d4df038",
+    "sites": {
+     "100": 180
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "--fmad=false",
+     "--ftz=false",
+     "--prec-div=true",
+     "--prec-sqrt=true",
+     "-DGPUWM_WRF_EXACT_C_DIFFUSION=1",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "--fmad=false",
+     "--ftz=false",
+     "--prec-div=true",
+     "--prec-sqrt=true",
+     "-DGPUWM_WRF_EXACT_C_DIFFUSION=1",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "80504d4b46f9808e6764c8b18550aedfb642ccd5ba1f7d6e61706e04ff9607f1"
+  },
+  "kernels:smag2d_w_faces": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "8b3be9cea09c79214641be3bd26eff3aaaeb035c1d9ca2948999c15c39e24424",
+    "sites": {
+     "100": 497
+    }
+   },
+   "native_differences": {
+    "sha256": "a65f1a94d2e480f14a3cefed1e940ff005c7a03e1eb0f3cb86e6274835363237",
+    "sites": {
+     "100": 181
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "--fmad=false",
+     "--ftz=false",
+     "--prec-div=true",
+     "--prec-sqrt=true",
+     "-DGPUWM_WRF_EXACT_C_DIFFUSION=1",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "--fmad=false",
+     "--ftz=false",
+     "--prec-div=true",
+     "--prec-sqrt=true",
+     "-DGPUWM_WRF_EXACT_C_DIFFUSION=1",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "e91e93f9fcef5906857fa5b952bc00a2cb5e9e5a2650b6d6237cbe2b697089d7"
   },
   "kernels:sms3dtke": {
    "assessment": "static_diagnostic_only",
@@ -24784,22 +25890,22 @@
     }
    },
    "differences": {
-    "sha256": "b1bf7ecc49396f92a280525770e397167f5de2f04423e5d039519b1cf7710ac2",
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
     "sites": {
-     "100": 2
+     "100": 0
     }
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "e3312f2e6f2d4ab8d6b23dd1069fee572d0f1261a0926ccaddb7769b5534c914",
+    "sha256": "0c8d25faacdb26141361ada29cc3fa1a6a7bbd423ae2527e3811f5bc0030a602",
     "sites": {
      "100": 673
     }
    },
    "native_differences": {
-    "sha256": "eb9cd0bad3f7b6541561504811a797bdbe402d035450601a76f2ccb92149ff64",
+    "sha256": "ca1fb95eeaf8c92cb6437f721ca9ee2dab83b03a0382062494dea83c47295031",
     "sites": {
-     "100": 92
+     "100": 93
     }
    },
    "native_errors": {},
@@ -24819,7 +25925,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "5710765289a1e76bc92162d26853caa567ee2475567a72422c1ee62ac4414ea8"
+   "source_sha256": "55f62d942b90fd07b5e8476dc10c6d7aeab63af9dfa1172ded603a1af7f51522"
   },
   "kernels:tc_spray": {
    "assessment": "static_diagnostic_only",
@@ -25410,13 +26516,13 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "d77427e244f41e836468aefb56bb1dc2959abbddf34b379667371e07ad2f5a78",
+    "sha256": "60bd94683060d59fb7243e8d18232023d3d1f985c27eb34b0d5cc026f510fe97",
     "sites": {
      "100": 1577
     }
    },
    "native_differences": {
-    "sha256": "9bfb3d8b078843a4f60996505716f19500f8e37810cf8db2a66708b7278ad1db",
+    "sha256": "f1318481b53ccfb11e95435432c9fa834fb0a69608d4a4de16a2a55803d32526",
     "sites": {
      "100": 208
     }
@@ -25438,7 +26544,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "e8fddc338f216240deeb5caebc64ea058719e972779d38edf2c742d15ce9cf13"
+   "source_sha256": "92e710387d7af20a2f7242b90be1ed000fa4c52f4f115da07c5e6fb7f28abb34"
   },
   "kernels:thompson_classic": {
    "assessment": "static_diagnostic_only",
@@ -25649,13 +26755,13 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "d7110931be94fc3b11a0e17bb0b9cc2da0c07ae8e191a3a00ca0436708b6a517",
+    "sha256": "14dc30ad5ea31516bdf6c913c59b168b5ad09205b03c410d616b7ab6eb385278",
     "sites": {
      "100": 1230
     }
    },
    "native_differences": {
-    "sha256": "4fe873634762ca91e1c18e1d439b9d34a2d4b5e046eb457e6c23ee79679dc40f",
+    "sha256": "081b31502cc1df4640ddf7e2af1901bc2b413f0f6e9ef03a893614d3660f7839",
     "sites": {
      "100": 86
     }
@@ -25677,7 +26783,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "0143794d19daac080dbc8e0857c992eec727f493d8738bb776ba27f953c48f83"
+   "source_sha256": "383e701dcd1da43cf76ec2a4d88c0730b2f3341066006427c9a2eedec9d964c3"
   },
   "kernels:tiedtke": {
    "assessment": "static_diagnostic_only",
@@ -25837,15 +26943,15 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "c7e1b99b5beb61f44cc8932a94c36da0fcba956a2f7d6218c314f6d52a8accd4",
+    "sha256": "e7a2b7afd44274a6dff351e5251b6fe984b404cdcef78902c2db0de29c001826",
     "sites": {
-     "100": 396
+     "100": 244
     }
    },
    "native_differences": {
-    "sha256": "df88163e2db99c2011a1da90139ade9a43d361bdf419e7b0450bb9729294b83d",
+    "sha256": "632fdda1d931270daa17e24915b6df533fdebab73a590c487558efcef7f82cbe",
     "sites": {
-     "100": 39
+     "100": 35
     }
    },
    "native_errors": {},
@@ -25865,7 +26971,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "9b11daa09b7f128ab42ffb43cc077a1bde2ae0d754194d50477b92d7b9c78072"
+   "source_sha256": "fb62e6d96805a76c41fdc1eca3f5e10a6e2af9d883fcb4912d5461841d8f9533"
   },
   "kernels:tracer_pblmix": {
    "assessment": "static_diagnostic_only",
@@ -27444,7 +28550,7 @@
    },
    "source_sha256": "09a8565214c8550d78b4d3eb0ff3009aeafc1cc8fb9fceaa5b007883370928cb"
   },
-  "literal:woof/core/gfl.py:366": {
+  "literal:woof/core/gfl.py:340": {
    "assessment": "static_diagnostic_only",
    "coverage": "compiled",
    "dataflow_differences": {
@@ -27489,7 +28595,7 @@
    },
    "source_sha256": "ccef701f1f1ddc3fda00b3e023a28874c32e62e1b63b5a02adebd7de47bb51f6"
   },
-  "literal:woof/core/gfl_873b414.py:43867": {
+  "literal:woof/core/gfl_873b414.py:43925": {
    "assessment": "static_diagnostic_only",
    "coverage": "compiled",
    "dataflow_differences": {
@@ -28041,7 +29147,7 @@
    },
    "source_sha256": "aa3255ad884eddc46748ca4e4232188cc3a22c415444c5b956f7dc7dd3c70246"
   },
-  "literal:woof/ensemble/batch_physics.py:551": {
+  "literal:woof/ensemble/batch_physics.py:557": {
    "assessment": "static_diagnostic_only",
    "coverage": "compiled",
    "dataflow_differences": {
@@ -33047,6 +34153,53 @@
    },
    "source_sha256": "5815888a54fc20876e0c4ced4b2d06fd3b1ebd02e4a0012c96e5914fdaf037a8"
   },
+  "spp:mynn_surface[capacity=40,MYNN_SL_PSIH_ZOLZT=1,MYNN_SL_Q2_LAND_CAP=1]": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "bd1a9ba6079c30c1ef676dd694743f100e47c4396f800076e316af1f15bdf116",
+    "sites": {
+     "100": 549
+    }
+   },
+   "native_differences": {
+    "sha256": "740cb4c2568df8778661e73bad701c946db57af3d8eacf30f3178010f36e39df",
+    "sites": {
+     "100": 632
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "47cca52caca01bbb9aed32d78c78e03feade6511ddfb1c0bf85d9c0bc9f3a5cb"
+  },
   "spp:mynn_surface[capacity=40,MYNN_SL_PSIH_ZOLZT=1]": {
    "assessment": "static_diagnostic_only",
    "coverage": "compiled",
@@ -33064,7 +34217,7 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "bd08031c6b9e417f432eb79d60b626260013af1fda9751c8775f373ef13cbd3e",
+    "sha256": "10e64bc18bf2f81926ae98f898f940b30ee6ce50c0bb392dbaa6e68140a65ca3",
     "sites": {
      "100": 549
     }
@@ -33092,7 +34245,54 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "8f3ebf378093a4773083454163370bcdada40a8fbfd6971c58cfdddac537a6ac"
+   "source_sha256": "e56ca32bb942f7ca4c3908da3b06e51a57d6f522800630e2f176ed058b347a14"
+  },
+  "spp:mynn_surface[capacity=40,MYNN_SL_Q2_LAND_CAP=1]": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "abdcf1cc96fb15ddd4435b8f1384da8d89d6a1c5bb02d3ef03d159e7adf8ed1f",
+    "sites": {
+     "100": 549
+    }
+   },
+   "native_differences": {
+    "sha256": "601630da161fafbad2fb37f700ed0acea1b64448c38890b5b6a8a234d121e54a",
+    "sites": {
+     "100": 632
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "b1cd9e48cebe2a34f23ffc4ffd8a20824a102d6f5d979c4565e76bf115e2a2c7"
   },
   "spp:mynn_surface[capacity=40]": {
    "assessment": "static_diagnostic_only",
@@ -33111,7 +34311,7 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "df129a738b441097dba4ff4d83bb4cdb29ec98f942a58cf80f914d22daaab612",
+    "sha256": "c1a4cb01c71651c1fec0b173ba5bccd70fa2a0e2dfbf97e7e2dc4b108cc2b2fb",
     "sites": {
      "100": 549
     }
@@ -33139,7 +34339,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "b2745d3f2bcf8eee60ac158316f2c9fd01386d6e90f07382302662dc74e9f6ab"
+   "source_sha256": "0ea5f2a20e01ea5cc215dc558fe5a0a86da412905f143b551a6ef8b24d08fdd0"
   }
  }
 }

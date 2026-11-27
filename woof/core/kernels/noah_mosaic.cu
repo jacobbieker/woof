@@ -1365,6 +1365,11 @@ __device__ static void noah_mosaic_tile_glacial(MosaicState& s,
  real eta_e=etp_e>0.0f?esnow_e:etp_e;
  real ssoil_out=FMUL(-1.0f, ssoil);
  real runoff1=FDIV(snomlt, dt);
+#ifdef NOAH_LAND_ICE_RAIN_RUNOFF
+ // RunConfig.noah_land_ice_rain_runoff, as noah.cu: the liquid precipitation
+ // SFLX_GLACIAL drops (glacial_only.F:287, :912) leaves as surface runoff.
+ runoff1=FADD(runoff1, FMUL(prcpf, 0.001f));
+#endif
  // noahdrv:3605-3729 and 4062-4080. SOILW retains its previous tile value.
  s.lai=0.01f;s.canwat=FMUL(cmc, 1000.0f);s.snow=FMUL(sneqv, 1000.0f);s.snowh=snowhk;
  s.albedo=albedo;s.albbck=alb;s.z0=z0brd;s.emiss=emissi;s.znt=z0k;
@@ -1704,6 +1709,11 @@ __device__ static void noah_mosaic_tile(MosaicState& s,
         real frcsno = FDIV(snowhk, dtot);
         real frcsoi = FDIV(dsoil, dtot);
         real df1a = FADD(FMUL(frcsno, sncond), FMUL(frcsoi, df1));
+#ifdef NOAH_SNOW_SERIES_CONDUCTIVITY
+        // RunConfig.noah_snow_series_conductivity, as noah.cu: the unused
+        // series DF1H (module_sf_noahlsm.F:649) in place of DF1A (:656).
+        df1a = FDIV(FMUL(sncond, df1), FADD(FMUL(frcsoi, sncond), FMUL(frcsno, df1)));
+#endif
         df1 = FADD(FMUL(df1a, sncovr), FMUL(df1, (FSUB(1.0f, sncovr))));
         ssoil = FDIV(FMUL(df1, (FSUB(t1, stc[0]))), dtot);
     }
