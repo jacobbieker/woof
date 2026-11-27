@@ -1154,7 +1154,9 @@ woof pack-plan member.toml --copies 8 --deadline-hours 2 --emit-plan plan.toml
   CPU core of the card's share of the host. An option that admission
   refuses is shown as REFUSED and never recommended.
 - **Contention** is `woof estimate`'s sharing bracket above. A streamed
-  run is bus-bound and runs alone on its card.
+  run is bus-bound: it is priced at pure time-slicing (no gain from
+  sharing). Multi-run admission has no streamed-run rule, so packing one is
+  not refused.
 - **Choice.** `--objective makespan` (the default) or `throughput`, with
   an optional `--deadline-hours` every run must meet. Options within 5 % of
   the best are not separated by the prediction. Among them, measured

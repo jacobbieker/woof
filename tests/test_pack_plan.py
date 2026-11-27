@@ -342,3 +342,32 @@ def test_same_stem_configs_get_unique_deterministic_names(tmp_path):
     assert pp.run_names(paths) == ["a-member", "b-member", "solo"]
     assert pp.run_names([paths[0], paths[0]]) == ["a-member-1", "a-member-2"]
     assert pp.run_names(paths) == pp.run_names(paths)
+
+
+def test_json_is_strict_when_an_option_is_refused(tmp_path, capsys,
+                                                  monkeypatch):
+    import woof.supervisor as supervisor
+
+    monkeypatch.setattr(supervisor, "priced_reservation_bytes",
+                        lambda e: 60 * GIB)
+    cfg = _config(tmp_path, name="big")
+    args = _parse(str(cfg), "--card", "a6000", "--max-slots", "2", "--json")
+    args.func(args)
+
+    def refuse(name):
+        raise ValueError(f"non-standard JSON token {name}")
+    doc = json.loads(capsys.readouterr().out, parse_constant=refuse)
+    refused = [o for o in doc["options"] if not o["admitted"]]
+    assert refused and refused[0]["makespan_s"] == [None, None]
+    assert refused[0]["central_makespan_s"] is None
+
+
+def test_a_streamed_run_is_priced_as_pure_time_slicing(monkeypatch):
+    def bracket(*a, **k):
+        raise AssertionError("streamed runs do not use the measured rows")
+    monkeypatch.setattr(rte, "sharing_bracket", bracket)
+    jobs = [replace(_job(n, fixed=0.0), road="streamed") for n in "ab"]
+    packed = pp.simulate(jobs, runner=_runner(), slots=2, mps=False)
+    alone = pp.simulate(jobs, runner=_runner(), slots=1, mps=False)
+    assert packed.admitted and packed.makespan_s == pytest.approx(
+        alone.makespan_s)

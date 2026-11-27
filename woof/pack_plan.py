@@ -28,7 +28,10 @@ four to a card ran 2.24-4.50x slower each, slower than time-slicing: a
 card a large domain already fills gains nothing from packing but the
 overlap of the runs' start-up.  Each run's alone time is
 ``woof estimate``'s.  A run streamed through host memory is bus-bound:
-it is planned alone on its card.
+it is priced at pure time-slicing (``n`` runs on a card each take ``n``
+times as long), so sharing gains it nothing.  multi-run admission has no
+streamed-run rule, so packing one is not refused; it is just never
+predicted to win by more than start-up overlap.
 
 The simulation is a fluid one: a run's preparation proceeds at its own
 pace (CPU), and its forecast at ``1 / slowdown(n)`` where ``n`` is the
@@ -40,13 +43,12 @@ wait with it).
 
 from __future__ import annotations
 
-import argparse
 import json
 import math
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Sequence
 
 from woof.runner_cards import CUDA, GIB, Runner, RunnerSpecError
 
@@ -356,6 +358,12 @@ def slot_cap(runner: Runner, max_slots: int | None = None) -> int:
     return max(1, cap)
 
 
+def _finite(v: float) -> float | None:
+    """Rounded seconds, or ``None`` (JSON null) for an infinite makespan
+    (a refused option): strict JSON has no Infinity."""
+    return round(v, 1) if math.isfinite(v) else None
+
+
 @dataclass
 class Option:
     slots: int
@@ -390,8 +398,8 @@ class Option:
         return {"runs_per_gpu": self.slots, "mps": self.mps,
                 "order": self.order, "admitted": self.admitted,
                 "refused": self.low.refused or self.high.refused,
-                "makespan_s": [round(v, 1) for v in self.makespan],
-                "central_makespan_s": round(self.central_s, 1),
+                "makespan_s": [_finite(v) for v in self.makespan],
+                "central_makespan_s": _finite(self.central_s),
                 "runs_per_hour": [round(v, 2) for v in tp],
                 "most_on_one_card": max(self.low.max_on_card,
                                         self.high.max_on_card),
