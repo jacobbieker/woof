@@ -482,6 +482,13 @@ control binary is missing. This is the same daemon code as
 `woof energy worker --mps` (`woof/gpu_packing.py`). Packing and MPS have not
 been timed on hardware by this tree.
 
+The per-run GPU preflight reads `nvidia-smi pmon` types C, G, M and their
+`+` joins (an MPS client is `M+C`). A compute process that is not one of the
+run's own MPS siblings or its MPS server (matched by the
+`CUDA_MPS_PIPE_DIRECTORY` it was started under) is a co-tenant, priced against
+the card's free memory as before; an unrecognised type string still fails
+closed.
+
 ### Small domains: the host decides the step time
 
 Below about 0.5 M cells, a full-physics step costs more host time than GPU
