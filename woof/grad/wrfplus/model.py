@@ -278,6 +278,10 @@ def _refuse(cfg, state) -> None:
     checks.update({
         "mixing package other than diff_opt 1 / km_opt 4 or diff_opt 2 / km_opt 3 or 4": bool(
             wrf_mixing_package_active(cfg) and not _mixes(cfg)),
+        # named on their own: diff_opt 2's constant K, TKE and SFS closures
+        "diff_opt 2 with km_opt 1, 2 or 5": bool(
+            wrf_mixing_package_active(cfg) and int(cfg.diff_opt) == 2
+            and int(cfg.km_opt) in (1, 2, 5)),
         # what else _step_body runs that the chain does not
         "physics": bool(physics_enabled(cfg)),
         "radiation selector 31 (idealized Rayleigh friction)":
@@ -810,6 +814,8 @@ def run_state(state, cfg, dtype=np.float64) -> dict:
             out[n] = cp.zeros(shape, dtype=dtype)
     if _mixes(cfg):
         out.update(_mix_state(state, cfg, dtype))
+        if state.qv is not None:   # the moist rows' held sources
+            out.update({_q_slot(n): cp.zeros((nz, ny, nx), dtype=dtype) for n in SPECIES})
     if _diff2(cfg):
         # the base theta (calculate_N2, the theta row's full_theta), 3-D
         thb = cp.asarray(state.thb)
@@ -819,8 +825,6 @@ def run_state(state, cfg, dtype=np.float64) -> dict:
         if int(cfg.km_opt) == 3:   # smag_km's vertical pair and BN2
             out.update({n: cp.zeros((nz, ny, nx), dtype=dtype)
                         for n in ("smag_kmv", "smag_khv", "bn2")})
-        if state.qv is not None:   # the moist rows' held sources
-            out.update({_q_slot(n): cp.zeros((nz, ny, nx), dtype=dtype) for n in SPECIES})
     if cfg.specified:
         out.update(_lbc_state(state, cfg, dtype))
     return out

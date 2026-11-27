@@ -251,6 +251,7 @@ for key, over in cases.items():
     assert out["km4"] == out["km3"] == "accepted mix=True", out
     for key in ("km1", "km2", "km5"):
         assert "mixing package other than" in out[key], out
+        assert "diff_opt 2 with km_opt 1, 2 or 5" in out[key], out
     assert "moist diff_opt 2" in out["moist"], out
     assert "isfflx" in out["isfflx"], out
     assert "tc_horizontal_length_m" in out["tc"], out
