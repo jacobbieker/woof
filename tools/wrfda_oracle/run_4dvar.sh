@@ -12,11 +12,18 @@
 #        (mp/cu/bl/ra/sfclay/surface 0, diff_opt 0).
 #   l0   the tutorial's namelist as shipped (warm rain, PBL 98, CU 98).
 #
-# Every lane: one outer loop, hybrid_opt = 0 and use_theta_m = 0 (the
-# testdata are V3-style files), trajectory_io with var4d_detail_out so the
-# TL perturbations at each slot, the adjoint forcings and the gradient at
-# 0h are written to disk (checked non-empty), and files.sha256 over every
-# input and output.
+# Every lane: hybrid_opt = 0 and use_theta_m = 0 (the testdata are
+# V3-style files), var4d_detail_out so the TL perturbations at each slot,
+# the adjoint forcings and the gradient at 0h are written to disk (checked
+# non-empty), and files.sha256 over every input and output.
+#
+# MAX_EXT_ITS (default 1) sets max_ext_its, the outer loops (the 4D.4 L1
+# gate runs 2).  TRAJ_IO (default .true.) sets trajectory_io: .true. keeps
+# the nonlinear trajectory in memory; .false. has WRFPLUS write it to disk
+# every time step (auxhist6_d01_<date>, da_nl_model.inc) and read it back,
+# which is how woof gets WRF's own per-step states.  Later outer loops
+# overwrite the earlier loops' auxhist6 and detail files (same names); run
+# MAX_EXT_ITS=1 alongside for loop 1's.
 #
 # Layout under $W (default /d/scratch/wrfda) as run_tutorial.sh.
 # usage: run_4dvar.sh lid|l1|l0 NAME
@@ -29,6 +36,9 @@ W=${W:-/d/scratch/wrfda}; W=$(cd "$W" && pwd); D=$W/data; R=$W/run/$NAME
 S=$W/src/${TREE:-WRFDAV4.7.1-4dvar-dump}
 PLUS=$W/src/WRFPLUSV4.7.1
 export HOME=/tmp
+MAX_EXT_ITS=${MAX_EXT_ITS:-1}; TRAJ_IO=${TRAJ_IO:-.true.}
+case "$MAX_EXT_ITS" in [1-9]) ;; *) echo "MAX_EXT_ITS must be 1-9" >&2; exit 2;; esac
+case "$TRAJ_IO" in .true.|.false.) ;; *) echo "TRAJ_IO must be .true. or .false." >&2; exit 2;; esac
 H="2008-02-05_"
 NL=$S/var/test/4dvar/namelist.input
 [ -s "$NL" ] || { echo "$NL is missing: the 4D-Var tutorial namelist ships with WRFDA" >&2; exit 2; }
@@ -51,13 +61,13 @@ cp "$D/rc/2008020512/wrfinput_d01" fg
 ln -sf fg wrfinput_d01
 cp "$D/rc/2008020512/wrfbdy_d01" wrfbdy_d01
 for n in 1 2 3 4 5 6 7; do h=$((11 + n)); cp "$D/ob/20080205$h/ob0$n.ascii" "ob0$n.ascii"; done
-python3 - "$NL" "$LANE" > namelist.input <<'PY'
+python3 - "$NL" "$LANE" "$MAX_EXT_ITS" "$TRAJ_IO" > namelist.input <<'PY'
 import re, sys
-src, lane = sys.argv[1], sys.argv[2]
+src, lane, ext_its, traj_io = sys.argv[1:5]
 H = "2008-02-05_"
 want = {
     "wrfvar1": {"var4d": ".true.", "var4d_bin": "3600", "var4d_lbc": ".false.", "write_increments": ".true."},
-    "wrfvar6": {"max_ext_its": "1"},
+    "wrfvar6": {"max_ext_its": ext_its},
     "wrfvar18": {"analysis_date": f"'{H}12:00:00.0000'"},
     "wrfvar21": {"time_window_min": f"'{H}12:00:00.0000'"},
     "wrfvar22": {"time_window_max": f"'{H}18:00:00.0000'"},
@@ -77,7 +87,7 @@ want = {
     "time_control": {"run_hours": "6", "start_hour": "12", "end_hour": "18", "force_use_old_data": ".true.",
                      "input_from_file": ".true.", "io_form_auxhist7": "2", "io_form_auxhist8": "2",
                      "frames_per_auxhist7": "1", "frames_per_auxhist8": "1"},
-    "perturbation": {"trajectory_io": ".true.", "var4d_detail_out": ".true.",
+    "perturbation": {"trajectory_io": traj_io, "var4d_detail_out": ".true.",
                      "enable_identity": ".true." if lane == "lid" else ".false."},
     "dynamics": {"hybrid_opt": "0", "use_theta_m": "0"},
     # the shipped var/test/4dvar namelist says 1; the testdata files carry
@@ -134,10 +144,15 @@ ulimit -s unlimited
 grep -E "Elapsed|Maximum resident" time.txt
 [ "$status" = 0 ] && grep -q "WRF-Var completed successfully" rsl.out.0000 wrfda.out 2>/dev/null \
   || { echo "da_wrfvar.exe did not complete (exit $status)" >&2; exit 1; }
-grep -E "Final cost|Original gradient|Final: " wrfda.out | tail -6
+grep -E "Starting outer|Final cost|Original gradient|Final: " wrfda.out | tail -$((6 * MAX_EXT_ITS))
 ls -la
 shopt -s nullglob
-# var4d_detail_out under trajectory_io, last inner iteration: the TL
+if [ "$TRAJ_IO" = .false. ]; then
+  # the trajectory on disk: state 0 and one file per time step, 12Z to 18Z
+  f=(auxhist6_d01_*)
+  [ ${#f[@]} -ge 2 ] || { echo "trajectory_io = .false. wrote no auxhist6 trajectory" >&2; exit 1; }
+fi
+# var4d_detail_out, last inner iteration: the TL
 # perturbation at each of the 7 slots (auxhist8_d01_*, in G_*), the adjoint
 # forcing at each slot (af_d01_*, also in G_*: WRFDA reuses the g_ arrays)
 # and the 0h gradient (gradient_d01_*, in A_*).  A header-only file (no
