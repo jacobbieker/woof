@@ -3650,6 +3650,123 @@ extern "C" __global__ void h2_vrow_tl(wreal* __restrict__ tend, wreal* __restric
 
 // AD: into the row's inputs' adjoints (h2_inputs, stage vrow).  The
 // tendency adjoint is read, not consumed.
+// The vertical w and scalar rows' AD (rows 6, 7) by column: each word
+// gathers the tau33 (h3) statements that read it, each's adjoint from the
+// two tendency words it feeds and its partials by seeded pieces (tau33:
+// rho, K, w(k + 1) - w(k), rdzw; h3: the K and rho mixes, dvar, rdz).
+static __device__ wreal h2_t33g(const H2Src& s, const wreal* atend, int k, int j, int i,
+                                int q)
+{
+    if (k < 0 || k >= s.nz) return (wreal)0;
+    size_t m2 = (size_t)s.ny * s.nx, c = (size_t)j * s.nx + i;
+    wreal a = (wreal)0;
+    if (k > 0) a = a + wdiv(DF_G, s.dn[k]) * atend[(size_t)k * m2 + c];
+    if (k + 1 < s.nz) a = a - wdiv(DF_G, s.dn[k + 1]) * atend[(size_t)(k + 1) * m2 + c];
+    if (a == (wreal)0) return (wreal)0;
+    size_t h0 = (size_t)k * m2 + c, h1 = h0 + m2;
+    wreal pv[4] = {s.rho[h0], s.km[h0], s.w[h1] - s.w[h0], s.rz[h0]};
+    Dl x[4];
+    for (int e = 0; e < 4; ++e) x[e] = dl(pv[e], e == q ? (wreal)1 : (wreal)0);
+    Dl f = ((-x[0]) * x[1]) * (((wreal)2 * x[2]) * x[3]);
+    return a * f.d;
+}
+
+static __device__ wreal h2_h3g(const H2Src& s, const wreal* atend, int kw, int j, int i, int q)
+{
+    if (kw <= 0 || kw >= s.nz) return (wreal)0;
+    size_t m2 = (size_t)s.ny * s.nx, c = (size_t)j * s.nx + i;
+    wreal a = wdiv(DF_G, s.dnw[kw - 1]) * atend[(size_t)(kw - 1) * m2 + c]
+              - wdiv(DF_G, s.dnw[kw]) * atend[(size_t)kw * m2 + c];
+    if (a == (wreal)0) return (wreal)0;
+    size_t hc = (size_t)kw * m2 + c, hm = hc - m2;
+    wreal x1 = (s.fnm[kw] * s.km[hc]) + (s.fnp[kw] * s.km[hm]);
+    wreal x2 = (s.fnm[kw] * s.rho[hc]) + (s.fnp[kw] * s.rho[hm]);
+    wreal dv = s.f[hc] - s.f[hm];
+    if (s.full) dv = dv + (s.thb[hc] - s.thb[hm]);
+    wreal pv[4] = {x1, x2, dv, s.rz[hc]};
+    Dl x[4];
+    for (int e = 0; e < 4; ++e) x[e] = dl(pv[e], e == q ? (wreal)1 : (wreal)0);
+    Dl f = ((-(x[0] * x[1])) * x[2]) * x[3];
+    return a * f.d;
+}
+
+extern "C" __global__ void h2_vrow_wsad(const wreal* __restrict__ atend,
+                                        const wreal* __restrict__ st,
+                                        const wreal* __restrict__ u,
+                                        const wreal* __restrict__ v,
+                                        const wreal* __restrict__ w,
+                                        const wreal* __restrict__ f,
+                                        const wreal* __restrict__ rho,
+                                        const wreal* __restrict__ km,
+                                        const wreal* __restrict__ rz,
+                                        const wreal* __restrict__ qv, H2_V_PASSIVE,
+                                        wreal* __restrict__ ast, wreal* __restrict__ au,
+                                        wreal* __restrict__ av, wreal* __restrict__ aw,
+                                        wreal* __restrict__ af, wreal* __restrict__ arho,
+                                        wreal* __restrict__ akm, wreal* __restrict__ arz,
+                                        wreal* __restrict__ aqv, H2_GEOM)
+{
+    H2Src s = h2_src(H2_GARGS, 2);
+    s.w = w; s.f = f; s.rho = rho; s.km = km; s.rz = rz; s.qv = qv;
+    h2_vset(s, fnm, fnp, dn, dnw, ustm, hfx, qfx, thb, cd0, hflux, sfc, heat, full, qflux,
+            vint);
+    size_t t = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    size_t m2 = (size_t)ny * nx, m = (size_t)nz * m2, m1 = m + m2;
+    // the inputs (h2_inputs of stage vrow), written out
+    int ids[5], n = 0;
+    size_t sz[5];
+    if (row == 6) {
+        ids[0] = H2_W; ids[1] = H2_RZ; ids[2] = H2_RHO; ids[3] = H2_K; n = 4;
+        sz[0] = m1; sz[1] = sz[2] = sz[3] = m;
+    } else if (vint) {
+        ids[0] = H2_F; ids[1] = H2_K; ids[2] = H2_RHO; ids[3] = H2_RZ; n = 4;
+        sz[0] = sz[1] = sz[2] = m; sz[3] = m1;
+    } else {
+        ids[0] = H2_RHO; sz[0] = m; n = 1;
+    }
+    if (moist && heat == 2 && row == 7) { ids[n] = H2_QV; sz[n] = m; ++n; }
+    int q = 0;
+    while (q < n && t >= sz[q]) { t -= sz[q]; ++q; }
+    if (q >= n) return;
+    int id = ids[q];
+    size_t c = t % m2;
+    int l = (int)(t / m2), j = (int)(c / nx), i = (int)(c % nx);
+    wreal acc = (wreal)0;
+    wreal* out;
+    if (row == 6) {
+        if (id == H2_W) {
+            acc = h2_t33g(s, atend, l - 1, j, i, 2) - h2_t33g(s, atend, l, j, i, 2);
+            out = aw;
+        } else {
+            acc = h2_t33g(s, atend, l, j, i, id == H2_RHO ? 0 : id == H2_K ? 1 : 3);
+            out = id == H2_RHO ? arho : id == H2_K ? akm : arz;
+        }
+    } else {
+        if (vint) {
+            if (id == H2_K || id == H2_RHO) {
+                int e = id == H2_K ? 0 : 1;
+                acc = s.fnm[l] * h2_h3g(s, atend, l, j, i, e);
+                if (l + 1 < nz) acc = acc + s.fnp[l + 1] * h2_h3g(s, atend, l + 1, j, i, e);
+            } else if (id == H2_F) {
+                acc = h2_h3g(s, atend, l, j, i, 2) - h2_h3g(s, atend, l + 1, j, i, 2);
+            } else if (id == H2_RZ) {
+                acc = h2_h3g(s, atend, l, j, i, 3);
+            }
+        }
+        if (l == 0 && id == H2_RHO && heat == 1)
+            acc = acc - wdiv((DF_G * hflux), dnw[0]) * atend[c];
+        if (l == 0 && id == H2_QV) {
+            wreal cpm = DF_CP * ((wreal)1 + ((wreal)0.8 * qv[c]));
+            wreal hv = wdiv(hfx[c], cpm);
+            wreal hd = wdiv(-(hv * (DF_CP * (wreal)0.8)), cpm);
+            acc = acc - wdiv(DF_G * hd, dnw[0]) * atend[c];
+        }
+        out = id == H2_F ? af : id == H2_K ? akm : id == H2_RHO ? arho : id == H2_RZ ? arz
+              : aqv;
+    }
+    out[t] = out[t] + acc;
+}
+
 extern "C" __global__ void h2_vrow_ad(const wreal* __restrict__ atend,
                                       const wreal* __restrict__ st,
                                       const wreal* __restrict__ u, const wreal* __restrict__ v,

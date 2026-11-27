@@ -744,7 +744,8 @@ def _h2_vrow_ad(adj_state, traj, adj, T, A, geom, dtype):
     # the adjoint targets: the row's temps, else the active inputs; one
     # distinct scratch word per input the row does not read
     out = _h2_vsel(geom, {**adj, **A}, lambda n: cp.zeros(1, dtype=dtype))
-    _h2_launch("h2_vrow_ad", dtype, _h2_vrow_count(geom),
+    name = "h2_vrow_wsad" if geom.code in (6, 7) else "h2_vrow_ad"
+    _h2_launch(name, dtype, _h2_vrow_count(geom),
                (adj_state["tend"],) + val + _h2_vargs(traj, geom, dtype) + out, geom)
 
 
