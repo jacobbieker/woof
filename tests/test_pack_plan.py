@@ -195,8 +195,12 @@ def test_emitted_plan_loads_in_multi_run(tmp_path, linear):
         j.name for j in pp.order_jobs(jobs, best.order)]
     assert pp.invocations(best, str(plan))[0].startswith(
         f"woof multi-run {plan} --runs-per-gpu {best.slots}")
-    # No plan written: an obvious placeholder, not a file that is not there.
-    assert pp.NO_PLAN in pp.invocations(best)[0]
+    # No plan written: a plain placeholder name with the hint on its own
+    # comment line, so the printed lines stay safe to paste into a shell.
+    command, hint = pp.invocations(best)[:2]
+    assert hint == pp.NO_PLAN_HINT and hint.startswith("# ")
+    assert command.startswith(f"woof multi-run {pp.NO_PLAN} --runs-per-gpu")
+    assert not set("<>;|&") & set(command)
 
 
 def _parse(*argv):

@@ -515,8 +515,11 @@ def multi_run_queues(option: Option, runs: int, gpus: int) -> bool:
     return option.slots > 1 or runs <= max(1, gpus)
 
 
-#: What the command names when no plan file was written.
-NO_PLAN = "<PLAN.toml: not written; re-run with --emit-plan PLAN.toml>"
+#: What the command names when no plan file was written: a plain file
+#: name (no shell metacharacters), with the hint on its own comment line.
+NO_PLAN = "PLAN.toml"
+NO_PLAN_HINT = ("# PLAN.toml was not written; re-run with --emit-plan "
+                "PLAN.toml to write it")
 
 
 def invocations(option: Option, plan_path: str | None = None, *,
@@ -551,8 +554,10 @@ def invocations(option: Option, plan_path: str | None = None, *,
         return lines + ["wait", f"# {SERIAL_NOTE}; one queue per card, "
                         "the cards in parallel", worker]
     plan = shlex.quote(plan_path) if plan_path else NO_PLAN
-    return [f"woof multi-run {plan} --runs-per-gpu {option.slots}{mps}"
-            f"{margin}", worker]
+    command = (f"woof multi-run {plan} --runs-per-gpu {option.slots}{mps}"
+               f"{margin}")
+    return ([command, worker] if plan_path
+            else [command, NO_PLAN_HINT, worker])
 
 
 # --------------------------------------------------------------------------
