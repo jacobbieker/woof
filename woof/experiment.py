@@ -351,6 +351,9 @@ _DOMAIN_RUN_OVERRIDES = (
     # The diffusion-metrics periodic seam correction (FQ12), on the same
     # terms: a [shared] value reaches the diff_opt = 1, 2 domains only.
     "diff_metrics_seam_slope",
+    # The MYNN surface-layer Q2 land cap (FQ10), on the same terms: a
+    # [shared] value reaches the sf_sfclay_physics = 5 domains only.
+    "mynn_sfclay_q2_land_cap",
     # The umbrella over the opt-in quirk corrections (woof.quirk_corrections):
     # per domain like the corrections it turns on, each where its scheme runs.
     "woof_quirk_corrections",
@@ -5142,6 +5145,11 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
                      or kw.get("mynn_sfclay_variant", RunConfig.mynn_sfclay_variant) != "wrf_461")
                 and "mynn_sfclay_psih_zolzt" not in dom):
             kw["mynn_sfclay_psih_zolzt"] = False
+        if (tree_runs_mynn_sl
+                and (kw.get("sf_sfclay_physics", RunConfig.sf_sfclay_physics) != 5
+                     or kw.get("mynn_sfclay_variant", RunConfig.mynn_sfclay_variant) != "wrf_461")
+                and "mynn_sfclay_q2_land_cap" not in dom):
+            kw["mynn_sfclay_q2_land_cap"] = False
         if (tree_runs_noah and kw.get("sf_surface_physics", RunConfig.sf_surface_physics) != 2
                 and "noah_smc_floor_booking" not in dom):
             kw["noah_smc_floor_booking"] = False
@@ -6590,6 +6598,7 @@ def _public_config_value(value):
                                   ("kf_capped_downdraft_rain_floor", False),
                                   ("diff_metrics_seam_slope", False),
                                   ("noah_land_ice_rain_runoff", False),
+                                  ("mynn_sfclay_q2_land_cap", False),
                                   *OBSTACLE_RUN_DEFAULTS.items()):
                 value = run_document.get(name, default)
                 if isinstance(value, list):

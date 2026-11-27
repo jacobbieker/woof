@@ -3845,7 +3845,7 @@
    },
    {
     "file": "woof/core/kernels/mynn_surface.cu",
-    "sha256": "2e8b7cb344da2eb74e68893f8921d7140c534d3ed311f471abca8c6580b7a7c0"
+    "sha256": "c0ae59ecfca4e54c49d7e141168bcc274ac60eddb6d2f4067d9867891cbd7490"
    },
    {
     "file": "woof/core/kernels/mynn_surface_libm.cuh",
@@ -5879,7 +5879,7 @@
    },
    {
     "file": "woof/core/physics.py",
-    "sha256": "e8dd285b454a8fa36fc9b4bf3958cdb04f921e54b808b5f51b97c536571c2bb3"
+    "sha256": "81814eaf2e6c004d308ecd502f060568007b29401c6a632d833c40d6403a4e90"
    },
    {
     "file": "woof/core/preflight.py",
@@ -5979,7 +5979,7 @@
    },
    {
     "file": "woof/core/spp_kernel_sources.py",
-    "sha256": "949c752131a7fbb6e69ccf48ee72c31e5cb213c85b6182f7258fec00846de646"
+    "sha256": "0f057bfe9f825a6b2237cfa4e63960b311d8d90fa6ac930f0da5ec2dc50e17c8"
    },
    {
     "file": "woof/core/storm_tracking.py",
@@ -7413,15 +7413,15 @@
    },
    {
     "file": "woof/core/gfl_lanes.py",
+    "sha256": "51e750bd472452e2a578995c1e300a2684b889f852b16aad93982b64040bc35e"
+   },
+   {
+    "file": "woof/core/gfl_lanes.py",
     "sha256": "632129c483482236cf2be90f69d27584fd7c413503c101827ea0e39b0c65c1c7"
    },
    {
     "file": "woof/core/gfl_lanes.py",
     "sha256": "92484540d4fa8efc772dcd4763823afc29a13e4fb70742f0ecbaf8bf0573a08a"
-   },
-   {
-    "file": "woof/core/gfl_lanes.py",
-    "sha256": "51e750bd472452e2a578995c1e300a2684b889f852b16aad93982b64040bc35e"
    },
    {
     "file": "woof/core/gfl_lanes.py",
@@ -19535,7 +19535,7 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "e0a540d87472166d49092c03bfa258f39cd91374a6a43fb57efc6aac20069410",
+    "sha256": "0c44c08cff1ae1841f4c50c83b79b8bd0de8e19e0e221b0cd3b2210479de3911",
     "sites": {
      "100": 494
     }
@@ -19565,7 +19565,56 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "179711d725891b0ab4b4431b7e788d0fa372cde253a1a36760c545296c01f6c1"
+   "source_sha256": "1f61b4c1a35190151579e0599882f8021498e2bff645e8329fb969356742ae7b"
+  },
+  "kernels:mynn_surface[MYNN_SL_PSIH_ZOLZT=1,MYNN_SL_Q2_LAND_CAP=1]": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "b340ac30c2ef9eeed75e7a4fdbf689da50dc74296be13be5a22773363829d637",
+    "sites": {
+     "100": 494
+    }
+   },
+   "native_differences": {
+    "sha256": "30312c26cbd93436b7a40cd5f0ff87a84e7d70b7b6541982130c29ec4bfaad52",
+    "sites": {
+     "100": 378
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "--fmad=false",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "--fmad=false",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "455597d59ab1028e3ccb9b43ab46287c88d4bf79b9316da11ce9a8cab501b562"
   },
   "kernels:mynn_surface[MYNN_SL_PSIH_ZOLZT=1]": {
    "assessment": "static_diagnostic_only",
@@ -19584,7 +19633,7 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "924fdb4903a3ef8325193799cbd513742b4674b42cd093b4f420ab03f44502fc",
+    "sha256": "70260082ee658a4863c065b1d7401a0be4715af72aed0c02f662f4cef54e49bb",
     "sites": {
      "100": 494
     }
@@ -19614,7 +19663,56 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "c3618cbba3fb6a0befb3ac9bb8358bb1e4995ea0ad5d1bf4e7b0e89989abd378"
+   "source_sha256": "f09d0a4755b062f49f4b5540e5f7515492959422040694e31a31113df8afce93"
+  },
+  "kernels:mynn_surface[MYNN_SL_Q2_LAND_CAP=1]": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "eb7042c50a94a18fc5e27cbae0aa9e298274c124b0fe855fc809f85dd98287ca",
+    "sites": {
+     "100": 494
+    }
+   },
+   "native_differences": {
+    "sha256": "f13f9e3bdb7a68f65c207a8c95c50c53574c86e44ca07f840ecac8b8b3069510",
+    "sites": {
+     "100": 378
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "--fmad=false",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "--fmad=false",
+     "--ftz=false",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "30e17fa7922a7c35c34bb91140096dbdd27075ce2581613bb3f0f06abf1312e7"
   },
   "kernels:native_surface_diagnostics": {
    "assessment": "static_diagnostic_only",
@@ -33561,6 +33659,53 @@
    },
    "source_sha256": "5815888a54fc20876e0c4ced4b2d06fd3b1ebd02e4a0012c96e5914fdaf037a8"
   },
+  "spp:mynn_surface[capacity=40,MYNN_SL_PSIH_ZOLZT=1,MYNN_SL_Q2_LAND_CAP=1]": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "bd1a9ba6079c30c1ef676dd694743f100e47c4396f800076e316af1f15bdf116",
+    "sites": {
+     "100": 549
+    }
+   },
+   "native_differences": {
+    "sha256": "740cb4c2568df8778661e73bad701c946db57af3d8eacf30f3178010f36e39df",
+    "sites": {
+     "100": 632
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "47cca52caca01bbb9aed32d78c78e03feade6511ddfb1c0bf85d9c0bc9f3a5cb"
+  },
   "spp:mynn_surface[capacity=40,MYNN_SL_PSIH_ZOLZT=1]": {
    "assessment": "static_diagnostic_only",
    "coverage": "compiled",
@@ -33578,7 +33723,7 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "bd08031c6b9e417f432eb79d60b626260013af1fda9751c8775f373ef13cbd3e",
+    "sha256": "10e64bc18bf2f81926ae98f898f940b30ee6ce50c0bb392dbaa6e68140a65ca3",
     "sites": {
      "100": 549
     }
@@ -33606,7 +33751,54 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "8f3ebf378093a4773083454163370bcdada40a8fbfd6971c58cfdddac537a6ac"
+   "source_sha256": "e56ca32bb942f7ca4c3908da3b06e51a57d6f522800630e2f176ed058b347a14"
+  },
+  "spp:mynn_surface[capacity=40,MYNN_SL_Q2_LAND_CAP=1]": {
+   "assessment": "static_diagnostic_only",
+   "coverage": "compiled",
+   "dataflow_differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "differences": {
+    "sha256": "e9365ece5241b1d968e31cd86566a49a709e267b49b9f44cc88ce5eafa2aea1a",
+    "sites": {
+     "100": 0
+    }
+   },
+   "errors": {},
+   "native_dataflow_differences": {
+    "sha256": "abdcf1cc96fb15ddd4435b8f1384da8d89d6a1c5bb02d3ef03d159e7adf8ed1f",
+    "sites": {
+     "100": 549
+    }
+   },
+   "native_differences": {
+    "sha256": "601630da161fafbad2fb37f700ed0acea1b64448c38890b5b6a8a234d121e54a",
+    "sites": {
+     "100": 632
+    }
+   },
+   "native_errors": {},
+   "options": {
+    "100": [
+     "-std=c++17",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_100"
+    ],
+    "120": [
+     "-std=c++17",
+     "-ftz=true",
+     "--device-as-default-execution-space",
+     "-lineinfo",
+     "-arch=compute_120"
+    ]
+   },
+   "source_sha256": "b1cd9e48cebe2a34f23ffc4ffd8a20824a102d6f5d979c4565e76bf115e2a2c7"
   },
   "spp:mynn_surface[capacity=40]": {
    "assessment": "static_diagnostic_only",
@@ -33625,7 +33817,7 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "df129a738b441097dba4ff4d83bb4cdb29ec98f942a58cf80f914d22daaab612",
+    "sha256": "c1a4cb01c71651c1fec0b173ba5bccd70fa2a0e2dfbf97e7e2dc4b108cc2b2fb",
     "sites": {
      "100": 549
     }
@@ -33653,7 +33845,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "b2745d3f2bcf8eee60ac158316f2c9fd01386d6e90f07382302662dc74e9f6ab"
+   "source_sha256": "0ea5f2a20e01ea5cc215dc558fe5a0a86da412905f143b551a6ef8b24d08fdd0"
   }
  }
 }

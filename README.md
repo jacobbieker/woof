@@ -753,13 +753,13 @@ Notes on the 1.1.7 sync:
     turns every one on / off whatever the mode (the hex door takes
     `--quirk-corrections all|none`); a key set false next to `"all"` is
     refused by name, and a key set next to `"none"` wins. On the WRF route
-    the keys are correct-mode findings FQ1-FQ8, FQ11 and FQ12, so the run
+    the keys are correct-mode findings FQ1-FQ8, FQ10, FQ11 and FQ12, so the run
     receipt's `correct_mode` block names them.
     It covers `gf_deep_rain_evaporation_booking`, `ysu_surface_heat_exner`,
     `mynn_sfclay_psih_zolzt`, `noah_smc_floor_booking`,
     `thompson_rain_snow_closure`, `rrtmg_lw_model_top`,
     `thompson_lamc_updated_rc`, `noah_land_ice_rain_runoff`,
-    `kf_capped_downdraft_rain_floor` and `diff_metrics_seam_slope` (WRF route);
+    `mynn_sfclay_q2_land_cap`, `kf_capped_downdraft_rain_floor` and `diff_metrics_seam_slope` (WRF route);
     `--undriven-species-boundary wrf-flow-dependent` (hex, regional, where its drivers carry it; the only
     flag `--quirk-corrections` sets); `woof_land_ice_isomip_freezing_salinity`,
     `woof_bottom_drag_dry_edges`, `woof_rayleigh_bottom_friction` and
@@ -839,6 +839,13 @@ Notes on the 1.1.7 sync:
     initial zero while every other column has its slope. The option fills
     the top level too, as the engine always has; off (exact mode) the seam
     is WRF's word for word (finding FQ12). Bounded axes are unchanged.
+  - `mynn_sfclay_q2_land_cap` (MYNN surface layer, `sf_sfclay_physics = 5`
+    at `wrf_461`, WRF route). WRF's MYNN caps its 2 m mixing ratio at 1.05
+    times the lowest level at every point, water included, while the
+    surface driver's cap of the same limit runs over land only. The option
+    caps over land only, so Q2 over a warm sea under cooler, drier air keeps
+    its surface-flux value (finding FQ10). Only Q2 moves; not yet scored
+    against observations.
 - **Observation-driven corrections, each opt-in and off by default** (GF's
   is also a quirk correction, so it is on in correct mode):
   - `gf_deep_rain_evaporation_booking` (Grell-Freitas, `cu_physics = 3`).

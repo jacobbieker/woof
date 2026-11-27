@@ -2728,7 +2728,6 @@ class RunConfig:
     # Correct-mode finding FQ8: on by default, off in physics.mode = 'exact'.
     noah_land_ice_rain_runoff: bool = _config_field(
         default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
-
     # Correction of a WRF 4.7.1 quirk (quirk pass 2026-11-26), appended.
     # The Kain-Fritsch family (cu_physics = 1, 10, 11) caps the downdraft
     # with DDINC = TRPPT/TDER and forms PPTFLX = TRPPT - TDER with no floor
@@ -2739,6 +2738,19 @@ class RunConfig:
     # for word.  Read only where KF, KF-CuP or MSKF runs.  Correct-mode
     # finding FQ11: on by default, off in physics.mode = 'exact'.
     kf_capped_downdraft_rain_floor: bool = _config_field(
+        default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
+
+    # Correction of a WRF 4.7.1 quirk (quirk pass 2026-11-26), appended.  The
+    # MYNN surface layer (sf_sfclay_physics = 5) caps the 2 m mixing ratio
+    # at 1.05 * QV1D at every point (module_sf_mynn.F:1149), water included;
+    # the surface driver's cap of the same limit
+    # (module_surface_driver.F:4452-4456) runs over land (XLAND < 1.5) only.
+    # True keeps the cap over land and leaves the surface-flux Q2 over water
+    # (kernels/mynn_surface.cu MYNN_SL_Q2_LAND_CAP), which moves only Q2 and
+    # what is derived from it; False is WRF's arithmetic word for word.
+    # wrf_461 variant only.  Correct-mode finding FQ10: on by default, off in
+    # physics.mode = 'exact'.
+    mynn_sfclay_q2_land_cap: bool = _config_field(
         default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
 
 
@@ -3040,7 +3052,7 @@ CORRECT_MODE_RESTART_BREAK_NOTICE = (
     "mynn_sfclay_psih_zolzt, noah_smc_floor_booking, "
     "thompson_rain_snow_closure, rrtmg_lw_model_top, "
     "thompson_lamc_updated_rc, noah_land_ice_rain_runoff, "
-    "kf_capped_downdraft_rain_floor); otherwise "
+    "mynn_sfclay_q2_land_cap, kf_capped_downdraft_rain_floor); otherwise "
     "restart from t = 0.")
 
 #: The same accuracy for the 2.8.9 WRF-folder default (D8): a fixed-step
@@ -10279,9 +10291,11 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
         raise ConfigurationRefused("diff_metrics_seam_slope must be true or false")
     if type(cfg.noah_land_ice_rain_runoff) is not bool:
         raise ConfigurationRefused("noah_land_ice_rain_runoff must be true or false")
+    if type(cfg.mynn_sfclay_q2_land_cap) is not bool:
+        raise ConfigurationRefused("mynn_sfclay_q2_land_cap must be true or false")
     from woof.quirk_corrections import check_run_config
     check_run_config(cfg)
-    # The quirk-ledger keys (correct-mode findings FQ1-FQ8, FQ11 and FQ12)
+    # The quirk-ledger keys (correct-mode findings FQ1-FQ8, FQ10, FQ11 and FQ12)
     # are on by default and read only where their scheme runs (correct_mode.KEY_SCOPE,
     # KEY_GENERATIONS, KEY_UNREAD: YSU's not with BEP/BEM, MYNN's only at
     # wrf_461), so an unread one is inert, not refused.

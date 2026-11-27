@@ -378,6 +378,11 @@ def _psih_zolzt(run) -> bool:
     return _reads(run, "mynn_sfclay_psih_zolzt")
 
 
+def _q2_land_cap(run) -> bool:
+    """RunConfig.mynn_sfclay_q2_land_cap where it is read."""
+    return _reads(run, "mynn_sfclay_q2_land_cap")
+
+
 #: RunConfig.kf_capped_downdraft_rain_floor (FQ11): kf.cu, kfcup.cu and
 #: mskf.cu compile its define where the key reaches the domain.
 _KF_RAIN_FLOOR_KEY = "kf_capped_downdraft_rain_floor"
@@ -432,7 +437,8 @@ def _variant_jobs(experiment, modules):
                 # compiled at its first call; mynn_surface keeps its default.
                 variant = getattr(run, "mynn_sfclay_variant", "wrf_461")
                 defines = (mynn_surface_defines(variant,
-                                                _psih_zolzt(run))
+                                                _psih_zolzt(run),
+                                                _q2_land_cap(run))
                            if variant in MYNN_SFCLAY_DEFINES else ())
             tiers = [defines] if defines else []
             if name == "advection":

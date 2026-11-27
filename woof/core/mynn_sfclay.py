@@ -109,7 +109,14 @@ MYNN_SFCLAY_DEFINES = {
 MYNN_SL_PSIH_ZOLZT_DEFINES = (("MYNN_SL_PSIH_ZOLZT", 1),)
 
 
-def mynn_surface_defines(variant: str = MYNN_SFCLAY_DEFAULT, psih_zolzt: bool = False):
+#: RunConfig.mynn_sfclay_q2_land_cap (on in correct mode, FQ10): the 1.05*qv1
+#: cap on the 2 m mixing ratio applies over land only, as the surface driver's
+#: does.
+MYNN_SL_Q2_LAND_CAP_DEFINES = (("MYNN_SL_Q2_LAND_CAP", 1),)
+
+
+def mynn_surface_defines(variant: str = MYNN_SFCLAY_DEFAULT, psih_zolzt: bool = False,
+                         q2_land_cap: bool = False):
     """The compile-time defines of one MYNN surface unit."""
     variant = mynn_sfclay_variant_form(variant)
     defines = MYNN_SFCLAY_DEFINES[variant]
@@ -119,12 +126,19 @@ def mynn_surface_defines(variant: str = MYNN_SFCLAY_DEFAULT, psih_zolzt: bool = 
                 "psih_zolzt corrects the wrf_461 MYNN surface layer; the "
                 "gsl_wrf39 fork already integrates from z0/L throughout")
         defines = defines + MYNN_SL_PSIH_ZOLZT_DEFINES
+    if q2_land_cap:
+        if variant != "wrf_461":
+            raise ValueError(
+                "q2_land_cap corrects the wrf_461 MYNN surface layer; the "
+                "gsl_wrf39 fork is another source")
+        defines = defines + MYNN_SL_Q2_LAND_CAP_DEFINES
     return defines
 
 
-def mynn_surface_kernel(variant: str = MYNN_SFCLAY_DEFAULT, shape=(), psih_zolzt: bool = False):
+def mynn_surface_kernel(variant: str = MYNN_SFCLAY_DEFAULT, shape=(), psih_zolzt: bool = False,
+                        q2_land_cap: bool = False):
     """The deterministic MYNN surface kernel for one variant."""
-    defines = mynn_surface_defines(variant, psih_zolzt)
+    defines = mynn_surface_defines(variant, psih_zolzt, q2_land_cap)
     if not defines:
         return get_kernel("mynn_surface", "mynn_surface_column", shape)
     return get_kernel_int_defines(
@@ -230,15 +244,17 @@ def launch_mynn_surface_layer(
     variant: str = MYNN_SFCLAY_DEFAULT,
     ocean_z0=None,
     psih_zolzt: bool = False,
+    q2_land_cap: bool = False,
 ) -> None:
     """Launch the MYNN surface kernel into preallocated outputs.
 
     ``psih_zolzt`` (RunConfig.mynn_sfclay_psih_zolzt, FQ3) is an
     opt-in correction of a WRF quirk: module_sf_mynn.F integrates the 2 m
     and 10 m heat profile from z0/L, not zt/L.  False compiles exactly the
-    unit this function compiled before the key existed.
+    unit this function compiled before the key existed.  ``q2_land_cap``
+    (RunConfig.mynn_sfclay_q2_land_cap, FQ10) caps Q2 at 1.05*qv over land
+    only, as the surface driver does, where WRF's MYNN caps every point.
     """
-
     _validate_options(dx, itimestep, isfflx, isftcflx)
     variant = mynn_sfclay_variant_form(variant)
     from woof.core.spp_kernel_sources import spp_flag
@@ -257,7 +273,7 @@ def launch_mynn_surface_layer(
                 "float32 surface arrays"
             )
     ocean_args = ()
-    defines = mynn_surface_defines(variant, psih_zolzt)
+    defines = mynn_surface_defines(variant, psih_zolzt, q2_land_cap)
     if ocean_z0 is not None:
         if ocean_z0.shape != shape or ocean_z0.dtype != DTYPE or not ocean_z0.flags.c_contiguous:
             raise ValueError("wave roughness requires contiguous FP32 on the surface grid")
@@ -283,7 +299,7 @@ def launch_mynn_surface_layer(
         from woof.core.kernels import get_kernel_int_defines
         kernel = get_kernel_int_defines("mynn_surface", "mynn_surface_column", defines, (1, 1, n))
     else:
-        kernel = mynn_surface_kernel(variant, (1, 1, n), psih_zolzt)
+        kernel = mynn_surface_kernel(variant, (1, 1, n), psih_zolzt, q2_land_cap)
     kernel(
         (blocks,),
         (_TPB,),
@@ -307,6 +323,7 @@ def mynn_surface_layer(
     pattern_spp_pbl=None,
     variant: str = MYNN_SFCLAY_DEFAULT,
     psih_zolzt: bool = False,
+    q2_land_cap: bool = False,
 ) -> MynnSurfaceResult:
     """Evaluate WRF MYNN surface physics on 2-D device fields."""
 
@@ -332,7 +349,7 @@ def mynn_surface_layer(
         inputs, mol_array, ustm_array, result,
         dx=dx, itimestep=itimestep, isfflx=isfflx, isftcflx=isftcflx,
         spp_pbl=spp_pbl, pattern_spp_pbl=pattern_spp_pbl, variant=variant,
-        psih_zolzt=psih_zolzt,
+        psih_zolzt=psih_zolzt, q2_land_cap=q2_land_cap,
     )
     return result
 

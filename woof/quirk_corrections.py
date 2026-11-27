@@ -128,6 +128,11 @@ CORRECTIONS: tuple[QuirkCorrection, ...] = (
         "Noah books the liquid rain that falls on land ice as surface runoff, where WRF's glacial arm drops it",
         active=lambda get: int(get("sf_surface_physics")) == 2),
     QuirkCorrection(
+        "mynn_sfclay_q2_land_cap", "wrf", False, True, "sf_sfclay_physics = 5, mynn_sfclay_variant = wrf_461",
+        "the MYNN surface layer caps its 2 m mixing ratio at 1.05 times the lowest level over land only, as the surface driver does, not over water",
+        # the gsl_wrf39 fork is another source: nothing to correct
+        active=lambda get: int(get("sf_sfclay_physics")) == 5 and get("mynn_sfclay_variant") == "wrf_461"),
+    QuirkCorrection(
         "kf_capped_downdraft_rain_floor", "wrf", False, True, "cu_physics = 1, 10 or 11",
         "Kain-Fritsch, KF-CuP and MSKF floor the capped downdraft's precipitation flux at zero, so convective rain is never negative",
         active=lambda get: int(get("cu_physics")) in (1, 10, 11)),

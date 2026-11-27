@@ -369,6 +369,10 @@ def test_new_fields_are_reviewed_defaults_appended_last():
     # (multi_perturb and its pert_* keys, the table) off at WRF's Registry
     # defaults (tests/test_wrfsolar_eps_madwrf_config.py).
     from woof.config import MULTI_PERTURB_RUN_DEFAULTS
+    # The MYNN surface-layer Q2 land cap (quirk pass, finding FQ10), appended.
+    assert names.pop() == "mynn_sfclay_q2_land_cap"
+    assert RunConfig.__dataclass_fields__["mynn_sfclay_q2_land_cap"].default is _cm.CORRECT_KEYS_DEFAULT
+    assert RunConfig.__dataclass_fields__["mynn_sfclay_q2_land_cap"].kw_only
     # The Kain-Fritsch capped-downdraft rain floor (quirk pass, finding FQ11), appended.
     assert names.pop() == "kf_capped_downdraft_rain_floor"
     assert RunConfig.__dataclass_fields__["kf_capped_downdraft_rain_floor"].default is _cm.CORRECT_KEYS_DEFAULT
@@ -1163,6 +1167,8 @@ def _check_frozen_defaults(actual):
                          ("noah_land_ice_rain_runoff", __import__("woof.correct_mode", fromlist=["x"]).CORRECT_KEYS_DEFAULT),
                          # the Kain-Fritsch capped-downdraft rain floor (FQ11)
                          ("kf_capped_downdraft_rain_floor", __import__("woof.correct_mode", fromlist=["x"]).CORRECT_KEYS_DEFAULT),
+                         # the MYNN surface-layer Q2 land cap (FQ10)
+                         ("mynn_sfclay_q2_land_cap", __import__("woof.correct_mode", fromlist=["x"]).CORRECT_KEYS_DEFAULT),
                          # the opt-in resolved obstacles, off
                          *__import__("woof.config", fromlist=["x"]).OBSTACLE_RUN_DEFAULTS.items()):
         assert actual.pop(field) == value, field

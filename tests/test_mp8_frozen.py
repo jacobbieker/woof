@@ -1225,8 +1225,13 @@ FROZEN_MODULE_DIGESTS = {
         # RE-PINNED by the quirk pass (mynn_sfclay_psih_zolzt): psih2/psih10
         # from zt/L compiled in only under MYNN_SL_PSIH_ZOLZT; without it the
         # preprocessed unit is the previous one.  Previously a02979c2/a9abd502.
-        '2e8b7cb344da2eb74e68893f8921d7140c534d3ed311f471abca8c6580b7a7c0',
-        '179711d725891b0ab4b4431b7e788d0fa372cde253a1a36760c545296c01f6c1'),
+        # RE-PINNED by the quirk pass (mynn_sfclay_q2_land_cap, FQ10): the
+        # Q2 cap over land only, compiled in only under MYNN_SL_Q2_LAND_CAP;
+        # without it the unit is the previous one
+        # (tests/test_mynn_sfclay_q2_land_cap.py strips both blocks and checks
+        # the digest a02979c2).  Previously 2e8b7cb3/179711d7.
+        'c0ae59ecfca4e54c49d7e141168bcc274ac60eddb6d2f4067d9867891cbd7490',
+        '1f61b4c1a35190151579e0599882f8021498e2bff645e8329fb969356742ae7b'),
     'nest': (
         # Re-pinned for a combined four-side boundary launch. The original
         # single-side entry point and SINT expression tree remain unchanged.

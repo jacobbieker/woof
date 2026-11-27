@@ -182,6 +182,7 @@ _WRF_SCHEMES = {
     "noah_land_ice_rain_runoff": dict(sf_surface_physics=2, bl_pbl_physics=1, sf_sfclay_physics=1),
     "kf_capped_downdraft_rain_floor": dict(cu_physics=1, moist=True),
     "diff_metrics_seam_slope": dict(diff_opt=2, km_opt=2),
+    "mynn_sfclay_q2_land_cap": dict(bl_pbl_physics=5, sf_sfclay_physics=5),
 }
 
 
