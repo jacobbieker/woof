@@ -232,9 +232,10 @@ def test_mixing_step_tl_matches_finite_differences(backend, tmp_path):
 
 @pytest.mark.parametrize("backend", NO_MLX[:1])
 def test_mixing_step_refuses_what_it_does_not_cover(backend, tmp_path):
-    """diff_opt 2, another km_opt, the TC horizontal length, m_opt,
+    """Another km_opt under diff_opt 1, the TC horizontal length, m_opt,
     passive tracers and a resumed state without WRF's t_init are refused
-    by name; diff_opt 1 / km_opt 4 is accepted, dry or moist."""
+    by name; diff_opt 1 / km_opt 4 is accepted, dry or moist, and so is
+    diff_opt 2 / km_opt 4 (dry)."""
     out = _run_periodic(backend, '''
 cases = {"ok": dict(MIX), "diff2": dict(MIX, diff_opt=2), "km3": dict(MIX, km_opt=3),
          "moist": dict(MIX, moist=True, moist_adv_opt=0),
@@ -256,8 +257,9 @@ for key, over in cases.items():
         out[key] = f"{type(e).__name__}: {e}"
 '''.replace("MIX", repr(MIX)), tmp_path)
     assert out["ok"] == out["carried"] == "accepted mix=True", out
-    for key in ("diff2", "km3"):
-        assert "mixing package other than diff_opt 1 with km_opt 4" in out[key], out
+    # diff_opt 2 / km_opt 4 has its own binding (test_grad_wrfplus_mix2_step)
+    assert out["diff2"] == "accepted mix=True", out
+    assert "mixing package other than diff_opt 1 / km_opt 4" in out["km3"], out
     assert out["moist"] == "accepted mix=True", out
     assert "tc_horizontal_length_m" in out["tc"], out
     assert "m_opt" in out["mopt"], out

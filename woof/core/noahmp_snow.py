@@ -103,6 +103,14 @@ COMPACTION_LABEL = ("re-implemented from published descriptions, "
 _AR24_SLOPE = _f(-0.00069503)   # [m3/kg/K]  Eq. 11
 _AR24_ICEPT = _f(0.20606699)    # [m3/kg]    Eq. 11
 _AR24_P_LO = _f(80000.0)        # [Pa]       Eq. 12 bin edge
+#: Noah-MP's in-model glacier snow limit, kg m-2 (mm of water): ``SWEMAXGLA``
+#: in the parameter table (WRF 4.8.1 ``phys/noahmp/parameters/NoahmpTable.TBL``
+#: line 438; MPAS 8.4.2 ``.../physics_noahmp/parameters/NoahmpTable.TBL`` line
+#: 456), read in ``SNOWWATER`` as ``IF(SNEQV > 5000.0)`` in WRF 4.7.1
+#: ``phys/noahmp/src/module_sf_noahmplsm.F`` line 6490.  Not the 2000 mm
+#: initial-state cap (``woof.ingest.soil.SNOW_WATER_CAP_KG_M2``).
+SWEMAXGLA_KG_M2 = 5000.0
+
 _AR24_P_HI = _f(85000.0)        # [Pa]       Eq. 12 bin edge
 _AR24_MIN_LO = _f(0.019)        # psfc < 80 kPa (high terrain)
 _AR24_MIN_MID = _f(0.018)       # 80 <= psfc < 85 kPa
@@ -727,9 +735,9 @@ def snowwater(col: SnowColumn, dt, zsoil, imelt, ficeold, sfctmp, snowhin,
         ZSNSO[iz] = _ZERO
 
     # to obtain equilibrium state of snow in glacier region
-    if col.sneqv > _f(5000.0):
+    if col.sneqv > _f(SWEMAXGLA_KG_M2):
         bdsnow = SNICE[0] / DZSNSO[0]
-        snoflow = col.sneqv - _f(5000.0)
+        snoflow = col.sneqv - _f(SWEMAXGLA_KG_M2)
         SNICE[0] = SNICE[0] - snoflow
         DZSNSO[0] = DZSNSO[0] - snoflow / bdsnow
         snoflow = snoflow / dt

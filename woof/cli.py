@@ -794,6 +794,9 @@ def build_parser(*, render_only: bool = False, preset_only: bool = False,
     # [runner] TOML): beside the other estimators, on the pace model
     # `woof check` quotes.
     _lazy_register("woof.runtime_estimate")(sub)
+    # How to pack a set of runs onto the runner's cards, admitted by
+    # multi-run's own rule and priced by the estimate above.
+    _lazy_register("woof.pack_plan")(sub)
     # Turbines placed on a domain's grid: the layout a wind-farm
     # parameterization reads, beside the energy doors whose turbine
     # library it resolves curves through.

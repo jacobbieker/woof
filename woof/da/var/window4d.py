@@ -40,6 +40,34 @@ gradient mixes two trajectories and is not WRFDA's.  WRFDA makes them one
 construction and refuse a mismatch over ``base_rtol``; the L1/L0 lanes
 should turn it on.
 
+**Boundary tables** (a specified window, ``lbc="wrfda"``, the default
+there).  WRFDA perturbs the lateral boundary tables even with
+``var4d_lbc = .false.``: ``da_transfer_xatowrftl.inc:282`` calls
+``da_transfer_wrftl_lbc_t0`` unconditionally, which couples ``g_u``,
+``g_v``, ``g_t``, ``g_ph``, ``g_qv`` and ``g_mu`` about the start state
+(``g_couple``, da_4dvar_lbc.inc: WRFDA's non-hybrid coupling, the face
+mass of ``g_calc_mu_uv``, edge faces the adjacent cell, ``1/msf`` on u and
+v only) and ``g_stuff_bdy``'s them into the value tables (``g_w_b`` and
+``g_w_bt`` zero); ``da_transform_vtoy.inc:75`` then calls
+``da_transfer_xatowrftl_lbc``, whose end-of-interval perturbation is zero
+without ``var4d_lbc``, so each tendency table is ``(0 - g_b) /
+interval_seconds``: the boundary perturbation decays linearly to zero over
+the interval.  :func:`lbc_tl` builds those tables in the window's layout
+(woof's resident tables', ``lateral_bc.extract_lateral_side``), and
+:func:`lbc_ad` is its adjoint, which :meth:`WindowModel.ad` adds to the
+state adjoint from ``Window.ad``'s table adjoints.  ``lbc="fixed"`` leaves
+the tables unperturbed and drops their adjoint (not WRFDA's).
+
+**Outer loops' boundaries.**  ``da_transfer_xatowrf.inc:665-727`` adds the
+last TL call's table perturbation (``model_grid%g_*_b``, ``g_*_bt``: the
+loop's own ``xhat``, ``da_minimise_cg.inc:258``) to ``grid``'s tables,
+which the next loop's nonlinear run uses (``da_solve.inc:827-918``).
+:meth:`WindowModel.boundary_increment` is that perturbation for a TL
+state, and :meth:`WindowModel.add_boundary_increment` adds it to the
+window's tables (the nonlinear rerun's and the TL's);
+:func:`~woof.da.var.analysis.analyse` carries it on the analysis state
+(``FirstGuess.lbc_increment``) for ``var4d.nl_model``.
+
 The window must be binary64: a binary32 window's adjoint is only its
 transpose to about 1e-6, and the minimiser needs 1e-12.
 """
@@ -52,7 +80,7 @@ import numpy as np
 
 from . import transfer4d as t4
 
-__all__ = ["WindowModel", "to_window", "from_window"]
+__all__ = ["WindowModel", "to_window", "from_window", "lbc_tl", "lbc_ad"]
 
 #: WRFDA's TL names -> the window's names (the slot read-back; the start
 #: goes through ``wrfda_tl_start``).
@@ -66,6 +94,140 @@ _MOISTURE = ("advect", "persist")
 #: reset to the edge row, its tangent seeded from g_mu) or ``carried`` (the
 #: window's carried halo, the TL halo starting at zero; woof's own window).
 _HALO_STARTS = ("wrfplus", "carried")
+
+
+#: ``lbc``: ``wrfda`` (the tables perturbed as WRFDA's TL start perturbs
+#: them, var4d_lbc off) or ``fixed`` (unperturbed, their adjoint dropped).
+_LBCS = ("wrfda", "fixed")
+
+#: Each boundary table field's state array (the window's names).
+_LBC_STATE = {"u": "u", "v": "v", "theta": "thp", "phi": "php", "mu": "mup", "qv": "qv"}
+_SIDES = ("west", "east", "south", "north")
+
+
+def _faces(m: np.ndarray, axis: int) -> np.ndarray:
+    """``g_calc_mu_uv``'s face mass (module_big_step_utilities_em_tl.F
+    G_CALC_MU_UV, non-periodic): interior faces the two cells' mean, each
+    domain-edge face its adjacent cell."""
+    m = np.moveaxis(m, axis, -1)
+    out = np.empty(m.shape[:-1] + (m.shape[-1] + 1,), dtype=np.float64)
+    out[..., 1:-1] = 0.5 * (m[..., :-1] + m[..., 1:])
+    out[..., 0] = m[..., 0]
+    out[..., -1] = m[..., -1]
+    return np.moveaxis(out, -1, axis)
+
+
+def _faces_ad(a: np.ndarray, axis: int) -> np.ndarray:
+    a = np.moveaxis(a, axis, -1)
+    out = np.zeros(a.shape[:-1] + (a.shape[-1] - 1,), dtype=np.float64)
+    out[..., :-1] += 0.5 * a[..., 1:-1]
+    out[..., 1:] += 0.5 * a[..., 1:-1]
+    out[..., 0] += a[..., 0]
+    out[..., -1] += a[..., -1]
+    return np.moveaxis(out, -1, axis)
+
+
+def _side(f: np.ndarray, side: str, w: int) -> np.ndarray:
+    """``extract_lateral_side``'s table (east and north outermost-first)."""
+    if side == "west":
+        return f[..., :w]
+    if side == "east":
+        return f[..., -w:][..., ::-1]
+    if side == "south":
+        return f[..., :w, :]
+    return f[..., -w:, :][..., ::-1, :]
+
+
+def _side_ad(acc: np.ndarray, a: np.ndarray, side: str, w: int) -> None:
+    if side == "west":
+        acc[..., :w] += a
+    elif side == "east":
+        acc[..., -w:] += a[..., ::-1]
+    elif side == "south":
+        acc[..., :w, :] += a
+    else:
+        acc[..., -w:, :] += a[..., ::-1, :]
+
+
+def _table_fields(params) -> tuple:
+    """The fields ``params`` (``Window.params``) holds tables for, in
+    :data:`_LBC_STATE`'s order; each must have all eight tables."""
+    fields = []
+    for f in _LBC_STATE:
+        have = [f"lbc_{f}_{s}{t}" in params for s in _SIDES for t in ("", "_t")]
+        if any(have) and not all(have):
+            raise ValueError(f"the window has some of {f}'s boundary tables, not all eight")
+        if all(have):
+            fields.append(f)
+    unknown = sorted(set(params) - {f"lbc_{f}_{s}{t}" for f in fields for s in _SIDES for t in ("", "_t")})
+    if unknown:
+        raise ValueError(f"boundary tables of no known field: {unknown}")
+    return tuple(fields)
+
+
+def lbc_tl(g: dict, base: dict, consts: dict, fields, width: int, seconds: float) -> dict:
+    """WRFDA's TL boundary tables (module docstring) from the TL state
+    ``g`` about ``base`` (both the window's names and layout, host
+    binary64; ``mup``, ``u``, ``v``, ``thp``, ``php`` and ``qv`` as
+    ``fields`` need).  ``consts``: ``mub2d``, ``msfu``, ``msfv``.
+    ``da_transfer_wrftl_lbc_t0``'s ``g_couple`` (non-hybrid, as WRFDA's):
+
+    - u: ``g_u * muu / msfu + u * g_muu / msfu`` (``muu`` the face mass of
+      ``mub + mu``), v likewise along y with ``msfv``;
+    - theta, phi, qv: ``g_f * (mub + mu) + f * g_mu``;
+    - mu: ``g_mu``.
+
+    Value tables ``lbc_<field>_<side>``; tendencies ``lbc_<field>_<side>_t =
+    -value / seconds`` (``da_transfer_xatowrftl_lbc``'s ``g_stuff_bdytend``
+    with a zero end perturbation)."""
+    mu = np.asarray(consts["mub2d"], dtype=np.float64) + base["mup"]
+    gmu = g["mup"]
+    out = {}
+    for f in fields:
+        if f == "u":
+            c = (g["u"] * _faces(mu, 1) + base["u"] * _faces(gmu, 1)) / consts["msfu"]
+        elif f == "v":
+            c = (g["v"] * _faces(mu, 0) + base["v"] * _faces(gmu, 0)) / consts["msfv"]
+        elif f == "mu":
+            c = gmu[None]
+        else:
+            s = _LBC_STATE[f]
+            c = g[s] * mu + base[s] * gmu
+        for side in _SIDES:
+            v = np.ascontiguousarray(_side(c, side, width))
+            out[f"lbc_{f}_{side}"] = v
+            out[f"lbc_{f}_{side}_t"] = -v / seconds
+    return out
+
+
+def lbc_ad(a: dict, base: dict, consts: dict, fields, width: int, seconds: float) -> dict:
+    """The adjoint of :func:`lbc_tl`: the table adjoints ``a`` (``Window.ad``'s
+    ``params``) to the TL state's, ``{name: array}`` over ``mup`` and each
+    field's state array (new arrays, the window's layout)."""
+    mu = np.asarray(consts["mub2d"], dtype=np.float64) + base["mup"]
+    out = {"mup": np.zeros(mu.shape)}
+    for f in fields:
+        s = _LBC_STATE[f]
+        shape = mu[None].shape if f == "mu" else base[s].shape
+        ac = np.zeros(shape)
+        for side in _SIDES:
+            av = np.asarray(a[f"lbc_{f}_{side}"], dtype=np.float64)
+            at = np.asarray(a[f"lbc_{f}_{side}_t"], dtype=np.float64)
+            _side_ad(ac, av - at / seconds, side, width)
+        if f == "u":
+            ac = ac / consts["msfu"]
+            out["u"] = ac * _faces(mu, 1)
+            out["mup"] += _faces_ad(np.sum(ac * base["u"], axis=0), 1)
+        elif f == "v":
+            ac = ac / consts["msfv"]
+            out["v"] = ac * _faces(mu, 0)
+            out["mup"] += _faces_ad(np.sum(ac * base["v"], axis=0), 0)
+        elif f == "mu":
+            out["mup"] += ac[0]
+        else:
+            out[s] = ac * mu
+            out["mup"] += np.sum(ac * base[s], axis=0)
+    return out
 
 
 def _halo_name():
@@ -138,9 +300,12 @@ class WindowModel:
     row and the TL halo seeded from ``g_mu``
     (``wrfda_tl_start(..., specified=True)``); ``"carried"`` keeps the
     window's carried halo and starts the TL halo at zero (woof's own
-    window, not WRFPLUS's: a warm window then differs from WRFPLUS's base).  The
-    boundary tables are not perturbed (WRFDA's ``var4d_lbc = .false.``)
-    and their adjoint is dropped.
+    window, not WRFPLUS's: a warm window then differs from WRFPLUS's base).
+
+    ``lbc`` (specified windows only): ``"wrfda"`` (default) perturbs the
+    boundary tables as WRFDA's TL start does with ``var4d_lbc = .false.``
+    (:func:`lbc_tl`, the module docstring) and adds their adjoint;
+    ``"fixed"`` leaves them unperturbed and drops their adjoint.
 
     :meth:`relinearise` moves the base to a new nonlinear run (an outer
     loop's :class:`~woof.da.var.outer4d.Trajectory`, through
@@ -150,7 +315,7 @@ class WindowModel:
 
     def __init__(self, window, steps_per_slot: int, *, moisture: str | None = None, to_device=None, to_host=None,
                  base: Sequence | None = None, base_rtol: float = 1e-5, base_end: dict | None = None,
-                 halo_start: str = "wrfplus"):
+                 halo_start: str = "wrfplus", lbc: str | None = None):
         moist = "qv" in tuple(getattr(window, "inputs", None) or ())
         if moisture is None:
             moisture = "advect" if moist else "persist"
@@ -181,6 +346,18 @@ class WindowModel:
         self.halo_start = halo_start
         if self.halo is not None and halo_start == "wrfplus":
             self._halo_to_edge()
+        params = tuple(getattr(window, "params", None) or ())
+        if lbc is None:
+            lbc = "wrfda" if params else None
+        if lbc is not None and lbc not in _LBCS:
+            raise ValueError(f"lbc must be one of {_LBCS}, not {lbc!r}")
+        if lbc is not None and not params:
+            raise ValueError(f"lbc={lbc!r}: the window has no boundary tables (not a specified domain)")
+        self.lbc = lbc
+        self._lbc_fields = _table_fields(params) if lbc == "wrfda" else ()
+        if "qv" in self._lbc_fields and moisture != "advect":
+            raise ValueError("the window has qv boundary tables but no g_qv (moisture is not 'advect')")
+        self._lbc_base = None
         if getattr(window, "_checkpoints", None) is None:
             window.forward()
         self.base_diff = None
@@ -208,6 +385,7 @@ class WindowModel:
                                  "halo_start='carried'")
         self._end = self.window.forward(trajectory=states)
         self.base_diff = None
+        self._lbc_base = None
         return self._end
 
     def check_base(self, slots: Sequence, *, rtol: float = 1e-5, end: dict | None = None) -> dict:
@@ -273,6 +451,52 @@ class WindowModel:
         w._start[h][...] = w._start["mup"]
         if getattr(w, "_checkpoints", None) is not None:
             w.forward()
+        self._lbc_base = None
+
+    # ------------------------------------------------------- boundary tables
+
+    def _lbc_args(self) -> tuple:
+        """:func:`lbc_tl`'s ``base``, ``consts``, width and seconds: the base
+        is the window's state 0 (WRFDA couples about ``grid``, the loop's
+        start), host binary64, cached until the base moves."""
+        if self._lbc_base is None:
+            w = self.window
+            ck = w._checkpoints.get(0) if w._checkpoints else None
+            st = ck if ck is not None else w._start
+            names = {"mup"} | {_LBC_STATE[f] for f in self._lbc_fields if f != "mu"}
+            base = {n: np.asarray(self._host(st[n]), dtype=np.float64) for n in names}
+            consts = {n: np.asarray(self._host(w._start[n]), dtype=np.float64) for n in ("mub2d", "msfu", "msfv")}
+            width = int(w._start[f"lbc_{self._lbc_fields[0]}_west"].shape[-1])
+            seconds = float(w.lbc_seconds)
+            self._lbc_base = (base, consts, width, seconds)
+        return self._lbc_base
+
+    def _lbc_state(self, g0: dict) -> dict:
+        """The TL state :func:`lbc_tl` reads, from WRFDA's ``g_*`` (Fortran)."""
+        names = {"u_2": "u", "v_2": "v", "t_2": "thp", "ph_2": "php", "mu_2": "mup", "qv": "qv"}
+        return {w: to_window(np.asarray(g0[k], dtype=np.float64)) for k, w in names.items()
+                if k in g0 and (w == "mup" or any(_LBC_STATE[f] == w for f in self._lbc_fields))}
+
+    def boundary_increment(self, g0: dict) -> dict:
+        """WRFDA's boundary-table perturbation of the TL state ``g0``
+        (:func:`lbc_tl`; host binary64, ``Window.params``' names): what
+        ``da_transfer_xatowrf.inc:665-727`` adds to the tables after a
+        loop, for ``g0`` the loop's own increment.  Empty unless
+        ``lbc == "wrfda"``."""
+        if self.lbc != "wrfda":
+            return {}
+        return lbc_tl(self._lbc_state(g0), *self._lbc_args()[:2], self._lbc_fields, *self._lbc_args()[2:])
+
+    def add_boundary_increment(self, tables: dict) -> None:
+        """Add ``tables`` (:meth:`boundary_increment`'s) to the window's
+        boundary tables in place: the tables every later ``forward`` (the
+        next loop's nonlinear run) and TL/AD step read, as WRFDA's next loop
+        runs on ``grid``'s updated tables."""
+        start = self.window._start
+        for n, v in tables.items():
+            if n not in start:
+                raise ValueError(f"the window has no boundary table {n!r}")
+            start[n][...] += self._dev(np.asarray(v, dtype=np.float64))
 
     def _tl_start(self, d: dict) -> dict:
         from woof.grad.wrfplus.window import wrfda_tl_start
@@ -313,6 +537,8 @@ class WindowModel:
         dx0["php"] = self._dev(to_window(g0["ph_2"]))
         if self.moisture == "advect":
             dx0["qv"] = self._dev(to_window(g0["qv"]))
+        for n, v in self.boundary_increment(g0).items():
+            dx0[n] = self._dev(v)
         out = self.window.tl(dx0, save_at=states, partial=True)
         res = []
         for k in states:
@@ -354,6 +580,12 @@ class WindowModel:
         if self.moisture == "advect":
             out["qv"] = a["qv"]   # not one of wrfda_tl_start's fields either
         out = {k: from_window(self._host(v)) for k, v in out.items()}
+        if self.lbc == "wrfda":   # the tables' adjoint, through lbc_tl's
+            base, consts, width, seconds = self._lbc_args()
+            at = {n: np.asarray(self._host(a[n]), dtype=np.float64) for n in self.window.params}
+            names = {"u": "u_2", "v": "v_2", "thp": "t_2", "php": "ph_2", "mup": "mu_2", "qv": "qv"}
+            for w, v in lbc_ad(at, base, consts, self._lbc_fields, width, seconds).items():
+                out[names[w]] = out[names[w]] + from_window(v)
         if qv is not None:
             out["qv"] = qv
         return out

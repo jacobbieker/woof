@@ -9,14 +9,26 @@
 #        per-slot H' are all that is left, the gate for woof's
 #        transfer4d (4D.1) and FourDObsTerm (4D.2).
 #   l1   adiabatic: no physics in the nonlinear, TL or AD model
-#        (mp/cu/bl/ra/sfclay/surface 0, diff_opt 0).
+#        (mp/cu/bl/ra/sfclay/surface 0, diff_opt 0), and the dynamics P3a's
+#        window covers (damp_opt 0, emdiv 0, moist_adv_opt 0, mp_zero_out 0;
+#        before 4D.4 the lane kept WRF's defaults 3, 0.01, 1 and the
+#        namelist's 2).
 #   l0   the tutorial's namelist as shipped (warm rain, PBL 98, CU 98).
 #
-# Every lane: one outer loop, hybrid_opt = 0 and use_theta_m = 0 (the
-# testdata are V3-style files), trajectory_io with var4d_detail_out so the
-# TL perturbations at each slot, the adjoint forcings and the gradient at
-# 0h are written to disk (checked non-empty), and files.sha256 over every
-# input and output.
+# Every lane: hybrid_opt = 0 and use_theta_m = 0 (the testdata are
+# V3-style files), var4d_detail_out so the TL perturbations at each slot,
+# the adjoint forcings and the gradient at 0h are written to disk (checked
+# non-empty), and files.sha256 over every input and output.
+#
+# MAX_EXT_ITS (default 1) sets max_ext_its, the outer loops (the 4D.4 L1
+# gate runs 2), with print_detail_outerloop so every loop but the last
+# leaves its analysis (wrfvar_output_NN, da_solve.inc).  The detail files
+# are the last loop's (each loop rewrites them); run MAX_EXT_ITS=1 for
+# loop 1's.  trajectory_io stays .true. (the trajectory in memory): with
+# .false. this build's auxhist6 trajectory files hold only XLAT, XLONG,
+# HGT and LANDMASK (WRFDA's Registry puts no state on stream 6), the TL
+# reads no base state and the run is wrong (J0 7.03e4 against 6.04e4, a
+# zero gradient).
 #
 # Layout under $W (default /d/scratch/wrfda) as run_tutorial.sh.
 # usage: run_4dvar.sh lid|l1|l0 NAME
@@ -29,6 +41,8 @@ W=${W:-/d/scratch/wrfda}; W=$(cd "$W" && pwd); D=$W/data; R=$W/run/$NAME
 S=$W/src/${TREE:-WRFDAV4.7.1-4dvar-dump}
 PLUS=$W/src/WRFPLUSV4.7.1
 export HOME=/tmp
+MAX_EXT_ITS=${MAX_EXT_ITS:-1}
+case "$MAX_EXT_ITS" in [1-9]) ;; *) echo "MAX_EXT_ITS must be 1-9" >&2; exit 2;; esac
 H="2008-02-05_"
 NL=$S/var/test/4dvar/namelist.input
 [ -s "$NL" ] || { echo "$NL is missing: the 4D-Var tutorial namelist ships with WRFDA" >&2; exit 2; }
@@ -51,13 +65,14 @@ cp "$D/rc/2008020512/wrfinput_d01" fg
 ln -sf fg wrfinput_d01
 cp "$D/rc/2008020512/wrfbdy_d01" wrfbdy_d01
 for n in 1 2 3 4 5 6 7; do h=$((11 + n)); cp "$D/ob/20080205$h/ob0$n.ascii" "ob0$n.ascii"; done
-python3 - "$NL" "$LANE" > namelist.input <<'PY'
+python3 - "$NL" "$LANE" "$MAX_EXT_ITS" > namelist.input <<'PY'
 import re, sys
-src, lane = sys.argv[1], sys.argv[2]
+src, lane, ext_its = sys.argv[1:4]
 H = "2008-02-05_"
 want = {
-    "wrfvar1": {"var4d": ".true.", "var4d_bin": "3600", "var4d_lbc": ".false.", "write_increments": ".true."},
-    "wrfvar6": {"max_ext_its": "1"},
+    "wrfvar1": {"var4d": ".true.", "var4d_bin": "3600", "var4d_lbc": ".false.", "write_increments": ".true.",
+                "print_detail_outerloop": ".true." if int(ext_its) > 1 else ".false."},
+    "wrfvar6": {"max_ext_its": ext_its},
     "wrfvar18": {"analysis_date": f"'{H}12:00:00.0000'"},
     "wrfvar21": {"time_window_min": f"'{H}12:00:00.0000'"},
     "wrfvar22": {"time_window_max": f"'{H}18:00:00.0000'"},
@@ -92,6 +107,12 @@ if lane == "l1":
     # WRFPLUS has no cu/bl_pbl _ad keys: its simplified TL/AD PBL and
     # cumulus (98) follow cu_physics / bl_pbl_physics being non-zero
     want["dynamics"]["diff_opt"] = "0"
+    # and the dynamics P3a's window covers (woof/grad/wrfplus/model.py
+    # _refuse): no Rayleigh w damping (damp_opt 3, WRF's default), no
+    # external-mode filter (emdiv 0.01), the non-positive-definite moist
+    # advection (moist_adv_opt 0); mp_zero_out 0 so nothing clips qv
+    want["dynamics"].update({"damp_opt": "0", "emdiv": "0", "moist_adv_opt": "0"})
+    want["physics"]["mp_zero_out"] = "0"
 lines = open(src).read().splitlines()
 out, group, seen = [], None, set()
 for line in lines:
@@ -134,10 +155,13 @@ ulimit -s unlimited
 grep -E "Elapsed|Maximum resident" time.txt
 [ "$status" = 0 ] && grep -q "WRF-Var completed successfully" rsl.out.0000 wrfda.out 2>/dev/null \
   || { echo "da_wrfvar.exe did not complete (exit $status)" >&2; exit 1; }
-grep -E "Final cost|Original gradient|Final: " wrfda.out | tail -6
+grep -E "Starting outer|Final cost|Original gradient|Final: " wrfda.out | tail -$((6 * MAX_EXT_ITS))
 ls -la
 shopt -s nullglob
-# var4d_detail_out under trajectory_io, last inner iteration: the TL
+for ((n = 1; n < MAX_EXT_ITS; n++)); do
+  [ -s "$(printf wrfvar_output_%02d "$n")" ] || { echo "no analysis for outer loop $n" >&2; exit 1; }
+done
+# var4d_detail_out, last inner iteration: the TL
 # perturbation at each of the 7 slots (auxhist8_d01_*, in G_*), the adjoint
 # forcing at each slot (af_d01_*, also in G_*: WRFDA reuses the g_ arrays)
 # and the 0h gradient (gradient_d01_*, in A_*).  A header-only file (no
@@ -152,7 +176,7 @@ done
 # not analysis_increments: da_write_increments writes q/ph/mu_cgrid over
 # 1:ix+1, 1:jy+1 and their last row and column are never set, so the file
 # differs run to run there (the analysis itself is wrfvar_output)
-files=(namelist.input fg wrfbdy_d01 be.dat ob0?.ascii wrfvar_output cost_fn grad_fn
+files=(namelist.input fg wrfbdy_d01 be.dat ob0?.ascii wrfvar_output wrfvar_output_?? cost_fn grad_fn
        woof_*.bin tl_d01_* af_d01_* gradient_d01_* gradient_wrfplus_d01_*
        auxhist*_d01_* nl_d01_*)
 sha256sum "${files[@]}" > files.sha256

@@ -1,4 +1,4 @@
-"""The two init ceilings: snow water at 5000 kg m-2, soil moisture at SMCMAX.
+"""The two init ceilings: snow water at 2000 kg m-2, soil moisture at SMCMAX.
 
 Both follow WRF's Noah-MP initialisation (``module_sf_noahmpdrv.F``,
 ``NOAHMP_INIT``).  The hex path applies them in ``rw_mpas_init``
@@ -46,7 +46,7 @@ def test_every_spelling_of_the_ceilings_is_the_packaged_table():
     block = re.search(r"STAS_MAXSMC: \[f32; 19\] = \[(.*?)\];", text, re.S).group(1)
     assert [float(v) for v in block.replace("\n", " ").split(",") if v.strip()] == table
     cap = re.search(r"SNOW_WATER_CAP_KG_M2: f32 = ([0-9.]+);", text).group(1)
-    assert float(cap) == soil.SNOW_WATER_CAP_KG_M2 == init_caps.SNOW_WATER_CAP_KG_M2 == 5000.0
+    assert float(cap) == soil.SNOW_WATER_CAP_KG_M2 == init_caps.SNOW_WATER_CAP_KG_M2 == 2000.0
     assert init_caps.LARGEST_LAND_SMCMAX == 0.484
 
 
@@ -56,14 +56,14 @@ def test_every_spelling_of_the_ceilings_is_the_packaged_table():
 def test_snow_cap_below_at_and_above(capsys):
     from woof.ingest.soil import cap_snow_water
 
-    snow = np.array([[0.0, 4999.0, 5000.0, 5001.0, 51_800.0]])
+    snow = np.array([[0.0, 1999.0, 2000.0, 2001.0, 51_800.0]])
     snowh = snow * 5.0 / 1000.0
     capped, depth, receipt = cap_snow_water(snow, snowh)
-    np.testing.assert_array_equal(capped, [[0.0, 4999.0, 5000.0, 5000.0, 5000.0]])
+    np.testing.assert_array_equal(capped, [[0.0, 1999.0, 2000.0, 2000.0, 2000.0]])
     # Below and at the cap, untouched to the bit; above it the density is kept.
     np.testing.assert_array_equal(depth[0, :3], snowh[0, :3])
-    np.testing.assert_allclose(depth[0, 3:], 25.0, rtol=0, atol=1e-12)
-    assert receipt["cap_kg_m2"] == 5000.0
+    np.testing.assert_allclose(depth[0, 3:], 10.0, rtol=0, atol=1e-12)
+    assert receipt["cap_kg_m2"] == 2000.0
     assert receipt["cells_capped"] == 2
     assert receipt["source_max_kg_m2"] == 51_800.0
     # The deepest snow over every cell, as rw_mpas_init reports it.
@@ -71,7 +71,7 @@ def test_snow_cap_below_at_and_above(capsys):
     assert receipt["bounding_box"] == {"rows": [0, 0], "columns": [3, 4]}
     line = capsys.readouterr().err.strip()
     assert line == (
-        "snow cap: capped SNOW at 5000 kg m-2 on 2 of 5 cell(s) (source value up "
+        "snow cap: capped SNOW at 2000 kg m-2 on 2 of 5 cell(s) (source value up "
         "to 51800 kg m-2, snow depth up to 259 m), snow depth scaled to keep the "
         "density; WRF NOAHMP_INIT's ceiling")
 
@@ -79,8 +79,8 @@ def test_snow_cap_below_at_and_above(capsys):
 def test_snow_cap_says_nothing_and_changes_nothing_below_it(capsys):
     from woof.ingest.soil import cap_snow_water
 
-    snow = np.array([[0.0, 415.0, 5000.0]], dtype=np.float32)
-    snowh = np.array([[0.0, 2.0, 25.0]], dtype=np.float32)
+    snow = np.array([[0.0, 415.0, 2000.0]], dtype=np.float32)
+    snowh = np.array([[0.0, 2.0, 10.0]], dtype=np.float32)
     capped, depth, receipt = cap_snow_water(snow, snowh)
     assert capped is snow and depth is snowh and receipt == {}
     assert capsys.readouterr().err == ""
@@ -109,17 +109,17 @@ def _land_case(snow, sm, soil_type, *, landsea=None):
 def test_wrf_init_admits_the_met_office_ice_sheet_store_and_caps_it(capsys):
     """51,800 kg m-2 over Greenland used to be refused at 20,000.  On land
     ice it is an ice sheet's snow store, real source data, so it is admitted
-    and starts at 5000 kg m-2."""
+    and starts at 2000 kg m-2."""
     from woof.ingest.soil import preprocess_noah_soil
 
-    fields, soil_type = _land_case([[51_800.0, 3_000.0, 0.0]],
+    fields, soil_type = _land_case([[51_800.0, 1_500.0, 0.0]],
                                    [[0.30, 0.30, 0.30]], [[16, 6, 6]])
     soil = preprocess_noah_soil(fields, soil_type=soil_type)
-    np.testing.assert_array_equal(soil.snow_water, [[5000.0, 3000.0, 0.0]])
-    np.testing.assert_allclose(soil.snow_depth, [[25.0, 15.0, 0.0]])
+    np.testing.assert_array_equal(soil.snow_water, [[2000.0, 1500.0, 0.0]])
+    np.testing.assert_allclose(soil.snow_depth, [[10.0, 7.5, 0.0]])
     assert set(soil.init_caps) == {"snow"}
     assert soil.init_caps["snow"]["cells_capped"] == 1
-    assert "capped SNOW at 5000 kg m-2 on 1 of 3 cell(s)" in capsys.readouterr().err
+    assert "capped SNOW at 2000 kg m-2 on 1 of 3 cell(s)" in capsys.readouterr().err
 
 
 def test_the_unit_error_guard_still_refuses_off_the_ice_sheet():
@@ -133,7 +133,7 @@ def test_the_unit_error_guard_still_refuses_off_the_ice_sheet():
     fields, soil_type = _land_case([[51_800.0, 30_000.0, 0.0, 0.0]],
                                    [[0.3] * 4], [[16, 6, 6, 6]])
     soil = preprocess_noah_soil(fields, soil_type=soil_type)
-    np.testing.assert_array_equal(soil.snow_water, [[5000.0, 5000.0, 0.0, 0.0]])
+    np.testing.assert_array_equal(soil.snow_water, [[2000.0, 2000.0, 0.0, 0.0]])
     assert soil.init_caps["snow"]["cells_capped"] == 2
 
     # The same 30,000 with no land ice in reach is the factor of 1000.
@@ -245,11 +245,11 @@ def test_hex_and_wrf_caps_agree_on_the_rust_unit_vectors():
     path's functions, give the numbers the Rust asserts."""
     from woof.ingest.soil import cap_land_moisture_at_smcmax, cap_snow_water
 
-    snow = np.array([[0.0, 4999.0, 5000.0, 5001.0, 51_800.0]], dtype=np.float32)
+    snow = np.array([[0.0, 1999.0, 2000.0, 2001.0, 51_800.0]], dtype=np.float32)
     snowh = snow * np.float32(5.0) / np.float32(1000.0)
     capped, depth, receipt = cap_snow_water(snow, snowh)
-    assert capped.tolist() == [[0.0, 4999.0, 5000.0, 5000.0, 5000.0]]
-    assert np.all(np.abs(depth[0, 3:] - 25.0) < 1e-4)
+    assert capped.tolist() == [[0.0, 1999.0, 2000.0, 2000.0, 2000.0]]
+    assert np.all(np.abs(depth[0, 3:] - 10.0) < 1e-4)
     assert receipt["cells_capped"] == 2
 
     # snow_below_at_and_above / soil_moisture_below_at_and_above in caps.rs,
@@ -283,13 +283,13 @@ def test_init_door_lifts_the_engine_caps_into_notes():
     from woof.hex.init_caps import engine_cap_notes
 
     receipt = {"caps": {
-        "snow": {"cap_kg_m2": 5000.0, "cells_capped": 3,
-                 "note": "rw_mpas_init: capped SNOW at 5000 kg m-2 on 3 cell(s)"},
+        "snow": {"cap_kg_m2": 2000.0, "cells_capped": 3,
+                 "note": "rw_mpas_init: capped SNOW at 2000 kg m-2 on 3 cell(s)"},
         "soil_moisture": {"cells_capped": 0, "note": ""},
     }}
     caps, notes = engine_cap_notes(receipt)
     assert caps == receipt["caps"]
-    assert notes == ["rw_mpas_init: capped SNOW at 5000 kg m-2 on 3 cell(s)"]
+    assert notes == ["rw_mpas_init: capped SNOW at 2000 kg m-2 on 3 cell(s)"]
     assert engine_cap_notes({"n_cells": 4}) == (None, [])
 
 
@@ -308,7 +308,7 @@ def test_intermediate_preview_counts_what_the_init_will_cap(tmp_path):
     landsea = np.array([[1, 1, 1], [1, 0, 1]], dtype=np.float32)
     _write_intermediate(path, [
         {"field": "SNOW", "units": "kg m-2", "description": "", "level": 200100.0,
-         "values": np.array([[51_800.0, 5000.0, 0.0], [12.0, 6000.0, 4999.0]], np.float32)},
+         "values": np.array([[51_800.0, 1500.0, 0.0], [12.0, 6000.0, 1999.0]], np.float32)},
         {"field": "LANDSEA", "units": "", "description": "", "level": 200100.0,
          "values": landsea},
         {"field": "SM000010", "units": "", "description": "", "level": 200100.0,
@@ -323,7 +323,7 @@ def test_intermediate_preview_counts_what_the_init_will_cap(tmp_path):
     assert soil["land_points_at_one"] == 1
     assert soil["source_max_below_one"] == pytest.approx(0.86)
     assert len(preview["notes"]) == 2
-    assert preview["notes"][0].startswith("SNOW is above 5000 kg m-2 at 2 source point(s)")
+    assert preview["notes"][0].startswith("SNOW is above 2000 kg m-2 at 2 source point(s)")
 
     calm = tmp_path / "MET:2026-10-11_03"
     _write_intermediate(calm, [

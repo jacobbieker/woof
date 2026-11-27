@@ -109,8 +109,13 @@ def lbc_from_ends(start: dict, end: dict, seconds: float) -> dict:
     form): the value is ``start`` and the tendency ``(end - start) /
     seconds``, as WRF's ``bt`` ties to the next record.  ``seconds`` is
     the interval's length (``Window.lbc_seconds``).  Without ``var4d_lbc``
-    WRFDA perturbs the start only and keeps the tendency: pass the value
-    tables alone in ``dx0`` (the ``_t`` tables then start at zero)."""
+    WRFDA does not keep the tendency: it sets each tendency table to
+    ``(0 - start) / seconds`` (``da_transfer_xatowrftl_lbc.inc``,
+    ``g_stuff_bdytend`` with ``temp2 = 0`` outside the ``var4d_lbc`` IF;
+    called from ``da_transform_vtoy.inc:75``), so the boundary
+    perturbation decays to zero over the interval.  That is this function
+    with ``end`` all zeros (``woof.da.var.window4d.lbc_tl`` / ``lbc_ad``
+    do it for the 4D-Var lane)."""
     if set(start) != set(end):
         raise ValueError(f"start and end name other tables: {sorted(set(start) ^ set(end))}")
     out = {}
