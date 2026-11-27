@@ -1209,11 +1209,15 @@ def main(args) -> int:
             print("woof estimate: --calibrate runs on THIS box; drop --card "
                   "and --runner", file=sys.stderr)
             return 2
-        report = calib.calibrate(
-            args.config, steps=args.calibrate, warmup=args.warmup,
-            estimate=est, prepared_root=args.prepared_root,
-            record=not args.no_record, runner=runner,
-            timeout_s=args.calibrate_timeout)
+        try:
+            report = calib.calibrate(
+                args.config, steps=args.calibrate, warmup=args.warmup,
+                estimate=est, prepared_root=args.prepared_root,
+                record=not args.no_record, runner=runner,
+                timeout_s=args.calibrate_timeout)
+        except ValueError as error:
+            print(f"woof estimate: {error}", file=sys.stderr)
+            return 1
     document = est.to_json()
     if admission is not None:
         document["admission"] = admission

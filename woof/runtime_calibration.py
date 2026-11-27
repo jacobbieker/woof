@@ -321,10 +321,12 @@ def stop_process_tree(process: subprocess.Popen, *, grace_s: float = 30.0
 
 def go_command(config: Path, outdir: Path, *, prepared_root: Path | None
                ) -> list[str]:
-    command = [sys.executable, "-m", "woof", "go", str(config),
-               "--outdir", str(outdir), "--products", "none"]
+    # Absolute: the run's working directory is the calibration's own.
+    command = [sys.executable, "-m", "woof", "go",
+               str(Path(config).resolve()),
+               "--outdir", str(Path(outdir).resolve()), "--products", "none"]
     if prepared_root is not None:
-        command += ["--prepared-root", str(prepared_root)]
+        command += ["--prepared-root", str(Path(prepared_root).resolve())]
     return command
 
 
@@ -436,17 +438,27 @@ def calibrate(config, *, steps: int, warmup: int, estimate, runner,
     config = Path(config)
     own_dir = workdir is None
     workdir = Path(workdir or tempfile.mkdtemp(prefix="woof-calibrate-"))
+    run = None
     try:
         run = measure_fn(config, steps=steps, warmup=warmup, workdir=workdir,
                          prepared_root=prepared_root, timeout_s=timeout_s)
     finally:
-        if own_dir and not keep:
+        failed = run is None or len(run["records"]) <= warmup + 1
+        # A failed calibration keeps its directory: the log is the answer.
+        if own_dir and not keep and not failed:
             import shutil
 
             shutil.rmtree(workdir, ignore_errors=True)
     if len(run["records"]) <= warmup + 1:
+        tail = ""
+        try:
+            lines = Path(run.get("log", "")).read_text(
+                encoding="utf-8", errors="replace").strip().splitlines()
+            tail = "\n  " + "\n  ".join(lines[-6:]) if lines else ""
+        except OSError:
+            pass
         raise ValueError(f"--calibrate measured no settled step: "
-                         f"{run['reason']} (see {run.get('log')})")
+                         f"{run['reason']} (see {run.get('log')}){tail}")
     report = report_from_records(
         run["records"], estimate=estimate, warmup=warmup,
         launch_to_first_step_s=run.get("launch_to_first_step_s"))
