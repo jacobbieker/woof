@@ -2508,7 +2508,9 @@ def _launch_wrf_smag_scalar_rows(state: DomainState, cfg: RunConfig, specs,
     moisture, chem, TKE) share SMAG_MULTI_ROWS per launch pair, the per-row
     words (kernels/smag2d.cu); w (stagger "z") and any row the multi launch
     cannot take keep their own launches; every row then takes its open-strip
-    zeroing.  chem_mix2_off drops a chem row's horizontal mixing only."""
+    zeroing, all rows in one launch (each launch writes only its own row's
+    buffer, so zeroing after the last is zeroing after each).
+    chem_mix2_off drops a chem row's horizontal mixing only."""
     mix2_exempt = chem_mix2_exempt_slots(state, cfg)
     scalar_rows = [(f, xk, state.scratch(f.shape, slot), slot == "smag_rth", stag)
                    for f, _tend, xk, _c1, _c2, slot, stag in specs[2:]
@@ -2522,7 +2524,8 @@ def _launch_wrf_smag_scalar_rows(state: DomainState, cfg: RunConfig, specs,
         if not (batched and stag == ""):
             launch_wrf_smag2d_hd(state, cfg, f, xk, buf, stagger=stag,
                                  time_t=time_t, full_theta=full)
-        _zero_open_strips(buf, cfg, 1)
+    _zero_open_strips_rows([buf for _f, _xk, buf, _full, _stag in scalar_rows],
+                           cfg, 1)
 
 
 def _compute_wrf_smag_tendencies(state: DomainState, cfg: RunConfig,
@@ -4167,6 +4170,21 @@ def _sumflux_launch(name: str, targets: tuple, sources: tuple = (),
                     nsub: int = 0) -> None:
     """Batch three independent staggered WRF sumflux array operations."""
     _prepare_sumflux_launch(name, targets, sources, nsub)()
+
+
+def _zero_open_strips_rows(bufs, cfg: RunConfig, width: int) -> None:
+    """:func:`_zero_open_strips` of every buffer in ``bufs`` (no
+    ``stag_high_extra``), in one launch when they share a horizontal shape
+    (ring_frame.zero_frames; ``WOOF_BATCHED_GLUE=0``: one per buffer)."""
+    from woof.core.bandwidth_glue import batched_glue_enabled
+    open_x, open_y = _boundary_x(cfg), _boundary_y(cfg)
+    if bufs and (open_x or open_y) and width > 0 and batched_glue_enabled():
+        from woof.core.ring_frame import zero_frames
+        x_w, y_w = (width if open_x else 0), (width if open_y else 0)
+        if zero_frames(bufs, x_w, x_w, y_w, y_w):
+            return
+    for buf in bufs:
+        _zero_open_strips(buf, cfg, width)
 
 
 def _zero_open_strips(buf: cp.ndarray, cfg: RunConfig, width: int,

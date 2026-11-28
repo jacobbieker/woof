@@ -31,7 +31,9 @@
 # src/shared, as MPAS's get_cvmix.sh links it) is found at CVMIX_SOURCE or at
 # MPAS_SOURCE_ROOT/src/core_ocean/cvmix, its ten modules (checked against
 # CVMIX_SOURCES.sha256) and mpas_ocn_vmix_cvmix.F are compiled verbatim with
-# the vertical mixing into run_vmix_cvmix_r8.  Nothing of CVMix is in this
+# the vertical mixing into run_vmix_cvmix_r8, and linked in place of
+# stubs_vmix.F90 into run_split_step_cvmix_r8 and run_forward_cvmix_r8 (the
+# step and the forward mode, every other object theirs).  Nothing of CVMix is in this
 # repository; the oracle compiles what it downloads.
 set -euo pipefail
 if [[ $# -ne 2 ]]; then
@@ -60,7 +62,7 @@ if [[ -f "${cvmix_root}/cvmix_kpp.F90" ]]; then
         exit 3
     }
 else
-    echo "no CVMix source (CVMIX_SOURCE or ${source_root}/src/core_ocean/cvmix): run_vmix_cvmix_r8 is not built" >&2
+    echo "no CVMix source (CVMIX_SOURCE or ${source_root}/src/core_ocean/cvmix): run_{vmix,split_step,forward}_cvmix_r8 are not built" >&2
     cvmix_root=""
 fi
 for precision in r4 r8; do
@@ -300,6 +302,21 @@ for precision in r4 r8; do
         "${fc[@]}" -o "${build_dir}/run_vmix_cvmix_${precision}" cvmix/run_vmix.o eos/oracle_stream.o \
             cvmix/mpas_ocn_vmix*.o cvmix/cvmix_*.o eos/mpas_ocn_equation_of_state*.o mpas_ocn_constants.o \
             mpas_constants.o stubs.o mpas_kind_types.o ${libm_objects[@]+"${libm_objects[@]}"}
+        # the step and the forward mode with CVMix: the same objects, the vertical
+        # mixing (and CVMix) from cvmix/ in place of eos/'s and stubs_vmix's
+        step_objects=(eos/ocn_split_step_cut.o eos/mpas_vector_reconstruction_cut.o eos/stubs_split.o \
+            eos/mpas_ocn_gm.o eos/ocn_gm_vectors_cut.o \
+            eos/mpas_ocn_time_average_coupled.o eos/mpas_ocn_effective_density_in_land_ice.o \
+            eos/mpas_ocn_tendency.o eos/mpas_ocn_surface_bulk_forcing.o eos/mpas_ocn_frazil_forcing.o \
+            eos/mpas_ocn_surface_land_ice_fluxes.o eos/mpas_ocn_tracer_*.o \
+            eos/mpas_tracer_advection_helpers_cut.o eos/ocn_diagnostics_cut.o eos/mpas_ocn_diagnostics_routines.o \
+            eos/mpas_ocn_thick_ale.o cvmix/mpas_ocn_vmix*.o cvmix/cvmix_*.o eos/mpas_ocn_equation_of_state*.o \
+            mpas_ocn_vel_*.o mpas_ocn_thick_hadv.o mpas_ocn_thick_vadv.o mpas_ocn_thick_surface_flux.o \
+            mpas_ocn_forcing.o mpas_ocn_constants.o mpas_constants.o stubs_unported.o stubs.o mpas_kind_types.o)
+        "${fc[@]}" -o "${build_dir}/run_split_step_cvmix_${precision}" eos/run_split_step.o eos/oracle_stream.o \
+            "${step_objects[@]}" ${libm_objects[@]+"${libm_objects[@]}"}
+        "${fc[@]}" -o "${build_dir}/run_forward_cvmix_${precision}" eos/run_forward.o eos/ocn_timestep_cut.o \
+            eos/oracle_stream.o "${step_objects[@]}" ${libm_objects[@]+"${libm_objects[@]}"}
     fi
     "${fc[@]}" -o "${build_dir}/run_gm_${precision}" gm/run_gm.o gm/oracle_stream.o gm/mpas_ocn_gm.o \
         mpas_ocn_constants.o mpas_constants.o stubs.o mpas_kind_types.o ${libm_objects[@]+"${libm_objects[@]}"}
@@ -311,4 +328,4 @@ done
     cat "${build_dir}/r4/libm.txt"
     if [[ -n ${cvmix_root} ]]; then echo "CVMix: ${cvmix_root} (CVMIX_SOURCES.sha256), RKIND 8 only"; fi
 } > "${build_dir}/TOOLCHAIN.txt"
-echo "built ${build_dir}/run_{oracle,pgrad_hmix,tendency,eos,diagnostics,tracer_advection,tracer_hmix,tend_tracer,vmix,vert_transport,btr_subcycle,split_step,forward,frazil,land_ice,gm}_{r4,r8}${cvmix_root:+ and run_vmix_cvmix_r8}"
+echo "built ${build_dir}/run_{oracle,pgrad_hmix,tendency,eos,diagnostics,tracer_advection,tracer_hmix,tend_tracer,vmix,vert_transport,btr_subcycle,split_step,forward,frazil,land_ice,gm}_{r4,r8}${cvmix_root:+ and run_vmix_cvmix_r8, run_split_step_cvmix_r8, run_forward_cvmix_r8}"

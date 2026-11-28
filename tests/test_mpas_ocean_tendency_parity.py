@@ -26,7 +26,6 @@ THE BREAKAGES THESE PREVENT
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -35,6 +34,7 @@ import numpy as np
 import pytest
 
 from conftest import requires_gpu
+import _oracle_toolchains
 from woof.hex.errors import ConfigurationRefusal
 from woof.verify import mpas_ocean_tendency_oracle as oo
 
@@ -240,11 +240,7 @@ def test_a_reordered_composition_is_caught(monkeypatch):
 
 
 def _oracle_toolchain() -> tuple[str, Path] | None:
-    source = os.environ.get("WOOF_MPAS_V842_SOURCE")
-    gfortran = os.environ.get("GFORTRAN") or shutil.which("gfortran")
-    if not source or not gfortran or not Path(source, "src", "core_ocean").is_dir():
-        return None
-    return gfortran, Path(source)
+    return _oracle_toolchains.mpas_v842("core_ocean")
 
 
 @pytest.mark.skipif(_oracle_toolchain() is None,

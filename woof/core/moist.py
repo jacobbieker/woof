@@ -438,10 +438,21 @@ def _mut2d(mu, ny: int, nx: int) -> cp.ndarray:
         cp.broadcast_to(cp.asarray(mu, dtype=DTYPE), (ny, nx)))
 
 
+def pd_west_symmetric(cfg) -> bool:
+    """RunConfig.pd_adv_west_courant (finding FQ13) where it is read: the
+    key is scoped by moist_adv_opt = 1 (woof.correct_mode.KEY_SCOPE), and
+    every PD launch of such a domain (moisture, scalars, TKE, tracers,
+    chem) takes it; with moist_adv_opt != 1 the other PD transports keep
+    WRF's west-face order."""
+    return (getattr(cfg, "pd_adv_west_courant", False) is True
+            and int(getattr(cfg, "moist_adv_opt", 1)) == 1)
+
+
 def launch_pd_fluxes(q, q0, ru, rv, rw, mut, coord, dx, dy, dt,
                      fxl, fxc, fyl, fyc, fzl, fzc,
                      msft=None, has_msf=None,
-                     open_x=False, open_y=False, vorder=3, horder=5) -> None:
+                     open_x=False, open_y=False, vorder=3, horder=5,
+                     west_symmetric=False) -> None:
     """Fill the six PD flux arrays for scalar ``q`` (see pd_advection.cu).
 
     ``q`` is the RK stage estimate (high-order fluxes), ``q0`` the time-t
@@ -461,6 +472,10 @@ def launch_pd_fluxes(q, q0, ru, rv, rw, mut, coord, dx, dy, dt,
     keeps the upwind flux (the fork's downstream cell there is confined to
     the strict WRF verification build: it drained empty cells and the
     final clamp turned that into mass). Order 3 never loads that kernel.
+    ``west_symmetric`` (:func:`pd_west_symmetric`, finding FQ13) gives a
+    bounded x axis's second-order west face every other face's Courant
+    order; off, the strict build keeps WRF's (ru/mu)*dt/dx there.  It
+    rides ``open_x`` as bit 2, which every other reader takes as truthy.
     """
     nz, ny, nx = q.shape
     if vorder not in (2, 3, 4, 5, 6):
@@ -491,7 +506,8 @@ def launch_pd_fluxes(q, q0, ru, rv, rw, mut, coord, dx, dy, dt,
           DTYPE(dx), DTYPE(dy), DTYPE(dt),
           fxl, fxc, fyl, fyc, fzl, fzc,
           np.int32(nz), np.int32(ny), np.int32(nx), np.int32(has_msf),
-          np.int32(open_x), np.int32(open_y), np.int32(vorder))
+          np.int32(int(bool(open_x)) | (2 if open_x and west_symmetric else 0)),
+          np.int32(open_y), np.int32(vorder))
     kern(grid, block, args)
     if vorder == 5:
         # pd_vertical_sl indexes rows by blockIdx.y: the row block
@@ -880,6 +896,7 @@ def _advance_species_wrf(state: DomainState, cfg: RunConfig, name: str, q, q0,
                          cfg.dx, cfg.dy, dt_eff, *bufs,
                          msft=state.msft, has_msf=state.has_msf,
                          open_x=boundary_x, open_y=boundary_y,
+                         west_symmetric=pd_west_symmetric(cfg),
                          vorder=vertical_orders(cfg)[0], horder=scalar_horizontal_order(cfg))
         launch_pd_renorm_apply(q0_eff, mu0, *bufs, tend=tend, coord=state,
                                dx=cfg.dx, dy=cfg.dy, dt=dt_eff,
@@ -1138,6 +1155,7 @@ def advance_scalars_stage(state: DomainState, cfg: RunConfig,
                              cfg.dx, cfg.dy, dt_eff, *bufs,
                              msft=state.msft, has_msf=state.has_msf,
                              open_x=boundary_x, open_y=boundary_y,
+                             west_symmetric=pd_west_symmetric(cfg),
                              vorder=vertical_orders(cfg)[0], horder=scalar_horizontal_order(cfg))
             launch_pd_renorm_apply(q0_eff, mu0, *bufs, tend=tend,
                                    coord=state,
@@ -1270,6 +1288,7 @@ def advance_scalars_stage(state: DomainState, cfg: RunConfig,
                                  cfg.dx, cfg.dy, dt_eff, *bufs,
                                  msft=state.msft, has_msf=state.has_msf,
                                  open_x=boundary_x, open_y=boundary_y,
+                                 west_symmetric=pd_west_symmetric(cfg),
                                  vorder=vertical_orders(cfg)[0], horder=scalar_horizontal_order(cfg))
                 launch_pd_renorm_apply(q0_eff, mu0, *bufs, tend=tend,
                                        coord=state,
@@ -1550,6 +1569,7 @@ def advance_tke_stage(state: DomainState, cfg: RunConfig,
                          cfg.dx, cfg.dy, dt_eff, *bufs,
                          msft=state.msft, has_msf=state.has_msf,
                          open_x=boundary_x, open_y=boundary_y,
+                         west_symmetric=pd_west_symmetric(cfg),
                          vorder=vertical_orders(cfg)[0], horder=scalar_horizontal_order(cfg))
         launch_pd_renorm_apply(q0_eff, mu0, *bufs, tend=tend,
                                coord=state,

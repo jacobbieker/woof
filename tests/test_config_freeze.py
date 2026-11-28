@@ -369,6 +369,10 @@ def test_new_fields_are_reviewed_defaults_appended_last():
     # (multi_perturb and its pert_* keys, the table) off at WRF's Registry
     # defaults (tests/test_wrfsolar_eps_madwrf_config.py).
     from woof.config import MULTI_PERTURB_RUN_DEFAULTS
+    # The PD transport's west-face Courant order (finding FQ13), appended.
+    assert names.pop() == "pd_adv_west_courant"
+    assert RunConfig.__dataclass_fields__["pd_adv_west_courant"].default is _cm.CORRECT_KEYS_DEFAULT
+    assert RunConfig.__dataclass_fields__["pd_adv_west_courant"].kw_only
     # The Noah snow series conductivity (quirk pass, finding FQ9), appended.
     assert names.pop() == "noah_snow_series_conductivity"
     assert RunConfig.__dataclass_fields__["noah_snow_series_conductivity"].default is _cm.CORRECT_KEYS_DEFAULT
@@ -1175,6 +1179,8 @@ def _check_frozen_defaults(actual):
                          ("mynn_sfclay_q2_land_cap", __import__("woof.correct_mode", fromlist=["x"]).CORRECT_KEYS_DEFAULT),
                          # the Noah snow series conductivity (FQ9)
                          ("noah_snow_series_conductivity", __import__("woof.correct_mode", fromlist=["x"]).CORRECT_KEYS_DEFAULT),
+                         # the PD transport's west-face Courant order (FQ13)
+                         ("pd_adv_west_courant", __import__("woof.correct_mode", fromlist=["x"]).CORRECT_KEYS_DEFAULT),
                          # the opt-in resolved obstacles, off
                          *__import__("woof.config", fromlist=["x"]).OBSTACLE_RUN_DEFAULTS.items()):
         assert actual.pop(field) == value, field

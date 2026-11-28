@@ -14,8 +14,8 @@ table update. The QC carry is measured at no effect on L1 and is not
 ported. `var_scaling(it)` defaults to 1, which is the identity. L1 is
 narrowed to `damp_opt 0`, `emdiv 0` and `moist_adv_opt 0` until P3a
 covers them. It is not word for word, because WRFPLUS's trajectory cannot
-be read out of this build. Not done: the checkpoint policy and its G3
-receipt, and 4D.5 (L0, after P3a item 6).
+be read out of this build. The checkpoint policy and its G3 receipt are
+section 6 (2026-11-28). Not done: 4D.5 (L0, after P3a item 6).
 It is the
 second half of V5 in
 [WRFDA-3DVAR-PLAN.md](WRFDA-3DVAR-PLAN.md) section 7 (V5.2 and the
@@ -265,3 +265,112 @@ It does not depend on how closely woof's forecast reproduces WRF.
   by the time step.
 
 The bin rules are WRFDA's own errors, refused with the same remedy.
+
+## 6. Trajectory checkpointing and the G3 receipt
+
+**Policy** (`WindowModel(checkpoint=...)`, `woof/da/var/window4d.py`).
+WRFPLUS keeps the nonlinear run's state at every time step in memory
+(`trajectory_io = .true.`) and rebuilds each step's tape inside its
+adjoint step (`solve_em_ad`'s recompute into `adBuffer`). P3a's window
+already works this way (`Window(checkpoint_every=1)`; P3A plan section 3).
+The policy picks how many step-start states the window keeps:
+
+| `checkpoint` | states kept | AD recompute | memory, tutorial window (90x60x41, 60 steps, binary64) |
+|---|---|---|---|
+| `"all"` (WRFPLUS's) | every step's | each step once, taped | 1.23 GB |
+| `"slot"` | one per slot, plus one slot's states during the AD | each step twice (once untaped, once taped) | 0.12 GB stored, 0.31 GB peak |
+| int `c` (divides `var4d_bin / time_step`) | one every `c` steps | as `"slot"` | between the two |
+
+- `None` (the default) keeps the window's own `checkpoint_every`. That is 1
+  unless the caller set it, so the default behaves as `"all"`.
+- The TL needs only state 0, because it advances the base with the
+  perturbation.
+- Every policy gives the same gradient to the word. The recompute is the
+  same base build (`model.step_base`).
+  `test_real_window_checkpoint_policy_is_word_exact` pins this on the host.
+- An outer loop whose rerun is the window's own model passes
+  `Trajectory.start` (the rerun's start state). `relinearise` then reruns
+  the window from it under the policy.
+- A rerun handed over as per-step states (`Trajectory.states`, for example
+  a forecast with physics) is held in full. The window cannot rerun a base
+  it did not run.
+- `WindowModel.checkpoint_report()` gives the stored and peak states, their
+  bytes, and the untaped steps each AD reruns.
+
+**Why `"all"` is the recommended policy** (and what the L1 harness and
+the receipt use). It is the simplest policy that meets G3, and the
+cheapest. At the tutorial's size its memory (1.2 GB) is far below
+the A6000's 48 GB and the Mac's unified memory. `"slot"` cuts the stored
+states tenfold and the AD's peak about fourfold, for one more forward step
+per step, which costs about 1x the
+forward window per AD. Binomial (revolve) schedules for long windows remain
+P4.1's `woof/grad/checkpoint.py` and are not needed here.
+
+Storing the whole window's tape instead would make each AD a pure sweep.
+The 8a/8b measurement puts that sweep at 3.3x where the full adjoint step
+costs 4.8x, in binary32. But the tape is about 80 fields per step (about
+145 MB per step at the tutorial size in binary64, 8.7 GB per window), and
+it needs a new mode in `woof/grad/wrfplus/window.py`, which this lane does
+not edit. It is the next lever if G3 must be met against the binary32
+forecast (below).
+
+**G3 receipt** (`python -m tools.var4d_g3_receipt`; 2026-11-28).
+
+- Medians of 3 interleaved repeats, after a warm-up repeat. Each row
+  reads back one value of every output array, so Metal's lazy arrays are
+  evaluated. Ranges are two runs.
+- The window: P3a's `Window` over 60 steps of a moist ridge case at the
+  tutorial's 90x60x41, with 7 slots 10 steps apart.
+- The rows are:
+  - the forward window (the base-only build, in the window's precision);
+  - the TL with all slots saved;
+  - the AD forced at every slot, under each policy.
+- pb A6000, card idle (`run_idle.sh`: no other compute app, under 10%
+  utilisation for 60 s).
+- Metal: M-series, binary32 only (Metal has no binary64). The host CI run
+  of another worker was using the CPU at the time.
+
+| backend, precision | TL / forward | AD `all` / forward | AD `slot` / forward | AD `all` / woof binary32 forecast |
+|---|---|---|---|---|
+| CUDA binary64 | 1.24-1.26 | 2.70-2.72 | 3.65-3.66 | 12.5-13.5 |
+| CUDA binary32 | 1.10-1.11 | 2.81-2.84 | 3.57-3.65 | 5.3-6.0 |
+| Metal binary32 | 1.40-1.58 | 2.95-3.23 | 3.85-4.15 | 3.9-4.0 |
+| CUDA binary64, 200x200x49, 12 steps | 1.11 | 2.48 | 3.32 | 24.8 |
+| CUDA binary32, 200x200x49, 12 steps | 1.60 | 3.80 | 4.64 | 5.57 |
+
+`WindowModel` on lane L1's real window measures one inner iteration's
+model cost:
+
+- the window: 89x59x40 mass points, specified, moist, binary64, CUDA;
+- the TL and AD include the host transfers and the boundary-table maps;
+- against the forward window, the TL is 1.56x;
+- the AD is 3.35-3.36x under `"all"` and 4.25x under `"slot"`.
+
+The L1 gate itself (`tests/_var4d_l1.py`, two outer loops, the second
+relinearised through `Trajectory.start`) gives the same `minimize_cg` lines
+and increments to the word under `WOOF_L1_CHECKPOINT=all` and `slot`
+(pb, lane `l1x2`). They match #883's numbers. Each run takes about 12
+minutes.
+
+**Verdict.**
+
+- Against the forward window in the same precision, the TL (1.1-1.6x) and
+  the AD (2.5-3.8x under `"all"`) are inside G3's ~5x on every backend.
+- Against woof's binary32 forecast, the forward step that P3a's G3 rows
+  divide by, the result depends on the precision:
+  - the binary32 window: 3.9-4.0x on Metal and 5.3-6.0x on CUDA, which is
+    about G3's 5x and a little over on CUDA. At these sizes the CUDA
+    forecast step (6 ms) is launch-bound, so the CUDA ratio moves between
+    runs;
+  - the binary64 window, which 4D-Var requires (`WindowModel` refuses
+    binary32, because the minimiser needs adjointness to 1e-12): 12-25x on
+    the A6000, whose fp64 rate is 1/32. The forward window alone is already
+    4.6-10x the binary32 forecast.
+- G3's per-step rows (P3A plan 8b) are unchanged by this lane.
+- Which denominator G3 means for the 4D-Var window is a user decision.
+  Against the same-precision forward window, G3 passes. Against the
+  binary32 forecast, it fails in binary64 on this card, and the options are:
+  - accept the binary64 cost for 4D-Var;
+  - store the window's tape;
+  - run a binary32 TL/AD with a looser minimiser.
+

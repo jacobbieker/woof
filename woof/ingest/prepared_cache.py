@@ -592,6 +592,10 @@ DEFAULT_TOLERANT_IDENTITY_FIELDS = frozenset({
     # The MYNN surface-layer Q2 land cap (FQ10, sf_sfclay_physics = 5 at
     # wrf_461 only, on in correct mode): step-time; preparation never reads it.
     "run.mynn_sfclay_q2_land_cap",
+    # The PD transport's west-face Courant order (FQ13, moist_adv_opt = 1 on
+    # a bounded x axis, on in correct mode): step-time; preparation never
+    # reads it.
+    "run.pd_adv_west_courant",
     # The opt-in TSI forcing (woof.spacewx), appended off.
     "run.solar_tsi_opt", "run.solar_tsi_source", "run.solar_tsi_mode",
     # The opt-in solar band shares (woof.spacewx), appended off.

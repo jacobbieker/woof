@@ -1,0 +1,144 @@
+"""One MPAS-Ocean split-explicit step with CVMix (and KPP) on, word for word against v8.4.2 at RKIND 8.
+
+The reference is the split step oracle (``tools/mpas_ocean_oracle/run_split_step.F90``)
+linked with CVMix v0.84-beta and ``mpas_ocn_vmix_cvmix.F`` verbatim
+(``run_split_step_cvmix_r8``): each iteration's tracer tendency computes
+KPP's input fields at time level 2 (the surface fluxes on time level 1's
+tracers) and adds KPP's non-local flux, or leaves it to the implicit solve;
+the implicit vertical mixing builds CVMix's coefficients. CVMix is real(8)
+throughout, so RKIND 8 only (RKIND 4 is refused by name,
+tests/test_mpas_ocean_split_step_parity.py). The outputs are committed
+(tests/data/oracles/mpas_ocean_split_step_cvmix, PROVENANCE.md). When
+gfortran, ``WOOF_MPAS_V842_SOURCE`` and ``CVMIX_SOURCE`` are set, the fixture
+itself is rebuilt and compared.
+
+THE BREAKAGES THESE PREVENT
+---------------------------
+1. KPP's input fields read on the wrong time level, or its non-local flux
+   dropped from the step: each held by a mutation.
+2. A fixture that misses a branch: KPP's non-local flux in the tendency and
+   in the implicit solve, the unsplit integrator with CVMix but no KPP, sea
+   ice, the friction velocity the bulk wind stress gives (behind
+   ``WOOF_GLIBC239_LIBM64=1`` at RKIND 8) and the calm one without it.
+3. A port exact only under strict numerics: the gate runs in fast and strict
+   child processes too.
+4. A case generator whose bytes drift. The input digests are pinned.
+"""
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+from _numerics_child import MODES, run as run_child
+from conftest import requires_gpu
+from woof.verify import mpas_ocean_split_step_cvmix_oracle as oo
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_case_inputs_are_the_recorded_bytes():
+    recorded = dict(reversed(line.split()) for line in
+                    (oo.FIXTURE_DIR / "inputs.sha256").read_text(encoding="utf-8").splitlines())
+    assert recorded == {f"{case['name']}/r8": oo.input_digest(case) for case in oo.cases("r8")}
+
+
+def test_fixture_covers_the_branches():
+    fixture = oo.load_fixture("r8")
+    cases = {case["name"]: case for case in oo.cases("r8")}
+    assert set(fixture) == set(cases)
+    seen = set()
+    for name, out in fixture.items():
+        case = cases[name]
+        c, d0 = case["config"], case["pools"]["diagnostics"]
+        nc, ne = case["dims"]["nCells"], case["dims"]["nEdges"]
+        assert c["config_use_cvmix"]
+        assert np.isfinite(out["state/normalVelocity@2"][:ne]).all()
+        assert np.isfinite(out["tracers/activeTracers@2"][:nc]).all()
+        assert not (out["diagnostics/vertDiffTopOfCell"][:nc] == d0["vertDiffTopOfCell"][:nc]).all()
+        if not c["config_use_cvmix_kpp"]:
+            seen.add("no_kpp")
+            continue
+        assert not (out["diagnostics/boundaryLayerDepth"][:nc] == d0["boundaryLayerDepth"][:nc]).all(), name
+        assert np.count_nonzero(out["diagnostics/vertNonLocalFlux"][:nc]), name
+        assert not (out["tracersSurfaceFlux/nonLocalSurfaceTracerFlux"][:nc] == 0).all(), name
+        friction = out["diagnostics/surfaceFrictionVelocity"][:nc]
+        seen.add("wind" if (friction > 0).all() else "calm")
+        assert (friction > 0).all() == c.get("config_use_bulk_wind_stress", False), name
+        seen.add("implicit" if c["config_cvmix_kpp_nonlocal_with_implicit_mix"] else "tendency")
+        if c["config_time_integrator"] == "unsplit_explicit":
+            seen.add("unsplit")
+        if (case["pools"]["forcing"]["iceFraction"][:nc] > 0).any():
+            seen.add("ice")
+    assert seen == {"no_kpp", "wind", "calm", "implicit", "tendency", "ice"}
+    assert {c["config_time_integrator"] for c in (k["config"] for k in cases.values())} == {
+        "split_explicit", "unsplit_explicit"}
+
+
+@requires_gpu
+def test_gpu_matches_the_v842_oracle_word_for_word():
+    report = oo.measure("r8")
+    bad = {case: {k: v for k, v in fields.items() if v} for case, fields in report.items()}
+    assert not any(bad.values()), bad
+
+
+@requires_gpu
+@pytest.mark.parametrize(*MODES)
+def test_word_exact_in_fast_and_strict_children(numerics, exact):
+    run_child(__file__, ["test_gpu_matches_the_v842_oracle_word_for_word"], numerics, exact)
+
+
+@requires_gpu
+@pytest.mark.parametrize("mutation, field", [
+    ("kpp_inputs_on_level_2", "tracersSurfaceFlux/nonLocalSurfaceTracerFlux"),
+    ("no_nonlocal_flux", "tracers/activeTracers@2"),
+])
+def test_a_mutated_step_is_caught(monkeypatch, mutation, field):
+    from woof.hex.mpas_ocean import tend_tracer_v842
+    real = tend_tracer_v842.tend_tracer
+
+    def tend_tracer(**kw):
+        if mutation == "kpp_inputs_on_level_2":
+            kw["tracers_level1"] = kw["tracers"]  # time level 2 for the surface fluxes
+        else:
+            kw["configs"] = dict(kw["configs"], config_disable_tr_nonlocalflux=True)
+        real(**kw)
+    monkeypatch.setattr(tend_tracer_v842, "tend_tracer", tend_tracer)
+    # the bulk thickness flux makes time level 1's tracers count (the step zeroes it otherwise)
+    name = "kpp_split_jm_bulk_implicit_budgets" if mutation == "kpp_inputs_on_level_2" else "kpp_split_defaults"
+    case = next(c for c in oo.cases("r8") if c["name"] == name)
+    got = oo.run_gpu(case)
+    want = oo.load_fixture("r8")[case["name"]]
+    assert oo.word_mismatches(got[field], want[field]) > 0
+
+
+def _oracle_toolchain() -> tuple[str, Path, Path] | None:
+    source = os.environ.get("WOOF_MPAS_V842_SOURCE")
+    cvmix = os.environ.get("CVMIX_SOURCE")
+    gfortran = os.environ.get("GFORTRAN") or shutil.which("gfortran")
+    if not source or not cvmix or not gfortran or not Path(source, "src", "core_ocean").is_dir():
+        return None
+    return gfortran, Path(source), Path(cvmix)
+
+
+@pytest.mark.skipif(_oracle_toolchain() is None,
+                    reason="the CVMix oracle build needs gfortran (pixi -e mpas-oracle), WOOF_MPAS_V842_SOURCE "
+                           "naming an MPAS-Model v8.4.2 tree and CVMIX_SOURCE naming CVMix v0.84-beta's src/shared")
+def test_the_oracle_rebuilt_here_writes_the_fixture(tmp_path):
+    gfortran, source, cvmix = _oracle_toolchain()
+    subprocess.run(["bash", str(ROOT / "tools" / "mpas_ocean_oracle" / "build.sh"), str(source),
+                    str(tmp_path / "build")], check=True,
+                   env={**os.environ, "GFORTRAN": gfortran, "CVMIX_SOURCE": str(cvmix)})
+    subprocess.run([sys.executable, str(ROOT / "tools" / "mpas_ocean_oracle" / "make_fixture.py"),
+                    str(tmp_path / "build"), "--piece", "split_step_cvmix", "--out", str(tmp_path / "fixture")],
+                   check=True)
+    fresh = np.load(tmp_path / "fixture" / "oracle-r8.npz")
+    pinned = np.load(oo.FIXTURE_DIR / "oracle-r8.npz")
+    assert sorted(fresh.files) == sorted(pinned.files)
+    for key in pinned.files:
+        assert oo.word_mismatches(fresh[key], pinned[key]) == 0, key

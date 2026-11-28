@@ -29,7 +29,6 @@ THE BREAKAGES THESE PREVENT
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -38,6 +37,7 @@ import numpy as np
 import pytest
 
 from conftest import requires_gpu
+import _oracle_toolchains
 from woof.hex.errors import ConfigurationRefusal
 from woof.verify import mpas_ocean_split_step_oracle as oo
 
@@ -82,8 +82,10 @@ def test_fixture_covers_the_branches(precision):
 @pytest.mark.parametrize("overrides, knob", [
     ({"config_time_integrator": "RK4"}, "config_time_integrator"),
     ({"config_use_freq_filtered_thickness": True}, "config_use_freq_filtered_thickness"),
+    # CVMix is real(8) throughout: refused at RKIND 4 (it runs at 8, test_mpas_ocean_split_step_cvmix_parity.py)
     ({"config_use_cvmix": True}, "config_use_cvmix"),
-    ({"config_cvmix_kpp_nonlocal_with_implicit_mix": True}, "config_cvmix_kpp_nonlocal_with_implicit_mix"),
+    ({"config_use_cvmix": True, "config_use_cvmix_kpp": True, "config_cvmix_kpp_EkmanOBL": True},
+     "config_use_cvmix"),
 ])
 def test_what_the_step_does_not_carry_is_refused_by_name(overrides, knob):
     from woof.hex.mpas_ocean import split_step_v842 as ss
@@ -97,6 +99,16 @@ def test_what_the_step_does_not_carry_is_refused_by_name(overrides, knob):
     # nested halo extents run (tests/test_mpas_ocean_forward_parity.py holds them)
     nested = dict(mesh, nEdgesArray=np.array([mesh["nEdges"] - 3] + [mesh["nEdges"]] * 3, np.int32))
     ss.check_config(case["config"], "r4", nested)
+
+
+def test_cvmix_runs_in_the_step_at_rkind_8_with_its_own_refusals():
+    from woof.hex.mpas_ocean import split_step_v842 as ss
+    case = oo.cases("r8")[0]
+    mesh, config = case["pools"]["mesh"], dict(case["config"], config_use_cvmix=True, config_use_cvmix_kpp=True)
+    ss.check_config(config, "r8", mesh)
+    ss.check_config(dict(config, config_cvmix_kpp_nonlocal_with_implicit_mix=True), "r8", mesh)
+    with pytest.raises(ConfigurationRefusal, match="config_cvmix_kpp_EkmanOBL"):
+        ss.check_config(dict(config, config_cvmix_kpp_EkmanOBL=True), "r8", mesh)
 
 
 def test_the_sphere_at_rkind_8_needs_the_glibc_opt_in(monkeypatch):
@@ -179,11 +191,7 @@ def test_a_mutated_step_is_caught(monkeypatch, precision, original, mutated, cas
 
 
 def _oracle_toolchain() -> tuple[str, Path] | None:
-    source = os.environ.get("WOOF_MPAS_V842_SOURCE")
-    gfortran = os.environ.get("GFORTRAN") or shutil.which("gfortran")
-    if not source or not gfortran or not Path(source, "src", "core_ocean").is_dir():
-        return None
-    return gfortran, Path(source)
+    return _oracle_toolchains.mpas_v842("core_ocean")
 
 
 @pytest.mark.skipif(_oracle_toolchain() is None,

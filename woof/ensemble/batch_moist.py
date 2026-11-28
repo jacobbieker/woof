@@ -288,6 +288,9 @@ def prepare_scalars_stage(state, cfg, ru, rv, ww, dt_eff, final, *, apply_relax=
     zero = prepare_bookkeeping(((tend, tend),), members=state.members, zero=True)
     forced = cfg.specified or cfg.nested
     bx, by = cfg.open_x or forced, cfg.open_y or forced
+    # pd_fluxes reads open_x bit 2 as the FQ13 west face (moist.launch_pd_fluxes)
+    from woof.core.moist import pd_west_symmetric
+    bx_pd = int(bool(bx)) | (2 if bx and pd_west_symmetric(cfg) else 0)
     pd = final and cfg.moist_adv_opt == 1 and not (cfg.open_x or cfg.open_y)
     from woof.core.advection import vertical_orders
     vorder_scalar = vertical_orders(cfg)[0]
@@ -356,7 +359,7 @@ def prepare_scalars_stage(state, cfg, ru, rv, ww, dt_eff, final, *, apply_relax=
                 specs.append(spec); strides[parameter] = stride
             flux_spec = KernelSpec('pd_advection', 'pd_fluxes', tuple(specs))
             flux_args = arrays + (_F(cfg.dx), _F(cfg.dy), _F(dt_eff)) + buffers + tuple(
-                _I(value) for value in (nz, ny, nx, state.has_msf, bx, by, vorder_scalar))
+                _I(value) for value in (nz, ny, nx, state.has_msf, bx_pd, by, vorder_scalar))
             flux = prepare_batch_kernel_launch(flux_spec, state.members,
                 ((nx + 1 + _TPB - 1) // _TPB, ny + 1, nz + 1), (_TPB, 1, 1),
                 flux_args, pointer_strides=strides, defines=pd_defines)

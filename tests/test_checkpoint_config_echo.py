@@ -172,6 +172,11 @@ MOVED = {
     "diff_metrics_seam_slope": (
         dict(diff_metrics_seam_slope=True, km_opt=4),
         {"diff_metrics_seam_slope"}),
+    # Correct-mode FQ13 (on by default): echoed where the PD moisture
+    # transport runs on a specified or nested domain.
+    "pd_adv_west_courant": (
+        dict(pd_adv_west_courant=True, specified=True),
+        {"pd_adv_west_courant"}),
     # The gridded urban morphology rides the single-layer UCM.
     "urban_param_file": (dict(sf_surface_physics=2, sf_urban_physics=1,
                               urban_param_file="geo_em.d01.nc"),
@@ -344,6 +349,9 @@ DEFAULT_OFF = frozenset({
     # The MYNN surface-layer Q2 land cap (FQ10), absent while off or while
     # the MYNN surface layer does not run.
     "mynn_sfclay_q2_land_cap",
+    # The PD transport's west-face Courant order (FQ13), absent while off
+    # or while no PD moisture transport meets a west boundary.
+    "pd_adv_west_courant",
     # WRF v4.8.0 MYNN-SFC roughness keys, absent at their Registry defaults.
     "sf_mynn_sfcflux_land", "sf_mynn_sfcflux_water", "shalwater_z0",
     # The upstream MYNN v6.1 fixes (correct-mode MY1): default on, echoed

@@ -26,7 +26,6 @@ THE BREAKAGES THESE PREVENT
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -36,6 +35,7 @@ import pytest
 
 from _numerics_child import MODES, run as run_child
 from conftest import requires_gpu
+import _oracle_toolchains
 from woof.hex.coupled import prep_ocn_merge_e3sm as pom
 from woof.verify import e3sm_ocean_merge_oracle as oo
 
@@ -206,11 +206,7 @@ def test_a_mutated_plan_is_caught(change, field, case):
 
 
 def _oracle_toolchain():
-    e3sm, mct = os.environ.get("WOOF_E3SM_V320_SOURCE"), os.environ.get("WOOF_MCT_SOURCE")
-    gfortran = os.environ.get("GFORTRAN") or shutil.which("gfortran")
-    if not e3sm or not mct or not gfortran or not Path(e3sm, "driver-mct").is_dir():
-        return None
-    return gfortran, Path(e3sm), Path(mct)
+    return _oracle_toolchains.e3sm_v320("driver-mct", directory=True)
 
 
 @pytest.mark.skipif(_oracle_toolchain() is None,
