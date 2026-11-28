@@ -91,9 +91,12 @@ STRICT_ENV = {"GPUWM_WRF_EXACT": "1", "WOOF_WRF_EXACT_DIAGNOSTICS": "1",
               "GPUWM_WRF_EXACT_BIGSTEP": "1"}
 
 
-def _run(backend, body, tmp_path, extra_env=None):
+def _run(backend, body, tmp_path, extra_env=None, default_build=False):
     env = dict(os.environ, WOOF_BACKEND=backend, PYTHONPATH=str(ROOT),
                WOOF_HOST_CACHE=str(tmp_path / "hostcache"), WOOF_HOST_THREADS="4")
+    if default_build:   # the default build even under a strict session
+        env = {k: v for k, v in env.items()
+               if not k.startswith(("GPUWM_WRF_EXACT", "WOOF_WRF_EXACT"))}
     env.update(extra_env or {})
     prelude = (
         "import json, numpy as np, woof\nimport cupy as cp\n"
@@ -657,6 +660,6 @@ for i, over in enumerate({WEST_CASES!r}):
     h0, h1 = fluxes(g, tr, False), fluxes(g, tr, True)
     out[str(i)] = {{n: int((h0[n].view(np.uint32) != h1[n].view(np.uint32)).sum())
                    for n in P.FLUXES}}
-''', tmp_path)
+''', tmp_path, default_build=True)
     for key, diff in out.items():
         assert all(v == 0 for v in diff.values()), (key, out)
