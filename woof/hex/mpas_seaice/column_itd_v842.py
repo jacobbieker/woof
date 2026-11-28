@@ -31,10 +31,17 @@ the column package's ``solve_zsal`` branches run: ``add_new_ice``'s
 temperature from that ``sice``, and ``lateral_melt_bgc``'s and
 ``zap_small_areas``' salt into ``zSalinityFlux``.
 
+The vertical tracers (``config_use_vertical_tracers``) with the nonreactive
+tracer, the z-aerosols or both: ``add_new_ice_bgc``'s frazil flux and
+``adjust_tracer_profile``, ``lateral_melt``'s snow and ``lateral_melt_bgc``,
+and ``zap_small_areas``' ``zap_small_bgc`` and ``zap_snow`` into
+``oceanBioFluxes``, each tracer in turn as v8.4.2's loops over them, with its
+own ocean concentration and ``zbgc_init_frac``.
+
 What it refuses, by name: the zero-layer thermodynamics (``cleanup_itd``'s
 ``zerolayer_check`` is not ported), the aerosols, and more than
 ``ITD_MAXCAT`` categories; of the biogeochemistry everything but the brine
-height and the inert vertical salinity
+height, the vertical salinity and those vertical tracers
 (:func:`woof.hex.mpas_seaice.column_v842.refuse_unported`).
 
 v8.4.2's quirks are kept: ``rebin`` drops ``shift_ice``'s abort (cleanup_itd
@@ -102,7 +109,7 @@ def _refuse(knob: str, value, reason: str, declaration: str):
 def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
     """Refuse, by name, what the ITD thermodynamics port does not carry."""
     c = configs
-    cv.refuse_unported(c, dims, biogeochemistry=True, z_tracers=True)
+    cv.refuse_unported(c, dims, biogeochemistry=True, z_tracers=cv.VT_INIT_PORTED)
     # refused only when named; under woof_quirk_corrections = 'all' alone it changes nothing
     if ZAP_SNOW_AREA in cv.named_corrections(c) and not cv.vertical_tracers(c):
         _refuse("woof_v842_corrections", ZAP_SNOW_AREA,
@@ -145,32 +152,39 @@ def _zsal_args(pools: dict, configs: dict, dims: dict[str, int], written: list, 
     return (np.int32(nbl), *extra, flux)
 
 
+#: column_itd_v842.cu's ITD_MAXBIO
+MAX_BIO_TRACERS = 32
+
+
 def _ztr_args(pools: dict, configs: dict, state: "cv.ColumnState", written: list, itd: bool = True) -> tuple:
-    """The kernels' trailing vertical-tracer arguments: nbtrcr, bio_index(1)
-    (0-based), (the ITD's interfaceBiologyGrid, zbgc_init_frac,
-    oceanBioConcentrations,) nZBGCTracers, (the ITD's bio_index_o(1),
+    """The kernels' trailing vertical-tracer arguments: nbtrcr, bio_index(1:nbtrcr)
+    (0-based), (the ITD's interfaceBiologyGrid, zbgc_init_frac(1:nbtrcr),
+    oceanBioConcentrations,) nZBGCTracers, (the ITD's bio_index_o(1:nbtrcr),
     0-based,) oceanBioFluxes. Only with the vertical tracers is anything read
     or written (``oceanBioFluxes`` then joins ``written``, which an abort
     restores past the aborting cell)."""
     import cupy as cp
     d, to = state.dims, state.tracers
     if not cv.vertical_tracers(configs):
-        dummy = cp.zeros(1, np.float64)
+        dummy, idummy = cp.zeros(1, np.float64), cp.zeros(1, np.int32)
         if itd:
-            return (np.int32(0), np.int32(0), dummy, np.float64(0.0), dummy, np.int32(1), np.int32(0), dummy)
-        return (np.int32(0), np.int32(0), np.int32(1), dummy)
+            return (np.int32(0), idummy, dummy, dummy, dummy, np.int32(1), idummy, dummy)
+        return (np.int32(0), idummy, np.int32(1), dummy)
     bgc, nz, n1 = pools["biogeochemistry"], d["nZBGCTracers"], d["nCells"] + 1
     flux = cv._need(bgc, "oceanBioFluxes", (n1, nz))
     written.append(flux)
-    if to.n_bio_tracers != 1:
-        # the kernels carry one vertical tracer (one ocean concentration, flux and bio index)
-        raise ValueError(f"the ITD and ridging carry one vertical tracer, not {to.n_bio_tracers}")
-    nbio, bio0 = np.int32(to.n_bio_tracers), np.int32(to.bio_index[0] - 1)
+    n = to.n_bio_tracers
+    if not 0 < n <= MAX_BIO_TRACERS:
+        # the kernels' zapped fluxes are per tracer (ITD_MAXBIO)
+        raise ValueError(f"the ITD and ridging carry 1 to {MAX_BIO_TRACERS} vertical tracers, not {n}")
+    nbio = np.int32(n)
+    bio = cp.asarray(np.asarray(to.bio_index[:n], np.int32) - 1)
     if not itd:
-        return (nbio, bio0, np.int32(nz), flux)
-    init_frac = cv.zbgc_parameters(configs, to)["init_frac"][0]
-    return (nbio, bio0, cv._need(bgc, "interfaceBiologyGrid", (d["nBioLayers"] + 1,)), np.float64(init_frac),
-            cv._need(bgc, "oceanBioConcentrations", (n1, nz)), np.int32(nz), np.int32(to.bio_index_o[0] - 1), flux)
+        return (nbio, bio, np.int32(nz), flux)
+    init_frac = cp.asarray(np.asarray(cv.zbgc_parameters(configs, to)["init_frac"][:n], np.float64))
+    return (nbio, bio, cv._need(bgc, "interfaceBiologyGrid", (d["nBioLayers"] + 1,)), init_frac,
+            cv._need(bgc, "oceanBioConcentrations", (n1, nz)), np.int32(nz),
+            cp.asarray(np.asarray(to.bio_index_o[:n], np.int32) - 1), flux)
 
 
 def module_source(n_ice_layers: int) -> str:

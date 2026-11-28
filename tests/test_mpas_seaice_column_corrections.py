@@ -329,3 +329,32 @@ def test_zap_snow_area_puts_the_snow_surface_layer_into_the_flux():
     for name in got_default:
         if name != key:
             assert co.word_mismatches(got_fixed[name], got_default[name]) == 0, name
+
+
+@requires_gpu
+def test_zap_snow_area_moves_every_z_aerosol_s_flux():
+    """The same move for each z-aerosol (black carbon 1 and 2, the first
+    dust): each tracer's own snow layers, into its own oceanBioFluxes entry,
+    so a kernel that handed only the first tracer the area is caught."""
+    default = _case(co.BGC_ZAERO_CARRY_CASES, "itd_zaero_mushy_level_ponds")
+    fixed = _case(co.BGC_ZAERO_CARRY_CASES, "itd_zaero_mushy_level_ponds", **{KEY: "zap_snow_area"})
+    t = default["pools"]["tracers"]
+    nbl, dt = default["dims"]["nBioLayers"], default["config"]["config_dt"]
+    area, snow = t["iceAreaCategory"][:, :, 0], t["snowVolumeCategory"][:, :, 0]
+    conc, stride = t["verticalAerosolsConc"], nbl + 3
+    assert conc.shape[-1] == 3 * stride
+    zapped = (area > 0.0) & (area <= PUNY)
+    dvssl = np.where(zapped, np.minimum(0.5 * snow, 0.040 * area), 0.0)
+    got_default, _ = co.run_gpu(default)
+    got_fixed, _ = co.run_gpu(fixed)
+    key = "biogeochemistry/oceanBioFluxes"
+    for m in range(3):
+        ssl, interior = m * stride + nbl + 1, m * stride + nbl + 2
+        expected = ((conc[:, :, ssl] - conc[:, :, interior]) * dvssl).sum(axis=1) / dt
+        moved = got_fixed[key][:, m] - got_default[key][:, m]
+        cells = np.flatnonzero(expected)
+        assert cells.size, m
+        np.testing.assert_array_equal(np.flatnonzero(moved), cells)
+        ulp = np.spacing(np.abs(got_default[key][cells, m]))
+        np.testing.assert_allclose(moved[cells], expected[cells], rtol=0.0, atol=2.0 * ulp.max())
+    assert not np.any(got_fixed[key][:, 3:] - got_default[key][:, 3:])

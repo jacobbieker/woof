@@ -120,6 +120,8 @@ BGC_NONREACTIVE_CARRY_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_nonrea
 BGC_NONREACTIVE_STEP_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_nonreactive_step"
 #: the z-aerosols' (BGC_ZAERO_CASES)
 BGC_ZAERO_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_zaero"
+#: the z-aerosols' through the ITD thermodynamics and the ridging (BGC_ZAERO_CARRY_CASES)
+BGC_ZAERO_CARRY_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_zaero_carry"
 PRECISIONS = {"r8": np.float64}
 REAL, INT, DIM = _stream.REAL, _stream.INT, _stream.DIM
 #: the Registry structs the column routines read and write, as oracle_stream pools
@@ -674,6 +676,23 @@ BGC_ZAERO_CASES = (
         "config_biogrid_bottom_molecular_sublayer": 0.01}),
     ("bgc_zaero_nonreactive_abort_negative", 20263016, _BGC_STAGE, _BGC_ZA_NR),
     ("bgc_zaero_nonreactive_abort_order", 20263017, _BGC_STAGE, _BGC_ZA_NR),
+)
+#: the z-aerosols through the ITD thermodynamics and the ridging, alone and after the
+#: nonreactive tracer: name, seed, stage, overrides
+BGC_ZAERO_CARRY_CASES = (
+    ("itd_zaero_mushy_level_ponds", 20263101, _ITD, _BGC_ZA),
+    ("itd_zaero_nonreactive_bl99_update_ocean", 20263102, _ITD, {
+        **_BGC_ZA_NR, **_BL99, "config_update_ocean_fluxes": True}),
+    ("itd_zaero_nonreactive_types_bl99_delta_function_four_layers", 20263103, _ITD, {
+        **_BGC_ZA_NR, **_ZA_TYPES, **_BL99, **_DELTA_NEW, "config_nIceLayers": 4, "config_nCategories": 4,
+        "config_use_level_meltponds": False, "config_use_level_ice": False}),
+    ("itd_zaero_nonreactive_types_frazil_three_layers", 20263104, _ITD, {
+        **_BGC_ZA_NR, **_ZA_TYPES, "config_nIceLayers": 3, "config_mobility_type_dust1": -1.0,
+        "config_fraction_biotracer_in_frazil": 0.6, "config_new_ice_fraction_biotracer": 0.7}),
+    ("itd_zaero_nonreactive_abort_regrid", 20263105, _ITD, _BGC_ZA_NR),
+    ("ridge_zaero_mushy_level_ponds", 20263111, _RDG, _BGC_ZA),
+    ("ridge_zaero_nonreactive_bl99_thorndike_hibler_subcycles", 20263112, _RDG, {
+        **_BGC_ZA_NR, **_BL99, **_THORNDIKE, **_HIBLER, "config_dynamics_subcycle_number": 2}),
 )
 
 
@@ -1505,9 +1524,11 @@ def _zaero_state(rs, case: dict) -> None:
 
 
 def _nonreactive_carry_state(rs, case: dict) -> None:
-    """What the ITD thermodynamics and the ridging read of the nonreactive
-    tracer: its ice and snow layers (positive), mobile fractions, the ocean
-    concentration and flux, and ``colpkg_init_hbrine``'s grids.
+    """What the ITD thermodynamics and the ridging read of the vertical
+    tracers: the nonreactive tracer's ice and snow layers (positive; drawn
+    whether or not it is on), mobile fractions, the ocean concentration and
+    flux, ``colpkg_init_hbrine``'s grids, then with the z-aerosols their
+    layers (positive, nBioLayersP3 per aerosol).
     ``abort_regrid`` in the name: a slightly negative brine fraction in cell
     2's first category, under :func:`_itd_state`'s spread frazil, so the
     tracer's ``regrid_stationary`` stops on a negative old brine height.
@@ -1519,7 +1540,8 @@ def _nonreactive_carry_state(rs, case: dict) -> None:
     t, bgc = pools["tracers"], pools["biogeochemistry"]
     conc = u(0.5, 20.0, (n1, ncat, nbl + 3))
     conc[:, :, nbl + 1:] = u(0.0, 5.0, (n1, ncat, 2))
-    t["verticalNonreactiveConc"] = conc
+    if case["config"]["config_use_nonreactive"]:
+        t["verticalNonreactiveConc"] = conc
     t["mobileFraction"] = u(0.0, 1.0, (n1, ncat, nz))
     bgc["oceanBioConcentrations"] = u(0.5, 15.0, (n1, nz))
     bgc["oceanBioFluxes"] = u(-1.0e-4, 1.0e-4, (n1, nz))
@@ -1527,6 +1549,12 @@ def _nonreactive_carry_state(rs, case: dict) -> None:
         bgc[key] = value
     if "abort_regrid" in name:
         t["brineFraction"][2, 0, 0] = -1.0e-3
+    if case["config"][cv.ZAERO_FLAG]:
+        nza = dims["nzAerosols"]
+        aero = u(0.5, 20.0, (n1, ncat, nza * (nbl + 3)))
+        for j in range(nza):
+            aero[:, :, j * (nbl + 3) + nbl + 1:(j + 1) * (nbl + 3)] = u(0.0, 5.0, (n1, ncat, 2))
+        t["verticalAerosolsConc"] = aero
 
 
 def _zsal_dtemp_band(case: dict) -> None:
