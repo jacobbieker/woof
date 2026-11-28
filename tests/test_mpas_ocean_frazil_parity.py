@@ -27,7 +27,6 @@ THE BREAKAGES THESE PREVENT
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -37,6 +36,7 @@ import pytest
 
 from _numerics_child import MODES, run as run_child
 from conftest import requires_gpu
+import _oracle_toolchains
 from woof.verify import mpas_ocean_frazil_oracle as oo
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -217,11 +217,7 @@ def test_the_tendencies_add_in_place(monkeypatch):
 
 
 def _oracle_toolchain() -> tuple[str, Path] | None:
-    source = os.environ.get("WOOF_MPAS_V842_SOURCE")
-    gfortran = os.environ.get("GFORTRAN") or shutil.which("gfortran")
-    if not source or not gfortran or not Path(source, "src", "core_ocean").is_dir():
-        return None
-    return gfortran, Path(source)
+    return _oracle_toolchains.mpas_v842("core_ocean")
 
 
 @pytest.mark.skipif(_oracle_toolchain() is None,
