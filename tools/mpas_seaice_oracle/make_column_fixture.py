@@ -2,7 +2,7 @@
 
     pixi run -e default python tools/mpas_seaice_oracle/make_column_fixture.py BUILD_DIR [--out DIR]
         [--cases init|therm|itd|ridge|radiation|dedd|step|coupled|oml|bgc|carry|zsal|zsal_solve|zsal_carry|zsal_solve_carry
-                 |nonreactive|nonreactive_carry|nonreactive_step]
+                 |nonreactive|nonreactive_carry|nonreactive_step|zaero]
 
 BUILD_DIR holds ``run_column_r8`` and ``run_init_thermo_r8`` from build.sh.
 Writes into ``tests/data/oracles/mpas_seaice_column`` by default:
@@ -46,7 +46,9 @@ the nonreactive tracer through the ITD thermodynamics and the ridging
 (``BGC_NONREACTIVE_CARRY_CASES``) into
 ``tests/data/oracles/mpas_seaice_bgc_nonreactive_carry``; ``--cases nonreactive_step``
 the nonreactive tracer through the time steps (``BGC_NONREACTIVE_STEP_CASES``) into
-``tests/data/oracles/mpas_seaice_bgc_nonreactive_step``.
+``tests/data/oracles/mpas_seaice_bgc_nonreactive_step``; ``--cases zaero`` the
+z-aerosols in the init and column_biogeochemistry (``BGC_ZAERO_CASES``) into
+``tests/data/oracles/mpas_seaice_bgc_zaero``.
 """
 from __future__ import annotations
 
@@ -71,7 +73,7 @@ def main() -> int:
     parser.add_argument("--cases", choices=("init", "therm", "itd", "ridge", "radiation", "dedd", "step", "coupled",
                                               "oml", "bgc", "carry", "zsal", "zsal_solve", "zsal_carry",
                                               "zsal_solve_carry", "nonreactive", "nonreactive_carry",
-                                              "nonreactive_step"),
+                                              "nonreactive_step", "zaero"),
                         default="init")
     args = parser.parse_args()
     rows, fixture_dir = {"init": (co.CASES, co.FIXTURE_DIR), "therm": (co.VT_CASES, co.VT_FIXTURE_DIR),
@@ -95,7 +97,8 @@ def main() -> int:
                          "nonreactive_carry": (co.BGC_NONREACTIVE_CARRY_CASES,
                                                co.BGC_NONREACTIVE_CARRY_FIXTURE_DIR),
                          "nonreactive_step": (co.BGC_NONREACTIVE_STEP_CASES,
-                                              co.BGC_NONREACTIVE_STEP_FIXTURE_DIR)}[args.cases]
+                                              co.BGC_NONREACTIVE_STEP_FIXTURE_DIR),
+                         "zaero": (co.BGC_ZAERO_CASES, co.BGC_ZAERO_FIXTURE_DIR)}[args.cases]
     args.out = args.out or fixture_dir
     args.out.mkdir(parents=True, exist_ok=True)
     arrays: dict[str, np.ndarray] = {}

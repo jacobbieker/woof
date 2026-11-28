@@ -145,17 +145,12 @@ def check_config(configs: dict) -> None:
         # nbtrcr (nBioTracers), so its fluxes are not among oceanBioFluxes. The nonreactive
         # tracer is (bio_index_o 17), and coupling_prep's mapping skips that entry (PON has no
         # ocean*Flux field, mpas_seaice_column.F:3998-3999): every ocean*Flux stays zero
-        carried = cv.BGC_PORTED + (cv.ZSAL_FLAG,)
+        # the flag list first, then the vertical tracers' own checks, in refuse_unported's order
+        cv.refuse_uncarried_bgc(c, cv.carried_bgc_flags(c),
+                                "the column biogeochemistry's ocean fluxes are ported for the brine height, "
+                                "the vertical salinity and the nonreactive vertical tracer only")
         if cv.vertical_tracers(c):
             cv._refuse_z_tracers(c)
-            carried += (cv.VT_FLAG,) + cv.VT_PORTED
-        for flag in cv._BGC_FLAGS:
-            if flag not in carried and c[flag]:
-                raise ConfigurationRefusal(
-                    knob=flag, value=True,
-                    reason="the column biogeochemistry's ocean fluxes are ported for the brine height, the "
-                           "vertical salinity and the nonreactive vertical tracer only",
-                    declaration=f"{flag} = .false.")
 
 
 #: the ocean biogeochemical fluxes seaice_column_coupling_prep maps from the column

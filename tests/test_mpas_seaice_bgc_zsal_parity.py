@@ -231,7 +231,7 @@ def test_gpu_matches_the_oracle_word_for_word(glibc239, which):
 def _mutated(monkeypatch, module, original, mutated):
     source = module.module_source
     assert source(7, 7).count(original) == 1
-    monkeypatch.setattr(module, "module_source", lambda nil, nbl: source(nil, nbl).replace(original, mutated))
+    monkeypatch.setattr(module, "module_source", lambda *a: source(*a).replace(original, mutated))
     module._module_on.cache_clear()
 
 
@@ -286,14 +286,14 @@ def _oracle_toolchain() -> tuple[str, Path] | None:
                            "PROVENANCE.md); it needs gfortran (pixi -e mpas-oracle) and WOOF_MPAS_V842_SOURCE")
 @pytest.mark.parametrize("which, patch", [("zsal", ""), ("zsal_solve", "zsal_solve"), ("zsal_carry", ""),
                                           ("zsal_solve_carry", "zsal_solve"), ("nonreactive", ""),
-                                          ("nonreactive_carry", ""), ("nonreactive_step", "")])
+                                          ("nonreactive_carry", ""), ("nonreactive_step", ""), ("zaero", "")])
 def test_the_oracle_rebuilt_here_writes_the_fixture(tmp_path, which, patch):
     gfortran, source = _oracle_toolchain()
     fixture = {"zsal": INERT, "zsal_solve": SOLVE, "zsal_carry": co.BGC_ZSAL_CARRY_FIXTURE_DIR,
                "zsal_solve_carry": co.BGC_ZSAL_SOLVE_CARRY_FIXTURE_DIR,
                "nonreactive": co.BGC_NONREACTIVE_FIXTURE_DIR,
                "nonreactive_carry": co.BGC_NONREACTIVE_CARRY_FIXTURE_DIR,
-               "nonreactive_step": co.BGC_NONREACTIVE_STEP_FIXTURE_DIR}[which]
+               "nonreactive_step": co.BGC_NONREACTIVE_STEP_FIXTURE_DIR, "zaero": co.BGC_ZAERO_FIXTURE_DIR}[which]
     subprocess.run(["bash", str(ROOT / "tools" / "mpas_seaice_oracle" / "build.sh"), str(source),
                     str(tmp_path / "build")], check=True,
                    env={**os.environ, "GFORTRAN": gfortran, "WOOF_ORACLE_PATCH": patch})

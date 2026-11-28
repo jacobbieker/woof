@@ -157,14 +157,15 @@ def _mismatches(names):
 @requires_gpu
 @pytest.mark.parametrize("names, original, mutated", [
     # update_snow_bgc's scavenging from the surface snow layer
-    (_BGC_NAMES, "if (dzssl > PUNY) sloss1 = D(M(M(ZB_KSCAVZ, a1), col_min(-dhs_melts, dzssl)), dzssl);",
-     "if (dzssl > PUNY) sloss1 = D(M(ZB_KSCAVZ, col_min(-dhs_melts, dzssl)), dzssl);"),
+    (_BGC_NAMES, "if (dzssl > PUNY) sloss1 = D(M(M(kscavz, a1), col_min(-dhs_melts, dzssl)), dzssl);",
+     "if (dzssl > PUNY) sloss1 = D(M(kscavz, col_min(-dhs_melts, dzssl)), dzssl);"),
     # the mobile phase retained at the release time
-    (_BGC_NAMES, "M(icm[k], S(glibc_exp(-M(dt, rtau_ret)), 1.0))", "M(icm[k], S(glibc_exp(-M(dt, rtau_rel)), 1.0))"),
+    (_BGC_NAMES, "M(icm[k], S(glibc_exp(-M(dt, rtau_ret[m])), 1.0))",
+         "M(icm[k], S(glibc_exp(-M(dt, rtau_rel[m])), 1.0))"),
     # the FCT flux without the atmospheric source
-    (_BGC_NAMES, "*flux_bio = D(A(S(c_init, c_new), source), dt);", "*flux_bio = D(S(c_init, c_new), dt);"),
+    (_BGC_NAMES, "flux_bio[m] = D(A(S(c_init, c_new), source[m]), dt);", "flux_bio[m] = D(S(c_init, c_new), dt);"),
     # the mobile fraction not updated from the solve
-    (_BGC_NAMES, "if (sum_tot > 0.0 && mobile > 0.0) *frac = D(sum_new, sum_tot);", ""),
+    (_BGC_NAMES, "if (sum_tot > 0.0 && mobile > 0.0) frac[m] = D(sum_new, sum_tot);", ""),
     # merge_bgc_fluxes' snow layers swapped
     (_BGC_NAMES, "*snow_bio_net = A(A(*snow_bio_net, M(trc[NB1], dvssl)), M(trc[NB1 + 1], dvint));",
      "*snow_bio_net = A(A(*snow_bio_net, M(trc[NB1], dvint)), M(trc[NB1 + 1], dvssl));"),
@@ -173,7 +174,7 @@ def _mismatches(names):
                  "                                                           aicen[iCell * ncat + n]));",
      "zfswin[((size_t)iCell * ncat + n) * NB1 + k]);"),
     # the new ice's mobile fraction not reset
-    (_BGC_NAMES, "if (z_tracers) ztr_frac[(size_t)c * nzbgc] = zpar[ZP_FRAC_INIT];", ""),
+    (_BGC_NAMES, "ztr_frac[(size_t)c * nzbgc + m] = zpar[m * ZP_N + ZP_FRAC_INIT];", ";"),
     # the stops dropped
     (("bgc_nonreactive_abort_init",), "if (*t < 0.0) return BG_ZBGC_INIT;", ""),
     (("bgc_nonreactive_abort_negative",), "else if (bio_tmp < 0.0) return BG_NEGATIVE_BGC;", ""),
@@ -181,7 +182,7 @@ def _mismatches(names):
 def test_a_mutated_vertical_tracer_is_caught(monkeypatch, names, original, mutated):
     source = cbgc.module_source
     assert source(7, 7).count(original) == 1
-    monkeypatch.setattr(cbgc, "module_source", lambda nil, nbl: source(nil, nbl).replace(original, mutated))
+    monkeypatch.setattr(cbgc, "module_source", lambda *a: source(*a).replace(original, mutated))
     cbgc._module_on.cache_clear()
     try:
         assert _mismatches(names) > 0

@@ -550,7 +550,13 @@ Notes on the 1.1.7 sync:
     thermodynamics `update_snow_bgc` divides 0/0 for a category the last
     step opened, and `oceanBioFluxes` is NaN; on Metal that NaN's sign bit
     is the opposite of x86's, the one word not compared bitwise there). The
-    other biogeochemistry
+    z-aerosols
+    (`config_use_zaerosols`: two black carbons and a dust, alone or with the
+    nonreactive tracer) run in the init and `column_biogeochemistry`, word
+    for word with v8.4.2; the opt-in correction `zaero_snow_scavenging`
+    gives each its own snow scavenging, where v8.4.2 indexes the table by
+    list position and gives all three 0.03. The other stages still refuse
+    them by name. The other biogeochemistry
     flags are
     refused by name until their phases land;
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,
@@ -780,7 +786,8 @@ Notes on the 1.1.7 sync:
     `set_sfcflux_order`, `ice_velocity_at_cell`,
     `ccsm3_absorbed_solar_layers`, `dedd_zero_volume_ice`,
     `zbgc_c2n_proteins`, `bgc_inactive_diagnostics`, `zsal_solve`,
-    `bgc_snow_new_category`, `subcycle_snow_ice_tracers` and `zap_snow_area`;
+    `bgc_snow_new_category`, `subcycle_snow_ice_tracers`, `zap_snow_area` and
+    `zaero_snow_scavenging`;
     and the MPAS-Seaice velocity solver's `planar_metric_terms`,
     `periodic_local_coords` and `weak_ridge_delta`.
     The list and its values are in
