@@ -7,6 +7,14 @@ releases and is kept as upstream wrote it.
 
 ## Unreleased
 
+- `woof_kpp_surface_flux_time_level` (correct-mode finding FQ14, MPAS-Ocean
+  with `config_use_cvmix_kpp`): v8.4.2's `ocn_compute_KPP_input_fields`
+  reads `activeTracers` at time level 1 whatever the current level is.
+  `'current'` (correct mode, the default) reads the current level;
+  `'level1'` (exact mode) is v8.4.2's word for word. `config_use_cvmix_kpp`
+  on with `config_use_cvmix` off is now refused by name (v8.4.2 ignores it
+  silently).
+
 - Initial snow cap is 2000 kg m-2, not 5000: WRF 4.7.1/4.8.1 and MPAS 8.4.2
   `NOAHMP_INIT` cap SNOW at 2000 mm (SNOWH scaled, density kept). The 5000
   was Noah-MP's in-model glacier limit (`SWEMAXGLA`, now its own constant

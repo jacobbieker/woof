@@ -130,6 +130,12 @@ def _refuse(knob: str, value, reason: str, declaration: str) -> None:
 
 def check_config(configs: dict, precision: str | None = None) -> None:
     """Refuse, by name, the CVMix options this port does not carry (``config_use_cvmix`` on)."""
+    if configs.get("config_use_cvmix_kpp", False) and not configs.get("config_use_cvmix", False):
+        _refuse("config_use_cvmix_kpp", True,
+                "config_use_cvmix_kpp is on with config_use_cvmix off: MPAS-Ocean v8.4.2 silently ignores the KPP "
+                "option there (ocn_vmix_coefs_cvmix_build returns early, so vertNonLocalFlux is never built) while "
+                "its tracer tendency still applies the non-local flux whatever the field holds",
+                "config_use_cvmix = .true. with config_use_cvmix_kpp, or config_use_cvmix_kpp = .false.")
     if not configs.get("config_use_cvmix", False):
         return
     if precision is not None and precision not in PRECISIONS:

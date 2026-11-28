@@ -738,10 +738,10 @@ A correction's own key, when set, wins over the mode, which is how one is
 turned off in correct mode or on in exact mode. `"all"` and `"none"` turn
 every correction on and off whatever the mode; a key set the other way
 next to `"all"` is refused by name, and a key set next to `"none"` wins. A correction whose scheme the run does
-not carry is inert. Per domain, like the corrections. The same key works
+not carry is inert. Per domain. The same key works
 in the MPAS config dicts, and the hex door takes it as
 `--quirk-corrections all|none`. The MPAS-Seaice corrections are names: with the umbrella unset, the
-names given in `woof_v842_corrections` are the whole set (so naming fewer
+names given in `woof_v842_corrections` are the whole set (naming fewer
 turns the others off), and the seaice velocity set-up's named corrections
 likewise. In correct mode, or under `"all"`, these are on:
 
@@ -773,7 +773,7 @@ likewise. In correct mode, or under `"all"`, these are on:
 - MPAS-Ocean: `woof_land_ice_isomip_freezing_salinity =
   'boundary_layer_salinity'`, `woof_bottom_drag_dry_edges = 'skip'`,
   `woof_rayleigh_bottom_friction = 'corrected'` and `woof_redi_k33 =
-  'kappa'`.
+  'kappa'` and `woof_kpp_surface_flux_time_level = 'current'`.
 - MALI: `woof_sgh_init_mask`, `woof_enthalpy_advection_units`,
   `woof_simple_velocity_bed` and `woof_analysis_empty` at `'corrected'`,
   and `woof_statistics_extrema = 'ice'`.
@@ -785,8 +785,14 @@ likewise. In correct mode, or under `"all"`, these are on:
   `zaero_snow_scavenging`, `shortwave_bio_grid` and `total_chlorophyll`.
 - MPAS-Seaice velocity solver set-up (the time step's
   `basis_corrections` / `weak_corrections` names): `planar_metric_terms`
-  and `periodic_local_coords` (variational basis; each acts only on a
-  planar or periodic mesh) and `weak_ridge_delta` (weak stress divergence).
+  and `periodic_local_coords` (variational basis; planar or periodic mesh only) and `weak_ridge_delta` (weak stress divergence).
+
+`woof_kpp_surface_flux_time_level` (MPAS-Ocean, `config_use_cvmix_kpp`;
+finding FQ14) is `'current'` in correct mode: KPP's non-local surface fluxes
+read the active tracers at the current time level. v8.4.2's
+`ocn_compute_KPP_input_fields` reads time level 1 whatever the current level
+is (`'level1'`, exact mode). `config_use_cvmix_kpp` with `config_use_cvmix`
+off is refused by name: v8.4.2 silently ignores KPP there.
 
 `mynn_sfclay_psih_zolzt` (default `true`; finding FQ3) is a correction to the
 MYNN surface layer's 2 m and 10 m diagnostics (`sf_sfclay_physics = 5`,

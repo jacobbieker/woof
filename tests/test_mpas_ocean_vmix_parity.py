@@ -93,6 +93,11 @@ def test_schemes_not_ported_are_refused_by_name():
         cvmix_v842.check_config(dict(oo.BASE_CONFIG, config_use_cvmix=True), "r4")
     with pytest.raises(ConfigurationRefusal, match="woof_redi_k33"):
         vm.check_config(dict(oo.BASE_CONFIG, config_use_standardGM=True, woof_redi_k33="E3SM"))
+    # KPP without CVMix: v8.4.2 ignores the option silently, so it is refused naming both
+    for check in (lambda c: vm.check_config(c), lambda c: cvmix_v842.check_config(c, "r8")):
+        with pytest.raises(ConfigurationRefusal, match="config_use_cvmix_kpp") as exc:
+            check(dict(oo.BASE_CONFIG, config_use_cvmix=False, config_use_cvmix_kpp=True))
+        assert "config_use_cvmix off" in str(exc.value)
 
 
 @requires_gpu

@@ -138,6 +138,26 @@ def check_config(configs: dict, groups=("activeTracers",)) -> None:
     tracer_hmix_v842.check_config(configs)
 
 
+def kpp_surface_flux_current_level(configs: dict) -> bool:
+    """FQ14 (``woof_kpp_surface_flux_time_level``): True when ``ocn_compute_KPP_input_fields``
+    reads the active tracers at the current time level, False when it reads time level 1.
+
+    v8.4.2 (mpas_ocn_diagnostics.F:1429) fetches ``activeTracers`` at time
+    level 1 whatever ``timeLevelIn`` is, so with the split step's second
+    stage the non-local surface fluxes' ``fracAbsorbed*surfaceThicknessFlux*T/S``
+    terms use the start-of-step surface T/S while alpha/beta use the iterate.
+    ``'level1'`` keeps that word for word (exact mode); ``'current'`` (the
+    correct-mode default) reads the current level.
+    """
+    from woof import quirk_corrections
+    value = quirk_corrections.option(configs, "woof_kpp_surface_flux_time_level")
+    if value not in ("level1", "current"):
+        _refuse("woof_kpp_surface_flux_time_level", value,
+                "KPP's surface fluxes read the active tracers at time level 1 as v8.4.2 does, or at the current level",
+                "woof_kpp_surface_flux_time_level = 'level1' | 'current'")
+    return value == "current"
+
+
 def tend_tracer(*, dt: float, mesh: dict, state: dict, tracers: dict, tracers_tend: dict,
                 tracers_surface_flux: dict, diagnostics: dict, forcing: dict, configs: dict,
                 tracers_level1: dict | None = None) -> None:
@@ -147,13 +167,17 @@ def tend_tracer(*, dt: float, mesh: dict, state: dict, tracers: dict, tracers_te
     With ``config_use_cvmix_kpp``, ``ocn_compute_KPP_input_fields`` reads
     ``tracers_level1`` (time level 1's tracers, required then; a call with
     one time level passes ``tracers`` again) for its surface fluxes, as the
-    Fortran does, and ``tracers`` for its equation of state. As in v8.4.2
+    Fortran does, and ``tracers`` for its equation of state; with
+    ``woof_kpp_surface_flux_time_level = 'current'`` (FQ14, the correct-mode
+    default) the surface fluxes read ``tracers`` too and ``tracers_level1`` is
+    not needed. As in v8.4.2
     this runs whether or not ``config_use_cvmix`` is on: without CVMix
     nothing builds ``vertNonLocalFlux``, and the flux applied is whatever the
     diagnostics pool holds (word-exact; QUIRKS)."""
     import cupy as cp
     check_config(configs)
-    if configs.get("config_use_cvmix_kpp", False) and tracers_level1 is None:
+    kpp_current = bool(configs.get("config_use_cvmix_kpp", False)) and kpp_surface_flux_current_level(configs)
+    if configs.get("config_use_cvmix_kpp", False) and not kpp_current and tracers_level1 is None:
         raise TypeError("tend_tracer: config_use_cvmix_kpp reads time level 1's tracers; pass tracers_level1 "
                         "(the same tracers for a call with one time level)")
     if configs.get("config_disable_tr_all_tend", False):
@@ -229,7 +253,7 @@ def tend_tracer(*, dt: float, mesh: dict, state: dict, tracers: dict, tracers_te
         sw[:n_cells] = tend[:n_cells, :, it - 1] - sw[:n_cells]
     if configs.get("config_use_cvmix_kpp", False):
         _kpp_input_fields(precision=precision, mesh=mesh, layer_thickness=h, tracers=tracers,
-                          tracers_level1=tracers_level1,
+                          tracers_level1=tracers if kpp_current else tracers_level1,
                           tracers_surface_flux=tracers_surface_flux, diagnostics=d, forcing=f, configs=configs)
         if not configs.get("config_cvmix_kpp_nonlocal_with_implicit_mix", False):
             if budgets:
