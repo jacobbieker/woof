@@ -316,7 +316,9 @@ forecast (below).
 
 **G3 receipt** (`python -m tools.var4d_g3_receipt`; 2026-11-28).
 
-- Medians of 3 interleaved repeats, after a warm-up repeat.
+- Medians of 3 interleaved repeats, after a warm-up repeat. Each row
+  reads back one value of every output array, so Metal's lazy arrays are
+  evaluated. Ranges are two runs.
 - The window: P3a's `Window` over 60 steps of a moist ridge case at the
   tutorial's 90x60x41, with 7 slots 10 steps apart.
 - The rows are:
@@ -330,9 +332,9 @@ forecast (below).
 
 | backend, precision | TL / forward | AD `all` / forward | AD `slot` / forward | AD `all` / woof binary32 forecast |
 |---|---|---|---|---|
-| CUDA binary64 | 1.24 | 2.70 | 3.66 | 12.5-13.4 |
-| CUDA binary32 | 1.10 | 2.81-2.84 | 3.57-3.62 | 5.3-5.7 |
-| Metal binary32 | 1.40 | 2.95 | 3.85 | 4.03 |
+| CUDA binary64 | 1.24-1.26 | 2.70-2.72 | 3.65-3.66 | 12.5-13.5 |
+| CUDA binary32 | 1.10-1.11 | 2.81-2.84 | 3.57-3.65 | 5.3-6.0 |
+| Metal binary32 | 1.40-1.58 | 2.95-3.23 | 3.85-4.15 | 3.9-4.0 |
 | CUDA binary64, 200x200x49, 12 steps | 1.11 | 2.48 | 3.32 | 24.8 |
 | CUDA binary32, 200x200x49, 12 steps | 1.60 | 3.80 | 4.64 | 5.57 |
 
@@ -342,7 +344,13 @@ model cost:
 - the window: 89x59x40 mass points, specified, moist, binary64, CUDA;
 - the TL and AD include the host transfers and the boundary-table maps;
 - against the forward window, the TL is 1.56x;
-- the AD is 3.36x under `"all"` and 4.28x under `"slot"`.
+- the AD is 3.35-3.36x under `"all"` and 4.25x under `"slot"`.
+
+The L1 gate itself (`tests/_var4d_l1.py`, two outer loops, the second
+relinearised through `Trajectory.start`) gives the same `minimize_cg` lines
+and increments to the word under `WOOF_L1_CHECKPOINT=all` and `slot`
+(pb, lane `l1x2`). They match #883's numbers. Each run takes about 12
+minutes.
 
 **Verdict.**
 
@@ -350,8 +358,10 @@ model cost:
   the AD (2.5-3.8x under `"all"`) are inside G3's ~5x on every backend.
 - Against woof's binary32 forecast, the forward step that P3a's G3 rows
   divide by, the result depends on the precision:
-  - the binary32 window: 4.0x on Metal and 5.3-5.7x on CUDA, which is
-    about G3's 5x and a little over on CUDA;
+  - the binary32 window: 3.9-4.0x on Metal and 5.3-6.0x on CUDA, which is
+    about G3's 5x and a little over on CUDA. At these sizes the CUDA
+    forecast step (6 ms) is launch-bound, so the CUDA ratio moves between
+    runs;
   - the binary64 window, which 4D-Var requires (`WindowModel` refuses
     binary32, because the minimiser needs adjointness to 1e-12): 12-25x on
     the A6000, whose fp64 rate is 1/32. The forward window alone is already
