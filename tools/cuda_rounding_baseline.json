@@ -5903,7 +5903,7 @@
    },
    {
     "file": "woof/core/ring_frame.py",
-    "sha256": "438e2b14d37c935eca69bd10807a9ae54e6d91a76b48e2ade176cb5e87e3e292"
+    "sha256": "fac1b92663fc4a0a9c9b988c07c00d398d4c921742825a788213b56bdcfa0724"
    },
    {
     "file": "woof/core/rrtm_lw.py",

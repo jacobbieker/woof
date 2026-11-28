@@ -60,9 +60,43 @@ def test_accumulate_scaled_rows_leave_unsupported_rows_to_the_caller():
     assert not accumulate_scaled_rows([(a, cp.ones((4, 3), dtype=cp.float32))], two)
     assert not accumulate_scaled_rows([(a[:, ::2], b[:, ::2])], two)
     assert not accumulate_scaled_rows([(flat[1:], flat[:-1])], two)   # partial overlap
+    c = cp.ones((4, 6), dtype=cp.float32)
     assert not accumulate_scaled_rows([(a, b), (b, a)], two)          # a later row reads a dst
+    assert not accumulate_scaled_rows([(a, b), (c, a)], two)          # one way only
+    assert not accumulate_scaled_rows([(a, b), (a, c)], two)          # one dst twice
     assert not accumulate_scaled_rows([(a, b)] * 65, two)
-    assert bool((a == 1).all()) and bool((b == 1).all()) and bool((flat == 1).all())
+    assert all(bool((x == 1).all()) for x in (a, b, c, flat))
+
+
+def test_accumulate_scaled_rows_fill_the_whole_table():
+    from woof.core.bandwidth_glue import accumulate_scaled, accumulate_scaled_rows
+    rng = np.random.default_rng(64)
+    dsts = [cp.asarray((rng.standard_normal(97 + 13 * r) * 1e4).astype(np.float32)) for r in range(64)]
+    srcs = [cp.asarray((rng.standard_normal(d.size) * 10).astype(np.float32)) for d in dsts]
+    want = [d.copy() for d in dsts]
+    for d, s in zip(want, srcs):
+        assert accumulate_scaled(d, s, np.float32(24))
+    assert accumulate_scaled_rows(list(zip(dsts, srcs)), np.float32(24))
+    for g, w in zip(dsts, want):
+        assert np.array_equal(_words(g), _words(w))
+
+
+@pytest.mark.parametrize("batched", ["1", "0"])
+def test_surface_energy_accumulators_are_the_per_row_words(batched, monkeypatch):
+    from woof.core import physics
+    monkeypatch.setenv("WOOF_BATCHED_GLUE", batched)
+    monkeypatch.setattr(physics, "WRF_EXACT", False)
+    rng = np.random.default_rng(3)
+    names = dict(physics.SURFACE_ENERGY_ACCUMULATORS)
+    host = {k: (rng.standard_normal((6, 7)) * 300).astype(np.float32)
+            for k in list(names) + list(names.values())}
+    cfg = SimpleNamespace(diag_print=0, sf_surface_physics=2, dt=24.0)
+    driver = SimpleNamespace(fields={k: cp.asarray(v) for k, v in host.items()})
+    physics.PhysicsDriver.accumulate_surface_energy(driver, cfg)
+    for name, source in names.items():
+        want = cp.asarray(host[name])
+        want += cp.asarray(host[source]) * np.float32(24.0)
+        assert np.array_equal(_words(driver.fields[name]), _words(want))
 
 
 @pytest.mark.parametrize("planes", [(), (1,), (3,), (2, 3)])
@@ -87,7 +121,8 @@ def test_zero_frames_are_the_per_buffer_words(planes, ny, nx):
 def test_zero_frames_leave_unsupported_buffers_to_the_caller():
     from woof.core.ring_frame import zero_frames
     a = cp.ones((3, 5, 6), dtype=cp.float32)
-    for bufs in ([], [a, cp.ones((3, 5, 7), dtype=cp.float32)], [a, a[:, :, ::2]],
+    for bufs in ([], [a, cp.ones((3, 5, 7), dtype=cp.float32)],
+                 [a, cp.ones((3, 5, 12), dtype=cp.float32)[:, :, ::2]], [None, a],
                  [a, cp.ones((3, 5, 6), dtype=cp.float64)], [a, cp.ones(6, dtype=cp.float32)],
                  [a] * 65):
         assert not zero_frames(bufs, 1, 1, 1, 1)
@@ -106,13 +141,21 @@ def test_open_strip_rows_are_the_per_buffer_words(bdy, monkeypatch):
     monkeypatch.setattr(dycore, "_boundary_y", lambda c: bdy in ("open_y", "both"))
     for batched in ("1", "0"):
         monkeypatch.setenv("WOOF_BATCHED_GLUE", batched)
-        got = [_poisoned(rng, (nz, ny, nx)) for _ in range(11)] + [_poisoned(rng, (nz + 1, ny, nx))]
+        got = ([_poisoned(rng, (nz, ny, nx)) for _ in range(11)] + [_poisoned(rng, (nz + 1, ny, nx))]
+               + [_poisoned(rng, (nz, ny, nx + 1))] * (batched == "0"))
         want = [g.copy() for g in got]
         for w in want:
             dycore._zero_open_strips(w, cfg, 1)
         dycore._zero_open_strips_rows(got, cfg, 1)
         for g, w in zip(got, want):
             assert np.array_equal(_words(g), _words(w))
+    mixed = [_poisoned(rng, (nz, ny, nx)), _poisoned(rng, (nz, ny, nx + 1))]   # zero_frames refuses
+    want = [m.copy() for m in mixed]
+    for w in want:
+        dycore._zero_open_strips(w, cfg, 1)
+    dycore._zero_open_strips_rows(mixed, cfg, 1)
+    for g, w in zip(mixed, want):
+        assert np.array_equal(_words(g), _words(w))
 
 
 @pytest.mark.gpu
@@ -121,6 +164,8 @@ def test_identity_holds_under_each_numerics(numerics, exact):
     """The battery runs strict; production runs fast.  Each mode in its own
     child process (tests/_numerics_child.py)."""
     _numerics_child.run(__file__, ["test_accumulate_scaled_rows_are_the_per_row_words",
+                                   "test_accumulate_scaled_rows_fill_the_whole_table",
+                                   "test_surface_energy_accumulators_are_the_per_row_words",
                                    "test_zero_frames_are_the_per_buffer_words",
                                    "test_open_strip_rows_are_the_per_buffer_words"],
                         numerics, exact)

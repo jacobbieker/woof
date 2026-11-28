@@ -113,9 +113,10 @@ def zero_frames(bufs, x_lo: int, x_hi: int, y_lo: int, y_hi: int) -> bool:
     FP32 buffers of at least two dimensions, one ``(ny, nx)`` and under
     2**31 elements each; the caller then zeroes each itself.  Buffers may
     overlap: every store is +0."""
-    if not bufs or len(bufs) > 64:
+    if (not bufs or len(bufs) > 64 or not isinstance(bufs[0], cp.ndarray)
+            or bufs[0].ndim < 2):
         return False
-    ny, nx = bufs[0].shape[-2:] if bufs[0].ndim >= 2 else (0, 0)
+    ny, nx = bufs[0].shape[-2:]
     for buf in bufs:
         if (not isinstance(buf, cp.ndarray) or buf.dtype != np.float32
                 or buf.ndim < 2 or buf.shape[-2:] != (ny, nx)
