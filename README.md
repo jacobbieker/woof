@@ -860,11 +860,12 @@ Notes on the 1.1.7 sync:
     the top level too, as the engine always has; off (exact mode) the seam
     is WRF's word for word (finding FQ12). Bounded axes are unchanged.
   - `pd_adv_west_courant` (positive-definite moisture transport,
-    `moist_adv_opt = 1`, on a bounded x axis, WRF route). WRF's
+    `moist_adv_opt = 1`, on a specified or nested domain, WRF route). WRF's
     `advect_scalar_pd` forms the Courant number of the second-order west
     face as `(ru/mu)*dt/dx`, where every other face, the east one
     included, forms `ru*dt/dx/mu`; WRFPLUS repeats it. The two round
-    differently, so a mirrored flow is not advected as the mirror. The
+    differently, so in the strict build and the TL/AD a mirrored flow is
+    not advected as the mirror. The
     option takes every face's order there, in the strict primal and the
     WRFPLUS PD TL/AD together; off (exact mode) the face is WRF's word for
     word (finding FQ13). The default build's face never carried WRF's

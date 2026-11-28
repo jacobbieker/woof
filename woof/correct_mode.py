@@ -593,10 +593,12 @@ def _diff_metrics_seam_read(values: Mapping) -> bool:
 
 
 def _pd_west_courant_read(values: Mapping) -> bool:
-    """FQ13 is read on a bounded x axis (open, specified or nested): a
-    periodic x axis has no west face."""
+    """FQ13 is read where the PD transport meets a west boundary: a
+    specified or nested domain.  A periodic x axis has no west face, and
+    woof runs no PD transport on an open (radiative) axis
+    (woof.core.moist: open domains take the unlimited stage plus clamp)."""
     view = _FieldView(values)
-    return bool(view.open_x or view.specified or view.nested)
+    return bool(view.specified or view.nested) and not (view.open_x or view.open_y)
 
 
 #: Key -> predicate over the selection: a key read only where the predicate

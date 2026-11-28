@@ -688,7 +688,7 @@ def _west_read(**overrides):
 @pytest.mark.parametrize("overrides,read", [
     ({}, False),                                       # periodic x: no west face
     ({"open_y": True}, False),
-    ({"open_x": True}, True),
+    ({"open_x": True}, False),                          # open: no PD transport runs
     ({"specified": True}, True),
     ({"nested": True}, True),
     ({"specified": True, "moist_adv_opt": 0}, False),  # no PD moisture transport
@@ -696,7 +696,8 @@ def _west_read(**overrides):
 def test_fq13_is_read_only_on_a_bounded_x_axis_with_pd_moisture(overrides, read):
     """The west-face key moves the identity, the echo and the receipt only
     where advect_scalar_pd's west face is reached: moist_adv_opt = 1 on a
-    bounded x axis."""
+    specified or nested domain (woof runs no PD transport on an open
+    axis)."""
     assert _west_read(**overrides) is read
 
 
@@ -708,10 +709,7 @@ def test_fq13_an_echo_without_moist_adv_opt_reads_as_moist_adv_opt_1():
 
 def test_fq13_carrier_is_listed_only_where_the_key_is_read():
     for overrides, listed in (({}, False), ({"specified": True}, True),
-                              ({"open_x": True}, True)):
-        cfg = RunConfig(**{**_TINY, **overrides},
-                        **correct_mode.resolve("correct", ["FQ13"]).settings)
-        assert "FQ13" not in correct_mode.uncorrected(cfg), overrides  # a named skip
+                              ({"open_x": True}, False)):
         cfg = RunConfig(**{**_TINY, **overrides},
                         **correct_mode.resolve("correct").settings)
         assert "FQ13" not in correct_mode.uncorrected(cfg), overrides

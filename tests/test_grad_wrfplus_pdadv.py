@@ -629,3 +629,34 @@ for i, over in enumerate({WEST_CASES!r}):
         assert all(out[f"{i}/elsewhere/{f}"] == 0 for f in
                    ("fxl", "fxc", "fyl", "fyc", "fzl", "fzc")), (i, out)
         assert all(v == 0 for v in out[f"{i}/mirror/corrected"].values()), (i, out)
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_west_courant_key_leaves_the_default_build_unchanged(backend, tmp_path):
+    """FQ13 in woof's default build: pd_fluxes' face never carried WRF's
+    (ru/mu)*dt/dx, so west_symmetric moves no word of any flux there."""
+    out = _run(backend, _MIRROR + f'''
+from types import SimpleNamespace as NS
+from woof.core import moist as M
+f32 = np.float32
+def fluxes(g, tr, west):
+    nz, ny, nx = g.nz, g.ny, g.nx
+    b = [cp.zeros(s, f32) for s in ((nz, ny, nx + 1),) * 2 + ((nz, ny + 1, nx),) * 2
+         + ((nz + 1, ny, nx),) * 2]
+    M.launch_pd_fluxes(tr["q"], tr["q0e"], tr["ru_m"], tr["rv_m"], tr["ww_m"], tr["muts"],
+                       NS(c1h=tr["c1h"], c2h=tr["c2h"], rdnw=tr["rdnw"], fnm=tr["fnm"],
+                          fnp=tr["fnp"]), g.dx, g.dy, g.dt, *b, msft=tr["msft"],
+                       has_msf=bool(g.has_msf), open_x=True, open_y=True, vorder=g.vorder,
+                       horder=g.horder, west_symmetric=west)
+    return host(dict(zip(P.FLUXES, b)))
+for i, over in enumerate({WEST_CASES!r}):
+    over = dict(over)
+    wind = over.pop("_wind", 1.0)
+    g = C.pd_geometry(**over)
+    tr = dev(C.pa_trajectory(g, 91 + i, f32, hybrid=bool(i % 2), wind=wind))
+    h0, h1 = fluxes(g, tr, False), fluxes(g, tr, True)
+    out[str(i)] = {{n: int((h0[n].view(np.uint32) != h1[n].view(np.uint32)).sum())
+                   for n in P.FLUXES}}
+''', tmp_path)
+    for key, diff in out.items():
+        assert all(v == 0 for v in diff.values()), (key, out)

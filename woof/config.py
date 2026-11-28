@@ -2771,8 +2771,10 @@ class RunConfig:
     # (ru/mu)*dt/dx, where every other face, the east one included, forms
     # ru*dt/dx/mu: the same quotient, rounded in another order on one face.
     # True takes every face's order there; False is WRF's arithmetic word for
-    # word.  Read where moist_adv_opt = 1 runs on a bounded x axis (the
-    # scalar, tracer, chem and TKE PD transport share the face then); the
+    # word.  Read where moist_adv_opt = 1 runs on a specified or nested
+    # domain (woof runs no PD transport on an open axis).  The key is scoped
+    # by moist_adv_opt: there the scalar, tracer, chem and TKE PD launches
+    # take the same order; with moist_adv_opt != 1 they keep WRF's.  The
     # default build's face never carried WRF's order, so the words it moves
     # are the strict build's and the WRFPLUS PD TL/AD's.  Correct-mode
     # finding FQ13: on by default, off in physics.mode = 'exact'.

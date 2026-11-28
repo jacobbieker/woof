@@ -642,15 +642,18 @@ and in exact mode, the seam is WRF's word for word. Bounded axes and other
 `diff_opt` values do not read it. It is not a WRF namelist key; set it in
 the TOML.
 `pd_adv_west_courant` (default `true`; finding FQ13) is a correction to the
-positive-definite transport (`moist_adv_opt = 1`) on a bounded x axis
-(open, specified or nested), per domain on the same terms. WRF's
+positive-definite transport (`moist_adv_opt = 1`) on a specified or
+nested domain (woof runs no PD transport on an open axis), per domain on
+the same terms. WRF's
 `advect_scalar_pd` (`module_advect_em.F`, `i == ids+1`) forms the Courant
 number of the second-order west face as `(ru/mu)*dt/dx`, where every other
 face, the east one included, forms `ru*dt/dx/mu`; WRFPLUS's TL/AD repeats
-it. The two round differently, so a mirrored flow is not advected as the
-mirror. With `true` the west face takes every face's order, in the strict
-primal and the WRFPLUS PD TL/AD together (the scalar, tracer, chem and TKE
-PD transport share the face); off, and in exact mode, the face is WRF's
+it. The two round differently, so in those builds a mirrored flow is not
+advected as the mirror. With `true` the west face takes every face's
+order, in the strict primal and the WRFPLUS PD TL/AD together; the key is
+scoped by `moist_adv_opt`, so on such a domain the scalar, tracer, chem and
+TKE PD launches take the same order, and with `moist_adv_opt` other than 1
+they keep WRF's. Off, and in exact mode, the face is WRF's
 word for word. The default build's face never carried WRF's order, so only
 a strict `GPUWM_WRF_EXACT=1` build and the TL/AD move. A periodic x axis
 does not read it. It is not a WRF namelist key; set it in the TOML.
@@ -757,7 +760,7 @@ likewise. In correct mode, or under `"all"`, these are on:
   `kf_capped_downdraft_rain_floor = true`
   (`cu_physics = 1`, `10` or `11`), `diff_metrics_seam_slope = true`
   (where WRF's mixing package runs on a periodic axis) and
-  `pd_adv_west_courant = true` (`moist_adv_opt = 1` on a bounded x axis).
+  `pd_adv_west_courant = true` (`moist_adv_opt = 1`, specified or nested).
 - Hex regional route: `--undriven-species-boundary wrf-flow-dependent`
   (a regional run, `--lbc-dir`, on the WOOF-physics one-card drivers; it
   stays off on local time stepping, partial nest and the partitioned
@@ -1024,7 +1027,7 @@ configuration has no `[physics]` table; `physics.mode` is not an engine key.
 | `mynn_sfclay_q2_land_cap` | MYNN surface layer (`sf_sfclay_physics = 5`, `mynn_sfclay_variant = "wrf_461"`) | FQ10 | the 1.05 times lowest-level cap on the 2 m mixing ratio runs over land only, as the surface driver's does, not over water |
 | `kf_capped_downdraft_rain_floor` | Kain-Fritsch eta, KF-CuP and MSKF (`cu_physics = 1, 10, 11`) | FQ11 | the capped downdraft's rain flux `TRPPT - TDER` is floored at zero, so `RAINCV` is never negative |
 | `diff_metrics_seam_slope` | WRF's mixing package on a periodic axis | FQ12 | the top w level's coordinate slope at a periodic seam is filled like every other column's, not left at zero |
-| `pd_adv_west_courant` | positive-definite transport (`moist_adv_opt = 1`) on a bounded x axis | FQ13 | the second-order west face forms its Courant number as `ru*dt/dx/mu`, as every other face does, not `(ru/mu)*dt/dx` |
+| `pd_adv_west_courant` | positive-definite transport (`moist_adv_opt = 1`) on a specified or nested domain | FQ13 | the second-order west face forms its Courant number as `ru*dt/dx/mu`, as every other face does, not `(ru/mu)*dt/dx` |
 
 A checkpoint resumes only under the arithmetic it was written with; a
 mismatch is refused, and the refusal names the key to set.

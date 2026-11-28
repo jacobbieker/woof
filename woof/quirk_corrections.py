@@ -146,7 +146,7 @@ CORRECTIONS: tuple[QuirkCorrection, ...] = (
         "where WRF keeps a cold zero",
         active=lambda get: int(get("diff_opt")) in (1, 2)),
     QuirkCorrection(
-        "pd_adv_west_courant", "wrf", False, True, "moist_adv_opt = 1, bounded x axis",
+        "pd_adv_west_courant", "wrf", False, True, "moist_adv_opt = 1, specified or nested",
         "the positive-definite transport's west face of a bounded x axis forms its Courant number "
         "in every other face's order, ru*dt/dx/mu, not WRF's (ru/mu)*dt/dx",
         active=lambda get: int(get("moist_adv_opt")) == 1),

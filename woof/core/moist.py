@@ -439,10 +439,11 @@ def _mut2d(mu, ny: int, nx: int) -> cp.ndarray:
 
 
 def pd_west_symmetric(cfg) -> bool:
-    """RunConfig.pd_adv_west_courant (finding FQ13) where it is read:
-    advect_scalar_pd's moisture transport (moist_adv_opt = 1), whose face
-    the scalar, tracer, chem and TKE PD transport share
-    (woof.correct_mode.KEY_SCOPE)."""
+    """RunConfig.pd_adv_west_courant (finding FQ13) where it is read: the
+    key is scoped by moist_adv_opt = 1 (woof.correct_mode.KEY_SCOPE), and
+    every PD launch of such a domain (moisture, scalars, TKE, tracers,
+    chem) takes it; with moist_adv_opt != 1 the other PD transports keep
+    WRF's west-face order."""
     return (getattr(cfg, "pd_adv_west_courant", False) is True
             and int(getattr(cfg, "moist_adv_opt", 1)) == 1)
 

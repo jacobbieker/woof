@@ -22,7 +22,7 @@ releases and is kept as upstream wrote it.
   WRFPLUS diffusion fixture grades the seam words it used to mask.
 
 - `pd_adv_west_courant` (correct-mode finding FQ13, read where
-  `moist_adv_opt = 1` runs on a bounded x axis): WRF's `advect_scalar_pd`
+  `moist_adv_opt = 1` runs on a specified or nested domain): WRF's `advect_scalar_pd`
   forms the second-order west face's Courant number as `(ru/mu)*dt/dx`,
   every other face as `ru*dt/dx/mu`. On (correct mode) the west face takes
   every face's order in the strict primal (`pd_fluxes`, CUDA and Metal) and
