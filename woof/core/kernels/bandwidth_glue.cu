@@ -136,3 +136,52 @@ extern "C" __global__ void glue_capture_theta_forcing(
         }
     }
 }
+
+// dst += src * scale for each table row (src, dst, n), one row per blockIdx.y:
+// the words of bandwidth_glue.py's gpuwm_accumulate_scaled, a rounded
+// product and then a rounded sum, for many accumulators in one launch.
+extern "C" __global__ void glue_accumulate_scaled_arrays(
+    GLUE_TABLE_PARAM table, float scale) {
+    const unsigned long long* row = table.rows[blockIdx.y];
+    const unsigned long long i = (unsigned long long)blockIdx.x * blockDim.x
+                                 + threadIdx.x;
+    if (i >= row[2]) return;
+    const float* src = (const float*)row[0];
+    float* dst = (float*)row[1];
+    dst[i] = __fadd_rn(dst[i], __fmul_rn(src[i], scale));
+}
+
+// +0 at the outer frame of each row's (planes, ny, nx) word array, rows
+// (unused, address, frame elements): ring_frame.py's gpuwm_zero_frame for
+// several buffers of one horizontal shape in one launch.  Element r of a
+// plane counts the y_lo top rows, the y_hi bottom rows, then each middle
+// row's side columns (x_lo first, x_hi last, or all nx when they meet).
+// 32-bit indices: the caller launches only when every index fits.
+extern "C" __global__ void glue_zero_frames(
+    GLUE_TABLE_PARAM table, int nx, int ny, int x_lo, int x_hi, int y_lo,
+    int y_hi, int side, int per_plane) {
+    const unsigned long long* row = table.rows[blockIdx.y];
+    const unsigned int j = blockIdx.x * blockDim.x + threadIdx.x;
+    if ((unsigned long long)j >= row[2]) return;
+    const unsigned int plane = j / (unsigned int)per_plane;
+    unsigned int r = j - plane * (unsigned int)per_plane;
+    const unsigned int w = (unsigned int)nx;
+    const unsigned int top = (unsigned int)y_lo * w;
+    const unsigned int bottom = (unsigned int)y_hi * w;
+    unsigned int y, x;
+    if (r < top) {
+        y = r / w; x = r - y * w;
+    } else if (r - top < bottom) {
+        r -= top;
+        const unsigned int k = r / w;
+        y = (unsigned int)(ny - y_hi) + k; x = r - k * w;
+    } else {
+        r -= top + bottom;
+        const unsigned int k = r / (unsigned int)side;
+        const unsigned int c = r - k * (unsigned int)side;
+        y = (unsigned int)y_lo + k;
+        x = (side == nx || c < (unsigned int)x_lo)
+            ? c : (unsigned int)(nx - x_hi) + (c - (unsigned int)x_lo);
+    }
+    ((unsigned int*)row[1])[plane * (unsigned int)ny * w + y * w + x] = 0u;
+}

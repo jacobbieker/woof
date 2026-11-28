@@ -184,6 +184,7 @@ _WRF_SCHEMES = {
     "kf_capped_downdraft_rain_floor": dict(cu_physics=1, moist=True),
     "diff_metrics_seam_slope": dict(diff_opt=2, km_opt=2),
     "mynn_sfclay_q2_land_cap": dict(bl_pbl_physics=5, sf_sfclay_physics=5),
+    "pd_adv_west_courant": dict(moist_adv_opt=1, moist=True, specified=True),
 }
 
 

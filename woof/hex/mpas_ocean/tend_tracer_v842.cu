@@ -10,6 +10,8 @@
 //   src/core_ocean/shared/mpas_ocn_tracer_surface_flux_to_tend.F (ocn_tracer_surface_flux_tend)
 //   src/core_ocean/shared/mpas_ocn_tracer_short_wave_absorption_jerlov.F
 //     (ocn_tracer_short_wave_absorption_jerlov_tend, ocn_get_jerlov_fraction)
+//   src/core_ocean/shared/mpas_ocn_diagnostics.F (ocn_compute_KPP_input_fields)
+//   src/core_ocean/shared/mpas_ocn_tracer_nonlocalflux.F (ocn_tracer_nonlocalflux_tend)
 // Copyright (c) 2013-2019, Los Alamos National Security, LLC (LANS) and the
 // University Corporation for Atmospheric Research (UCAR); BSD-3-Clause, the
 // terms in licenses/LICENSE-MPAS-BSD-3-Clause.txt. This is not the version
@@ -34,6 +36,7 @@ typedef double rk;
 #define M(a,b) __dmul_rn((a),(b))
 #define D(a,b) __ddiv_rn((a),(b))
 #define EXP(a) glibc_exp(a)
+#define SQRT(a) __dsqrt_rn(a)
 #define C(x) x
 __device__ __forceinline__ rk tt_min(rk a, rk b) {
     return __longlong_as_double(b < a ? __double_as_longlong(b) : __double_as_longlong(a));
@@ -48,6 +51,7 @@ typedef float rk;
 #define M(a,b) __fmul_rn((a),(b))
 #define D(a,b) __fdiv_rn((a),(b))
 #define EXP(a) gfk_exp(a)
+#define SQRT(a) __fsqrt_rn(a)
 #define C(x) x##f
 __device__ __forceinline__ rk tt_min(rk a, rk b) {
     return __int_as_float(b < a ? __float_as_int(b) : __float_as_int(a));
@@ -168,4 +172,80 @@ extern "C" __global__ void ocn_tt_jerlov_v842(
     }
     const int depLev = (kf == top || kf == 1) ? 2 : kf;
     penetrativeTemperatureFluxOBL[iCell] = M(penetrativeTemperatureFlux[iCell], w[depLev - 1]);
+}
+
+// ocn_compute_KPP_input_fields' cell loop (after its equation of state at the
+// surface-displaced type, which the caller runs): the non-local surface
+// fluxes of temperature and salinity, the surface buoyancy forcing, the
+// surface stress magnitude and the friction velocity, over 1..nCells
+// (nCellsArray(3)). The tracers are time level 1's, as the Fortran reads them.
+// alpha/beta(nVertLevels, nCells+1) are the in-situ coefficients.
+extern "C" __global__ void ocn_tt_kpp_input_fields_v842(
+    rk *nonLocalSurfaceTracerFlux, rk *surfaceBuoyancyForcing, rk *surfaceStressMagnitude,
+    rk *surfaceFrictionVelocity, const rk *activeTracersSurfaceFlux, const rk *activeTracersSurfaceFluxRunoff,
+    const rk *penetrativeTemperatureFlux, const rk *penetrativeTemperatureFluxOBL, const rk *surfaceThicknessFlux,
+    const rk *activeTracers, const rk *layerThickness, const rk *alpha, const rk *beta, const rk *surfaceStress,
+    const rk *areaCell, const rk *dcEdge, const rk *dvEdge, const int *nEdgesOnCell, const int *edgesOnCell,
+    int nCells, int nl, int nTracers, int maxEdges, int iT, int iS, rk attenuation, rk attenuationRunoff,
+    rk gravity, rk rhoSw)
+{
+    const int iCell = blockIdx.x * blockDim.x + threadIdx.x;
+    if (iCell >= nCells) return;
+    const rk invAreaCell = D(C(1.0), areaCell[iCell]);
+    const rk h1 = layerThickness[(size_t)iCell * nl];
+    const rk fracAbsorbed = S(C(1.0), EXP(tt_max(-D(h1, attenuation), C(-100.0))));
+    const rk fracAbsorbedRunoff = S(C(1.0), EXP(tt_max(-D(h1, attenuationRunoff), C(-100.0))));
+    const size_t f = (size_t)iCell * nTracers;
+    const rk *t1 = activeTracers + (size_t)iCell * nl * nTracers;
+    const rk tFlux = A(S(S(A(activeTracersSurfaceFlux[f + iT - 1], penetrativeTemperatureFlux[iCell]),
+                           penetrativeTemperatureFluxOBL[iCell]),
+                         M(M(fracAbsorbed, surfaceThicknessFlux[iCell]), t1[iT - 1])),
+                       M(activeTracersSurfaceFluxRunoff[f + iT - 1], fracAbsorbedRunoff));
+    nonLocalSurfaceTracerFlux[f + iT - 1] = tFlux;
+    const rk sFlux = S(activeTracersSurfaceFlux[f + iS - 1], M(M(fracAbsorbed, surfaceThicknessFlux[iCell]),
+                                                              t1[iS - 1]));
+    nonLocalSurfaceTracerFlux[f + iS - 1] = sFlux;
+    const rk b = S(M(alpha[(size_t)iCell * nl], tFlux), M(beta[(size_t)iCell * nl], sFlux));
+    surfaceBuoyancyForcing[iCell] = M(b, gravity);
+    rk dv2 = C(0.0);
+    for (int i = 0; i < nEdgesOnCell[iCell]; ++i) {
+        const int iEdge = edgesOnCell[(size_t)iCell * maxEdges + i] - 1;
+        const rk factor = M(M(M(C(0.5), dcEdge[iEdge]), dvEdge[iEdge]), invAreaCell);
+        const rk stress = surfaceStress[iEdge];
+        dv2 = A(dv2, M(factor, M(stress, stress)));
+    }
+    const rk magnitude = SQRT(dv2);
+    surfaceStressMagnitude[iCell] = magnitude;
+    surfaceFrictionVelocity[iCell] = SQRT(D(magnitude, rhoSw));
+}
+
+// ocn_tracer_nonlocalflux_tend over 1..nCells (nCellsArray(1)): the
+// divergence of surfaceTracerFlux * vertNonLocalFlux(1, :) added to the tend,
+// the interior levels first, then the bottom, then the top, as the Fortran.
+// vertNonLocalFlux(nGroup, nVertLevelsP1, nCells+1) is
+// f[(iCell*(nl+1) + k)*nGroup].
+extern "C" __global__ void ocn_tt_nonlocal_flux_v842(
+    rk *tend, const rk *vertNonLocalFlux, const rk *surfaceTracerFlux, const int *maxLevelCell, int nCells,
+    int nl, int nTracers, int nGroup)
+{
+    const int iCell = blockIdx.x * blockDim.x + threadIdx.x;
+    if (iCell >= nCells) return;
+    const rk *f = vertNonLocalFlux + (size_t)iCell * (nl + 1) * nGroup;
+    const rk *sf = surfaceTracerFlux + (size_t)iCell * nTracers;
+    rk *t = tend + (size_t)iCell * nl * nTracers;
+    const int mlc = maxLevelCell[iCell];
+    for (int k = 2; k <= mlc - 1; ++k)
+        for (int i = 0; i < nTracers; ++i) {
+            const rk top = M(sf[i], f[(size_t)(k - 1) * nGroup]);
+            const rk bottom = M(sf[i], f[(size_t)k * nGroup]);
+            t[(k - 1) * nTracers + i] = A(t[(k - 1) * nTracers + i], S(top, bottom));
+        }
+    for (int i = 0; i < nTracers; ++i) {
+        const rk top = M(sf[i], f[(size_t)(mlc - 1) * nGroup]);
+        t[(mlc - 1) * nTracers + i] = A(t[(mlc - 1) * nTracers + i], S(top, C(0.0)));
+    }
+    for (int i = 0; i < nTracers; ++i) {
+        const rk bottom = M(sf[i], f[nGroup]);
+        t[i] = A(t[i], S(C(0.0), bottom));
+    }
 }

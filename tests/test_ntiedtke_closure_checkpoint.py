@@ -108,7 +108,9 @@ _KEYS_APPENDED_SINCE: tuple[str, ...] = (
        # the urban canopy keys (development branch)
        "sf_urban_physics", "use_wudapt_lcz", "num_urban_hi",
        # tc/nest's fixed-frame archive, echoed on a nested domain (2.9.7)
-       "nest_accumulation_archive"))
+       "nest_accumulation_archive",
+       # FQ13's PD west-face Courant order (specified or nested domain)
+       "pd_adv_west_courant"))
 
 
 def _write(monkeypatch, tmp_path):

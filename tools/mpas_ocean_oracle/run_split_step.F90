@@ -16,6 +16,9 @@
 ! builds the block (its structs every pool, its dimensions the mesh pool's),
 ! computes the starting state's diagnostics (ocn_diagnostic_solve at time
 ! level 1, as MPAS's init does), sets nBtrSubcycles from the integer config of that name and takes the step.
+! run_split_step_{r4,r8} link stubs_vmix.F90 for CVMix (nothing when
+! config_use_cvmix is off); run_split_step_cvmix_r8 links CVMix v0.84-beta
+! and mpas_ocn_vmix_cvmix.F verbatim (build.sh).
 
 program run_split_step
   use mpas_kind_types
@@ -40,6 +43,7 @@ program run_split_step
   use ocn_tracer_hmix_redi
   use ocn_tracer_surface_flux_to_tend
   use ocn_tracer_short_wave_absorption
+  use ocn_tracer_nonlocalflux
   use ocn_equation_of_state
   use ocn_diagnostics
   use ocn_vmix
@@ -98,6 +102,8 @@ program run_split_step
   call ocn_tracer_surface_flux_init(err)
   if (err /= 0) stop 13
   call ocn_tracer_short_wave_absorption_init(domain, err)
+  if (err /= 0) stop 13
+  call ocn_tracer_nonlocalflux_init(err)
   if (err /= 0) stop 13
   call ocn_equation_of_state_init(err)
   if (err /= 0) stop 13

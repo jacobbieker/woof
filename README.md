@@ -403,7 +403,12 @@ Notes on the 1.1.7 sync:
     v0.84-beta: KPP's boundary layer, SimpleShapes and MatchBoth
     diffusivities and non-local flux, Pacanowski-Philander or KPP shear,
     convection, the background) in the implicit vertical mixing, at RKIND 8
-    only (v8.4.2 does not compile CVMix at RKIND 4), standalone; transcribed
+    only (v8.4.2 does not compile CVMix at RKIND 4), standalone, in the
+    split-explicit step and over forward steps on uniform and
+    variable-resolution meshes, with KPP's input fields
+    (`ocn_compute_KPP_input_fields`) and non-local flux
+    (`ocn_tracer_nonlocalflux_tend`) in the tracer tendency, or in the
+    implicit solve; transcribed
     under CVMix's Apache-2.0 grant, with the two v0.84-only options
     (`config_cvmix_kpp_EkmanOBL`, `config_cvmix_kpp_use_enhanced_diff =
     .false.`) refused by name. Three v8.4.2 quirks keep
@@ -707,8 +712,7 @@ Notes on the 1.1.7 sync:
   remap computes its init geometry (frames, moments, MPAS's RBF
   coefficients) itself, and refuses halo exchanges and periodic planar
   meshes by name. The sea-ice column physics' time step (mushy vertical thermodynamics,
-  shortwave), CVMix in the ocean's split-explicit step and KPP's non-local
-  flux in its tracer tendency,
+  shortwave)
   and the coupler pieces other than the ocean merge and the ocean's import and export are not ported. A few RKIND 8 cases need the LGPL libm
   opt-in below. These are ported pieces and steps, not coupled forecasts.
   Plan: [docs/mpas-coupled-roadmap.md](docs/mpas-coupled-roadmap.md).
@@ -764,14 +768,15 @@ Notes on the 1.1.7 sync:
     turns every one on / off whatever the mode (the hex door takes
     `--quirk-corrections all|none`); a key set false next to `"all"` is
     refused by name, and a key set next to `"none"` wins. On the WRF route
-    the keys are correct-mode findings FQ1-FQ12, so the run receipt's
+    the keys are correct-mode findings FQ1-FQ13, so the run receipt's
     `correct_mode` block names them.
     It covers `gf_deep_rain_evaporation_booking`, `ysu_surface_heat_exner`,
     `mynn_sfclay_psih_zolzt`, `noah_smc_floor_booking`,
     `thompson_rain_snow_closure`, `rrtmg_lw_model_top`,
     `thompson_lamc_updated_rc`, `noah_land_ice_rain_runoff`,
     `noah_snow_series_conductivity`, `mynn_sfclay_q2_land_cap`,
-    `kf_capped_downdraft_rain_floor` and `diff_metrics_seam_slope` (WRF route);
+    `kf_capped_downdraft_rain_floor`, `diff_metrics_seam_slope` and
+    `pd_adv_west_courant` (WRF route);
     `--undriven-species-boundary wrf-flow-dependent` (hex, regional, where its drivers carry it; the only
     flag `--quirk-corrections` sets); `woof_land_ice_isomip_freezing_salinity`,
     `woof_bottom_drag_dry_edges`, `woof_rayleigh_bottom_friction` and
@@ -865,6 +870,17 @@ Notes on the 1.1.7 sync:
     initial zero while every other column has its slope. The option fills
     the top level too, as the engine always has; off (exact mode) the seam
     is WRF's word for word (finding FQ12). Bounded axes are unchanged.
+  - `pd_adv_west_courant` (positive-definite moisture transport,
+    `moist_adv_opt = 1`, on a specified or nested domain, WRF route). WRF's
+    `advect_scalar_pd` forms the Courant number of the second-order west
+    face as `(ru/mu)*dt/dx`, where every other face, the east one
+    included, forms `ru*dt/dx/mu`; WRFPLUS repeats it. The two round
+    differently, so in the strict build and the TL/AD a mirrored flow is
+    not advected as the mirror. The
+    option takes every face's order there, in the strict primal and the
+    WRFPLUS PD TL/AD together; off (exact mode) the face is WRF's word for
+    word (finding FQ13). The default build's face never carried WRF's
+    order.
 - **Observation-driven corrections, each opt-in and off by default** (GF's
   is also a quirk correction, so it is on in correct mode):
   - `gf_deep_rain_evaporation_booking` (Grell-Freitas, `cu_physics = 3`).

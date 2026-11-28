@@ -3582,6 +3582,10 @@ def _drop_default_off_run_keys(values: dict) -> None:
     # every earlier header ran.
     if values.get("mynn_sfclay_q2_land_cap", False) is False:
         values.pop("mynn_sfclay_q2_land_cap", None)
+    # The PD transport's west-face Courant order (FQ13): absent while off,
+    # which every earlier header ran.
+    if values.get("pd_adv_west_courant", False) is False:
+        values.pop("pd_adv_west_courant", None)
     # The opt-in resolved obstacles (woof.core.obstacles): every key at its
     # default is what every earlier header ran, so each is echoed only when
     # it differs; obstacle_opt = 1 always echoes with its file.
@@ -5880,6 +5884,7 @@ _RESTART_ABSENT_RUN_DEFAULTS = {
     'noah_snow_series_conductivity': False,
     'diff_metrics_seam_slope': False,
     'mynn_sfclay_q2_land_cap': False,
+    'pd_adv_west_courant': False,
     'obstacle_opt': 0,
     'obstacle_file': '',
     'obstacle_solid_fraction': 0.5,
@@ -6552,6 +6557,7 @@ ECHO_ABSENT_RUN_VALUES = {"nest_accumulation_archive": False,
                           "noah_snow_series_conductivity": False,
                           "diff_metrics_seam_slope": False,
                           "mynn_sfclay_q2_land_cap": False,
+                          "pd_adv_west_courant": False,
                           "obstacle_opt": 0, "obstacle_file": "",
                           "obstacle_solid_fraction": 0.5,
                           "obstacle_relax_factor": 10.0,
