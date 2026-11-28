@@ -11,10 +11,10 @@
   ],
   "attribution_note": "route/mechanism attribution is judgment across five measured routes and is not machine-derivable; unattributed records carry asserted_token: null and the gate requires only that a token, once written, agrees with the receipt",
   "anchoring_note": "a site is its file plus the exact text of its line (anchor, anchor_sha256), and identical lines in one file are counted; line is where the generator last found the site, a hint the check does not fail on, so lines added or removed above a claim leave the census valid",
-  "site_count": 6886,
+  "site_count": 6887,
   "site_count_by_kind": {
     "behavioural": 67,
-    "prose": 6819
+    "prose": 6820
   },
   "sites": [
     {
@@ -13817,6 +13817,17 @@
       "kind": "prose",
       "anchor": "options = ('-std=c++17', '--ftz=true', '--use_fast_math')",
       "anchor_sha256": "9e0e23969fe8425037e8dcf26736da2a46e4bd5ae8deca3ff1ad00222915eb21",
+      "route": null,
+      "mechanism": null,
+      "asserted_token": null,
+      "attribution": "unattributed"
+    },
+    {
+      "file": "tests/test_batched_glue.py",
+      "line": 31,
+      "kind": "prose",
+      "anchor": "src[:3] = np.float32(1e-39)              # subnormal products and sums",
+      "anchor_sha256": "0a02eec6842e845b58dd5cb792893f4603bc9906968762aab889a19829847eb2",
       "route": null,
       "mechanism": null,
       "asserted_token": null,

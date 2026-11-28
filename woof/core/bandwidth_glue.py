@@ -1,6 +1,7 @@
 """Bandwidth-oriented launches for unchanged FP32 elementwise operations."""
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 
 import cupy as cp
@@ -10,6 +11,13 @@ from woof.core.kernels import get_kernel
 
 _TPB = 128
 _WORDS_PER_THREAD = 4
+
+
+def batched_glue_enabled() -> bool:
+    """``WOOF_BATCHED_GLUE=0``: the open-strip zeroing of the Smagorinsky
+    scalar rows and the per-step flux accumulators launch once per buffer
+    (ring_frame.zero_frames, :func:`accumulate_scaled_rows`), for A/B runs."""
+    return os.environ.get("WOOF_BATCHED_GLUE", "1") != "0"
 
 
 def _supported(arrays):
@@ -54,6 +62,43 @@ def accumulate_scaled(dst, src, scale) -> bool:
         return False
     if dst.size:
         _accumulate_scaled_kernel()(src, np.float32(scale), dst)
+    return True
+
+
+def accumulate_scaled_rows(pairs, scale) -> bool:
+    """:func:`accumulate_scaled` for every ``(dst, src)`` row of ``pairs``
+    in one launch (glue_accumulate_scaled_arrays), the same words.  False,
+    with nothing done, unless every row is dense FP32 of one shape with
+    ``src`` either ``dst`` or apart from it, no ``dst`` overlaps another
+    row's arrays, and there are at most 64 rows."""
+    if not pairs or len(pairs) > 64:
+        return False
+    arrays = tuple(a for dst, src in pairs for a in (dst, src))
+    if (not _supported(arrays)
+            or any(src.shape != dst.shape for dst, src in pairs)):
+        return False
+    # Each address once: a facade array's address is not a free attribute.
+    spans = [((int(dst.data.ptr), dst.nbytes), (int(src.data.ptr), src.nbytes))
+             for dst, src in pairs]
+
+    def apart(a, b):
+        return a[0] + a[1] <= b[0] or b[0] + b[1] <= a[0]
+
+    for row, (dst, src) in enumerate(spans):
+        if not apart(src, dst) and src[0] != dst[0]:
+            return False
+        if not all(apart(dst, other) for j, pair in enumerate(spans) if j != row
+                   for other in pair):
+            return False
+    rows = np.zeros((64, 3), dtype=np.uint64)
+    rows[:len(pairs)] = [(src[0], dst[0], d.size)
+                        for (dst, src), (d, _s) in zip(spans, pairs)]
+    nmax = max(dst.size for dst, _src in pairs)
+    if nmax:
+        table = rows.reshape(-1).view(np.dtype(('V', rows.nbytes)))
+        get_kernel('bandwidth_glue', 'glue_accumulate_scaled_arrays')(
+            ((nmax + _TPB - 1) // _TPB, len(pairs)), (_TPB,),
+            (table, np.float32(scale)))
     return True
 
 

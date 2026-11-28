@@ -3009,7 +3009,7 @@
    },
    {
     "file": "woof/core/kernels/bandwidth_glue.cu",
-    "sha256": "8ca05bd9653f73aa06b90ab25bfaf10468517b410f01d09725cc5de376458f12"
+    "sha256": "9b6e2e2bae60cf28a20cb7982cfe7e2eb1552c11c0a039749ea792bcca51dd7e"
    },
    {
     "file": "woof/core/kernels/bmj.cu",
@@ -5667,7 +5667,7 @@
    },
    {
     "file": "woof/core/bandwidth_glue.py",
-    "sha256": "7c451749f1d9d3ffc08c2fcb04f80d2e7ff943c26bf934e45a12a53103ae84aa"
+    "sha256": "63ce7f140ce2cd1bf6207dccfa4eca870279722b994523708f9e19e0c658769a"
    },
    {
     "file": "woof/core/cam3_fast.py",
@@ -5707,7 +5707,7 @@
    },
    {
     "file": "woof/core/dycore.py",
-    "sha256": "fd0ba35d57b5b40a6cf631a7abbb981c007dcc0d52782c3ab18f928333a58195"
+    "sha256": "061918d5f2031018ba8b7f5e2e14ac6e74ebc01afcb6a92510f32cc7d23ac54e"
    },
    {
     "file": "woof/core/etanew.py",
@@ -5891,7 +5891,7 @@
    },
    {
     "file": "woof/core/physics.py",
-    "sha256": "3fd18b359feb2a2cf56ad42ec3641b905ee9c6e2677dbd4bcabc0efa40800abd"
+    "sha256": "898945175123ef6d2d029e501d27b1172809123f692ea08d990c7acf9022d54d"
    },
    {
     "file": "woof/core/preflight.py",
@@ -5903,7 +5903,7 @@
    },
    {
     "file": "woof/core/ring_frame.py",
-    "sha256": "fa7eee299a4ec94653895a29c13f239de3d8599cfd25281b9aec9f49ac6cd133"
+    "sha256": "fac1b92663fc4a0a9c9b988c07c00d398d4c921742825a788213b56bdcfa0724"
    },
    {
     "file": "woof/core/rrtm_lw.py",
@@ -12544,7 +12544,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "85d3fa5d2d00f36c7201a71a7c18b9abff9cf53cae65cc82ca97492be50053f8"
+   "source_sha256": "72b068dca61b89018c0fdb076c66c61b7f4b0c4961e47c2c3d78d97ba76b9897"
   },
   "kernels:bmj": {
    "assessment": "static_diagnostic_only",
