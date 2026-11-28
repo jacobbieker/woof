@@ -23,7 +23,8 @@ qr), on a dry state WRF's diff_opt 1 / km_opt 4 horizontal mixing (the
 deformation, smag2d_km and the u, v, w and theta rows of the time-t
 fields into the held tendencies, coupled to the map factors and added on
 every stage), no physics, ``rk_ord = 3``, ``h_*_adv_order`` 3-6, a 3-D
-base state (terrain) and the w_damp limiter.
+base state (terrain), the w_damp limiter and damp_opt 3's implicit w
+damper (in advance_w; not the fork's noaa_wrf39 upper-wind limiter).
 Everything else is refused by :func:`step_geometry`.
 """
 
@@ -262,7 +263,11 @@ def _refuse(cfg, state) -> None:
         "microphysics": bool(cfg.mp_physics),
         "rk_ord 2": getattr(cfg, "rk_ord", 3) != 3,
         "emdiv": float(cfg.emdiv) > 0.0,
-        "damp_opt 3": cfg.damp_opt == 3,
+        # damp_opt 3's w damper is linearised (advance_w); the fork's
+        # NOAA-WRF 3.9 upper-wind limiter it switches on is not
+        "damp_opt 3 with upper_wind_limiter_form noaa_wrf39": (
+            cfg.damp_opt == 3
+            and getattr(cfg, "upper_wind_limiter_form", "wrf_461") == "noaa_wrf39"),
         "diff_6th_opt": bool(cfg.diff_6th_opt),
         "zadvect_implicit": bool(getattr(cfg, "zadvect_implicit", 0)),
         "momentum_adv_opt 3": getattr(cfg, "momentum_adv_opt", 1) == 3,
@@ -559,6 +564,7 @@ def step_geometry(state, cfg, *, reuse_first: bool | None = None,
                                spec_zone=mzone, open_x=bx, open_y=by),
                     WGeometry(nz, ny, nx, rdx, rdy, dtau, epssm=float(f32(cfg.epssm)),
                               top_lid=top_lid, dampmag=float(damp_magnitude(cfg, dtau)),
+                              zdamp=float(f32(cfg.zdamp)),
                               has_msf=msf, spec_zone=mzone, boundary_x=bx, boundary_y=by,
                               moist_cq=int(moist), **cf))
         moist_parts = {}
