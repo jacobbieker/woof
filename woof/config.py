@@ -2764,6 +2764,23 @@ class RunConfig:
     noah_snow_series_conductivity: bool = _config_field(
         default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
 
+    # Correction of a WRF 4.7.1 quirk (user 2026-11-27), appended.
+    # advect_scalar_pd's second-order west face of a bounded x axis
+    # (module_advect_em.F:6434-6439, i == ids+1; WRFPLUS repeats it,
+    # module_advect_em_tl.F:8581-8586) forms its Courant number as
+    # (ru/mu)*dt/dx, where every other face, the east one included, forms
+    # ru*dt/dx/mu: the same quotient, rounded in another order on one face.
+    # True takes every face's order there; False is WRF's arithmetic word for
+    # word.  Read where moist_adv_opt = 1 runs on a specified or nested
+    # domain (woof runs no PD transport on an open axis).  The key is scoped
+    # by moist_adv_opt: there the scalar, tracer, chem and TKE PD launches
+    # take the same order; with moist_adv_opt != 1 they keep WRF's.  The
+    # default build's face never carried WRF's order, so the words it moves
+    # are the strict build's and the WRFPLUS PD TL/AD's.  Correct-mode
+    # finding FQ13: on by default, off in physics.mode = 'exact'.
+    pd_adv_west_courant: bool = _config_field(
+        default=_correct_mode.CORRECT_KEYS_DEFAULT, kw_only=True)
+
 
 def _umbrella_resolved_as_in_toml(init):
     """RunConfig.__init__, wrapped so that a RunConfig built in Python with
@@ -10307,9 +10324,11 @@ def validate_run_config(cfg: RunConfig, *, native_fire_ideal: bool = False) -> R
         raise ConfigurationRefused("mynn_sfclay_q2_land_cap must be true or false")
     if type(cfg.noah_snow_series_conductivity) is not bool:
         raise ConfigurationRefused("noah_snow_series_conductivity must be true or false")
+    if type(cfg.pd_adv_west_courant) is not bool:
+        raise ConfigurationRefused("pd_adv_west_courant must be true or false")
     from woof.quirk_corrections import check_run_config
     check_run_config(cfg)
-    # The quirk-ledger keys (correct-mode findings FQ1-FQ12)
+    # The quirk-ledger keys (correct-mode findings FQ1-FQ13)
     # are on by default and read only where their scheme runs (correct_mode.KEY_SCOPE,
     # KEY_GENERATIONS, KEY_UNREAD: YSU's not with BEP/BEM, MYNN's only at
     # wrf_461), so an unread one is inert, not refused.

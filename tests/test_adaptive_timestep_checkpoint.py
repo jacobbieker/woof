@@ -81,7 +81,10 @@ def _digest_without_the_adaptive_config_keys(
                 "eta_levels", "relax_timescale_s", "relax_w",
                 "sf_urban_physics", "use_wudapt_lcz", "num_urban_hi",
                 # tc/nest's fixed-frame archive (2.9.7), echoed on a nested domain.
-                "nest_accumulation_archive"):
+                "nest_accumulation_archive",
+                # FQ13's PD west-face Courant order, echoed on a specified
+                # or nested domain with moist_adv_opt == 1.
+                "pd_adv_west_courant"):
             header["config"].pop(key, None)
         # The historical anchor predates the e13fa45c0 / 59f7e280f
         # moist_cq default flip. Retain the key and unwind only its value.

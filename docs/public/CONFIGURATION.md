@@ -410,7 +410,8 @@ and no others (`woof/experiment.py`'s `_DOMAIN_RUN_OVERRIDES`):
     noah_smc_floor_booking  thompson_rain_snow_closure  rrtmg_lw_model_top
     thompson_lamc_updated_rc  noah_land_ice_rain_runoff
     noah_snow_series_conductivity  kf_capped_downdraft_rain_floor
-    diff_metrics_seam_slope  mynn_sfclay_q2_land_cap  woof_quirk_corrections
+    diff_metrics_seam_slope  mynn_sfclay_q2_land_cap  pd_adv_west_courant
+    woof_quirk_corrections
     mynn_sfclay_psih_zolzt  urban_param_file  obstacle_opt  obstacle_file
     obstacle_solid_fraction  obstacle_relax_factor  obstacle_drag_coefficient
     obstacle_wall_z0  kf_edrates  maxiens  maxens  maxens2  maxens3  ensdim  cu_diag
@@ -640,6 +641,22 @@ is filled too, which is what the engine ran before the option existed; off,
 and in exact mode, the seam is WRF's word for word. Bounded axes and other
 `diff_opt` values do not read it. It is not a WRF namelist key; set it in
 the TOML.
+`pd_adv_west_courant` (default `true`; finding FQ13) is a correction to the
+positive-definite transport (`moist_adv_opt = 1`) on a specified or
+nested domain (woof runs no PD transport on an open axis), per domain on
+the same terms. WRF's
+`advect_scalar_pd` (`module_advect_em.F`, `i == ids+1`) forms the Courant
+number of the second-order west face as `(ru/mu)*dt/dx`, where every other
+face, the east one included, forms `ru*dt/dx/mu`; WRFPLUS's TL/AD repeats
+it. The two round differently, so in those builds a mirrored flow is not
+advected as the mirror. With `true` the west face takes every face's
+order, in the strict primal and the WRFPLUS PD TL/AD together; the key is
+scoped by `moist_adv_opt`, so on such a domain the scalar, tracer, chem and
+TKE PD launches take the same order, and with `moist_adv_opt` other than 1
+they keep WRF's. Off, and in exact mode, the face is WRF's
+word for word. The default build's face never carried WRF's order, so only
+a strict `GPUWM_WRF_EXACT=1` build and the TL/AD move. A periodic x axis
+does not read it. It is not a WRF namelist key; set it in the TOML.
 
 `thompson_lamc_updated_rc` (default `true`; finding FQ7) is a correction to
 the aerosol-aware Thompson's cloud-water balance (`mp_physics = 28` or `38`,
@@ -713,8 +730,8 @@ They follow the physics mode: unset, every correction is on in correct
 mode (the default) where its scheme runs, and off in exact mode, where the
 run is the WRF / MPAS oracle's arithmetic word for word (parity tests run
 there). On the WRF route exact mode is a strict `GPUWM_WRF_EXACT=1`
-process, or every correct-mode key set `false` (the twelve WRF-route keys
-below are correct-mode findings FQ1-FQ12, in the table under "Correct
+process, or every correct-mode key set `false` (the thirteen WRF-route keys
+below are correct-mode findings FQ1-FQ13, in the table under "Correct
 mode"); on the hex door it is `--physics-mode exact`; in an MPAS-Ocean,
 MALI or MPAS-Seaice config dict it is `config_physics_mode = 'exact'`.
 A correction's own key, when set, wins over the mode, which is how one is
@@ -741,8 +758,9 @@ likewise. In correct mode, or under `"all"`, these are on:
   `mynn_sfclay_q2_land_cap = true`
   (`sf_sfclay_physics = 5` with `mynn_sfclay_variant = "wrf_461"`),
   `kf_capped_downdraft_rain_floor = true`
-  (`cu_physics = 1`, `10` or `11`) and `diff_metrics_seam_slope = true`
-  (where WRF's mixing package runs on a periodic axis).
+  (`cu_physics = 1`, `10` or `11`), `diff_metrics_seam_slope = true`
+  (where WRF's mixing package runs on a periodic axis) and
+  `pd_adv_west_courant = true` (`moist_adv_opt = 1`, specified or nested).
 - Hex regional route: `--undriven-species-boundary wrf-flow-dependent`
   (a regional run, `--lbc-dir`, on the WOOF-physics one-card drivers; it
   stays off on local time stepping, partial nest and the partitioned
@@ -979,7 +997,7 @@ for the retained proof and the limits of the forecast evidence.
 ### Correct mode (`[shared]`)
 
 Correct mode is the default. It fixes defects that WRF itself carries
-(water budgets, and the fork's quirk ledger FQ1-FQ12, see
+(water budgets, and the fork's quirk ledger FQ1-FQ13, see
 `woof_quirk_corrections`), one key per scheme, each `true` by default and read only by the
 schemes named in its row. Setting a key to `false` in `[shared]` runs that
 scheme's WRF-matched arithmetic. Strict WRF mode (`GPUWM_WRF_EXACT=1`)
@@ -1009,6 +1027,7 @@ configuration has no `[physics]` table; `physics.mode` is not an engine key.
 | `mynn_sfclay_q2_land_cap` | MYNN surface layer (`sf_sfclay_physics = 5`, `mynn_sfclay_variant = "wrf_461"`) | FQ10 | the 1.05 times lowest-level cap on the 2 m mixing ratio runs over land only, as the surface driver's does, not over water |
 | `kf_capped_downdraft_rain_floor` | Kain-Fritsch eta, KF-CuP and MSKF (`cu_physics = 1, 10, 11`) | FQ11 | the capped downdraft's rain flux `TRPPT - TDER` is floored at zero, so `RAINCV` is never negative |
 | `diff_metrics_seam_slope` | WRF's mixing package on a periodic axis | FQ12 | the top w level's coordinate slope at a periodic seam is filled like every other column's, not left at zero |
+| `pd_adv_west_courant` | positive-definite transport (`moist_adv_opt = 1`) on a specified or nested domain | FQ13 | the second-order west face forms its Courant number as `ru*dt/dx/mu`, as every other face does, not `(ru/mu)*dt/dx` |
 
 A checkpoint resumes only under the arithmetic it was written with; a
 mismatch is refused, and the refusal names the key to set.

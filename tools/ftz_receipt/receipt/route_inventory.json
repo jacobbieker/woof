@@ -2984,7 +2984,7 @@
     },
     {
       "file": "tests/test_mp8_frozen.py",
-      "line": 3402,
+      "line": 3410,
       "column": 8,
       "surface": "tests",
       "constructor": "cp.RawModule",
@@ -7978,7 +7978,7 @@
     },
     {
       "file": "woof/core/moist.py",
-      "line": 636,
+      "line": 652,
       "column": 11,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -7994,7 +7994,7 @@
     },
     {
       "file": "woof/core/moist.py",
-      "line": 738,
+      "line": 754,
       "column": 11,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -9942,7 +9942,7 @@
     },
     {
       "file": "woof/grad/wrfplus/pdadv.py",
-      "line": 155,
+      "line": 160,
       "column": 13,
       "surface": "package",
       "constructor": "cp.RawModule",
