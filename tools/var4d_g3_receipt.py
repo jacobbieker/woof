@@ -35,10 +35,10 @@ STRICT = dict(GPUWM_WRF_EXACT="1", WOOF_WRF_EXACT_DIAGNOSTICS="1", WOOF_WRF_EXAC
 
 
 def _first(o):
-    while isinstance(o, dict):
+    while isinstance(o, (dict, list, tuple)):
         if not o:
             return None
-        o = next(iter(o.values()))
+        o = next(iter(o.values())) if isinstance(o, dict) else o[0]
     return o
 
 
