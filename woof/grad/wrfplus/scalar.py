@@ -24,8 +24,9 @@ geom, nl=...)`` and ``*_ad(adj_state, traj, adj, geom)``, the adjoint
 adding into ``adj``.
 
 The positive-definite final stage (``moist_adv_opt = 1``) is
-:mod:`woof.grad.wrfplus.pdadv`.  Not covered: physics and mixing sources (``moist_tend`` holds only the boundary rows
-here), IEVA, and the RQVFTEN export.
+:mod:`woof.grad.wrfplus.pdadv`.  Not covered: physics and mixing sources
+(``moist_tend`` holds only the boundary rows here), IEVA, and the RQVFTEN
+export.
 """
 
 from __future__ import annotations
