@@ -15,7 +15,10 @@ Breakage this prevents:
   binary32 window (its adjoint is a transpose to only ~1e-6), or a moisture
   option the dry window cannot honour, running anyway;
 - the optional base check (the window's base against the slots' first
-  guesses) passing a mismatch or comparing the wrong state.
+  guesses) passing a mismatch or comparing the wrong state;
+- a checkpoint policy that changes the gradient, keeps the wrong states, or
+  reruns an outer loop's base from the window's first start instead of the
+  loop's (``Trajectory.start``).
 """
 
 from __future__ import annotations
@@ -116,9 +119,11 @@ class FakeWindow:
         if trajectory is not None:
             return self.use_trajectory(list(trajectory))
         self.forwards += 1
-        self._checkpoints = {k: {n: self._start[n] + k for n in self._names}
+        self._external = False
+        x0 = self._start if x0 is None else x0
+        self._checkpoints = {k: {n: x0[n] + k for n in self._names}
                              for k in range(0, self.nsteps, self.every)}
-        return {n: self._start[n] + self.nsteps for n in self._names}
+        return {n: x0[n] + self.nsteps for n in self._names}
 
     def use_trajectory(self, states):
         """``forward(trajectory=states)`` as #746 keeps it: every state but
@@ -487,6 +492,79 @@ def test_base_check_reads_an_external_trajectory():
                           base_end=end).base_diff[(2, "u_2")] == 0.0
 
 
+def test_checkpoint_policy():
+    """``all`` keeps every step's state, ``slot`` one per slot, an int ``c``
+    one every ``c`` steps; an already-forwarded window is re-kept from its
+    own state 0; the TL and AD do not change; refused values are named."""
+    nx, ny, nz = 5, 4, 3
+    rng = np.random.default_rng(9)
+    g0 = _tl_state(rng, nx, ny, nz)
+    fs = [_tl_state(rng, nx, ny, nz) for _ in range(3)]
+    ref = None
+    for policy, every, kept in (("all", 1, [0, 1, 2, 3]), ("slot", 2, [0, 2]), (2, 2, [0, 2]), (None, 1, None)):
+        win = FakeWindow(nx, ny, nz, 4)
+        x0 = {n: v + 5.0 for n, v in win._start.items()}
+        win.forward(x0)
+        model = w4.WindowModel(win, 2, to_device=np.asarray, to_host=np.asarray, checkpoint=policy)
+        assert win.every == every and model.checkpoint == policy
+        assert win.forwards == (2 if every != 1 else 1)
+        assert win._checkpoints[0]["u"][0, 0, 0] == 6.0   # re-kept from x0, not from _start
+        if kept is not None:
+            assert sorted(win._checkpoints) == kept
+        rep = model.checkpoint_report()
+        assert rep["every"] == every and rep["stored_states"] == len(win._checkpoints)
+        assert rep["stored_bytes"] == rep["stored_states"] * rep["state_bytes"] > 0
+        assert rep["peak_states"] == rep["stored_states"] + every - 1
+        assert rep["ad_rerun_steps"] == 4 - rep["stored_states"]
+        out = (model.tl(g0, 3), model.ad(fs))
+        if ref is None:
+            ref = out
+        for a, b in zip(out[0] + [out[1]], ref[0] + [ref[1]]):
+            for k in a:
+                np.testing.assert_array_equal(a[k], b[k])
+    for bad, msg in ((3, "divide steps_per_slot=2"), (0, ">= 1"), ("sqrt", "one of"), (True, "one of"),
+                     (1.0, "one of")):
+        with pytest.raises(ValueError, match=msg):
+            w4.WindowModel(FakeWindow(nx, ny, nz, 4), 2, to_device=np.asarray, to_host=np.asarray,
+                           checkpoint=bad)
+
+
+def test_relinearise_from_start():
+    """``Trajectory.start``: the window reruns its own base from the loop's
+    start under the policy (not every state held, not the first loop's
+    start); ``states`` holds every state; one of the two, not both; the
+    base check then reruns from that start too."""
+    from woof.da.var.outer4d import Trajectory
+
+    nx, ny, nz = 5, 4, 3
+    win = FakeWindow(nx, ny, nz, 4)
+    model = w4.WindowModel(win, 2, to_device=np.asarray, to_host=np.asarray, checkpoint="slot")
+    start = {n: v + 20.0 for n, v in win._start.items()}
+    end = model.relinearise(Trajectory(slots=[], start=start))
+    assert not win._external and sorted(win._checkpoints) == [0, 2]
+    assert win._checkpoints[2]["u"][0, 0, 0] == 23.0 and end["u"][0, 0, 0] == 25.0
+    rep = model.checkpoint_report()
+    assert rep["ad_rerun_steps"] == 2 and not rep["external"]
+    slots = [(None, {g: np.full(a.shape, 21.0 + 2 * n) for g, a in _grids(nx, ny, nz, 1, 0)[0][1].items()})
+             for n in range(3)]
+    assert max(model.check_base(slots).values()) == 0.0
+    assert win._checkpoints[0]["u"][0, 0, 0] == 21.0
+    states = [{n: v + 1.0 * k for n, v in win._start.items()} for k in range(5)]
+    model.relinearise(Trajectory(slots=[], states=states))
+    rep = model.checkpoint_report()
+    assert rep["external"] and rep["every"] == 1 and rep["stored_states"] == 4 and rep["ad_rerun_steps"] == 0
+    with pytest.raises(ValueError, match="pass one"):
+        model.relinearise(Trajectory(slots=[], states=states, start=start))
+    with pytest.raises(ValueError, match="Trajectory.start"):
+        model.relinearise(Trajectory(slots=[]))
+    hwin = FakeWindow(nx, ny, nz, 4, halo=True)
+    hmodel = w4.WindowModel(hwin, 2, to_device=np.asarray, to_host=np.asarray)
+    bad = {n: v.copy() for n, v in hwin._start.items()}
+    bad[HALO] = bad[HALO] + 3.0
+    with pytest.raises(ValueError, match="carries a mu halo that is not mup"):
+        hmodel.relinearise(Trajectory(slots=[], start=bad))
+
+
 @pytest.mark.parametrize("press,ph", [("wrfda", "zero"), ("dnw", "hydrostatic")])
 def test_fourd_term_over_the_window_is_its_transpose(press, ph):
     from test_var_fourd import _case, _x
@@ -567,3 +645,74 @@ print('RESULT ' + json.dumps(dict(lhs=lhs, rhs=rhs, same=same, moved=moved)))
     assert out["same"] and out["moved"]
     assert abs(out["lhs"]) > 0.0
     assert out["lhs"] == pytest.approx(out["rhs"], rel=1e-12)
+
+
+@pytest.mark.skipif(not any(shutil.which(c) for c in ("clang++", "g++", "c++")), reason="no C++ compiler")
+def test_real_window_checkpoint_policy_is_word_exact(tmp_path):
+    """The real window (host backend, binary64, moist ridge case): the TL
+    slots and the AD under ``slot`` equal those under ``all`` to the word,
+    and a relinearisation from ``Trajectory.start`` equals one from the
+    same run's ``Trajectory.states``."""
+    env = dict(os.environ, WOOF_BACKEND="host", PYTHONPATH=str(ROOT),
+               WOOF_HOST_CACHE=str(tmp_path / "hostcache"), WOOF_HOST_THREADS="4", **STRICT)
+    script = """
+import dataclasses, json, numpy as np, woof
+import cupy as cp
+from tilestream import harness as H
+if cp.__name__ != 'cupy' or getattr(cp, '__woof_facade__', False):
+    import woof.core.resident_admission as RA
+    RA.device_free_bytes = lambda: None
+from woof.core import dycore as D
+from woof.grad.wrfplus import window as W
+from woof.da.var import window4d as w4
+from woof.da.var.outer4d import Trajectory
+nx, ny, nz = 16, 12, 10
+cfg = H.make_config(nx, ny, nz, h_sca_adv_order=5, terrain_opt=1, moist=True, moist_adv_opt=0)
+jj, ii = np.meshgrid(np.arange(ny), np.arange(nx), indexing='ij')
+ridge = 400.0 * np.exp(-(((ii - nx / 2) / (nx / 5)) ** 2 + ((jj - ny / 2) / (ny / 4)) ** 2))
+geo = dataclasses.replace(H.neutral_geography(cfg), terrain=ridge)
+state = H.make_state(cfg, 1, geography=geo)
+D.step(state, cfg)
+rng = np.random.default_rng(5)
+names = {"u_2": "u", "v_2": "v", "w_2": "w", "t_2": "thp", "mu_2": "mup", "ph_2": "php", "p": "p_pert",
+         "qv": "qv"}
+win = W.Window(state, cfg, 4)
+def rnd():
+    out = {}
+    for k, n in names.items():
+        base = cp.asnumpy(win._start[n])
+        out[k] = rng.standard_normal(base.shape[::-1]) * float(np.abs(base).max() * 1e-3 + 1e-12)
+    return out
+g0, fs = rnd(), [rnd() for _ in range(3)]
+def run(model):
+    return model.tl(g0, 3), model.ad(fs)
+def same(a, b):
+    ta, aa = a
+    tb, ab = b
+    return all(np.array_equal(x[k], y[k]) for x, y in zip(ta + [aa], tb + [ab]) for k in x)
+out = {}
+ref = run(w4.WindowModel(win, 2, checkpoint="all"))
+slot = w4.WindowModel(win, 2, checkpoint="slot")
+out["slot_kept"] = sorted(win._checkpoints)
+out["slot_same"] = same(run(slot), ref)
+# an outer loop's rerun from a moved start: start= against states=
+x0 = {n: win._start[n].copy() for n in win.inputs}
+x0["thp"] += 0.3
+x0["muts"][...] = win._start["mub2d"] + x0["mup"]
+win.every = 1
+end = win.forward(x0)
+states = [win._checkpoints[k] for k in range(4)] + [end]
+ext = w4.WindowModel(win, 2, checkpoint="slot")
+ext.relinearise(Trajectory(slots=[], states=states))
+a = run(ext)
+ext.relinearise(Trajectory(slots=[], start=x0))
+out["start_kept"] = sorted(win._checkpoints)
+out["start_same"] = same(run(ext), a)
+out["moved"] = not same(a, ref)
+print('RESULT ' + json.dumps(out))
+"""
+    done = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, env=env, timeout=1800)
+    assert done.returncode == 0, done.stderr[-4000:]
+    out = json.loads([ln for ln in done.stdout.splitlines() if ln.startswith("RESULT ")][-1][7:])
+    assert out["slot_kept"] == [0, 2] and out["start_kept"] == [0, 2]
+    assert out["slot_same"] and out["start_same"] and out["moved"]

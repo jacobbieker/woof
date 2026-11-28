@@ -68,6 +68,26 @@ window's tables (the nonlinear rerun's and the TL's);
 :func:`~woof.da.var.analysis.analyse` carries it on the analysis state
 (``FirstGuess.lbc_increment``) for ``var4d.nl_model``.
 
+**Checkpoint policy** (``checkpoint=``; docs/dev/WRFDA-4DVAR-PLAN.md
+section 6).  The base the TL and AD sweep is held as step-start states,
+WRFPLUS's way (``trajectory_io``: every step's state in memory, each step's
+tape rebuilt inside the adjoint step): the AD reruns each step once, taped
+(``model.step_base``), then sweeps it.  ``"all"`` keeps every step's state
+(``Window(checkpoint_every=1)``: ``nsteps`` states, no other recompute).
+``"slot"`` keeps one per slot (``checkpoint_every = steps_per_slot``): the
+AD first reruns each slot's segment untaped to recover its step-start
+states, so it holds ``nslots + steps_per_slot`` states and pays one more
+base step per step.  An int ``c`` (dividing ``steps_per_slot``) is a
+checkpoint every ``c`` steps.  ``None`` keeps the window's own
+``checkpoint_every``.  The TL needs only state 0 (it advances the base with
+the perturbation).  A window on an external trajectory
+(:meth:`relinearise` with ``Trajectory.states``) holds every state it was
+given whatever the policy: it cannot rerun a base it did not run; an outer
+loop whose rerun is the window's own model passes ``Trajectory.start``
+instead and keeps the policy.  The result is the same to the word under
+every policy (the rerun is the same base build).  :meth:`checkpoint_report`
+gives the memory and recompute.
+
 The window must be binary64: a binary32 window's adjoint is only its
 transpose to about 1e-6, and the minimiser needs 1e-12.
 """
@@ -99,6 +119,29 @@ _HALO_STARTS = ("wrfplus", "carried")
 #: ``lbc``: ``wrfda`` (the tables perturbed as WRFDA's TL start perturbs
 #: them, var4d_lbc off) or ``fixed`` (unperturbed, their adjoint dropped).
 _LBCS = ("wrfda", "fixed")
+
+#: ``checkpoint``: ``all`` (every step's state), ``slot`` (one per slot), or an
+#: int ``c`` dividing ``steps_per_slot`` (one every ``c`` steps).
+_CHECKPOINTS = ("all", "slot")
+
+
+def checkpoint_interval(checkpoint, steps_per_slot: int) -> int | None:
+    """``Window.checkpoint_every`` for a ``checkpoint`` policy (module
+    docstring); ``None`` for ``None`` (the window's own)."""
+    if checkpoint is None:
+        return None
+    if checkpoint == "all":
+        return 1
+    if checkpoint == "slot":
+        return int(steps_per_slot)
+    if isinstance(checkpoint, (bool, str)) or not isinstance(checkpoint, (int, np.integer)):
+        raise ValueError(f"checkpoint must be one of {_CHECKPOINTS}, an int or None, not {checkpoint!r}")
+    c = int(checkpoint)
+    if c < 1 or steps_per_slot % c:
+        raise ValueError(f"checkpoint={c}: a checkpoint interval must be >= 1 and divide steps_per_slot="
+                         f"{steps_per_slot} (every slot state is a checkpoint)")
+    return c
+
 
 #: Each boundary table field's state array (the window's names).
 _LBC_STATE = {"u": "u", "v": "v", "theta": "thp", "phi": "php", "mu": "mup", "qv": "qv"}
@@ -307,15 +350,20 @@ class WindowModel:
     (:func:`lbc_tl`, the module docstring) and adds their adjoint;
     ``"fixed"`` leaves them unperturbed and drops their adjoint.
 
+    ``checkpoint``: how the base is kept for the TL and AD (``"all"``,
+    ``"slot"``, an int, or ``None`` for the window's own
+    ``checkpoint_every``; the module docstring).
+
     :meth:`relinearise` moves the base to a new nonlinear run (an outer
     loop's :class:`~woof.da.var.outer4d.Trajectory`, through
-    ``Window.forward(trajectory=...)``).  Binary64 only: refused on Metal
+    ``Window.forward(trajectory=...)``, or the window's own rerun from
+    ``Trajectory.start``).  Binary64 only: refused on Metal
     when ``to_device`` is the default.
     """
 
     def __init__(self, window, steps_per_slot: int, *, moisture: str | None = None, to_device=None, to_host=None,
                  base: Sequence | None = None, base_rtol: float = 1e-5, base_end: dict | None = None,
-                 halo_start: str = "wrfplus", lbc: str | None = None):
+                 halo_start: str = "wrfplus", lbc: str | None = None, checkpoint=None):
         moist = "qv" in tuple(getattr(window, "inputs", None) or ())
         if moisture is None:
             moisture = "advect" if moist else "persist"
@@ -340,6 +388,12 @@ class WindowModel:
                             "(a binary32 window's adjoint is its transpose to only ~1e-6)")
         self._dev = to_device or (lambda a: _default_to_device(a, self.dtype))
         self._host = to_host or _default_to_host
+        every = checkpoint_interval(checkpoint, self.sps)
+        self.checkpoint = checkpoint
+        if every is not None and int(getattr(window, "every", 1)) != every:
+            window.every = every
+            if getattr(window, "_checkpoints", None) is not None and not getattr(window, "_external", False):
+                window.forward(window._checkpoints[0])   # the same base from the same start, re-kept
         if halo_start not in _HALO_STARTS:
             raise ValueError(f"halo_start must be one of {_HALO_STARTS}, not {halo_start!r}")
         self.halo = _halo_name() if _halo_name() in self._inputs() else None
@@ -369,21 +423,30 @@ class WindowModel:
         """An outer loop's new nonlinear run (:class:`~woof.da.var.outer4d.Trajectory`):
         the window linearises about its per-step ``states``
         (``Window.forward(trajectory=...)``, as WRFPLUS reads the rerun's
-        states).  Returns the run's end state, which :meth:`check_base`
-        then uses by default.  A trajectory without ``states`` is refused:
-        the window would stay on the previous loop's base."""
+        states; every state is held), or, with ``start`` instead, reruns
+        its own base from that state (``Window.forward(start)``) under the
+        checkpoint policy.  Returns the run's end state, which
+        :meth:`check_base` then uses by default.  A trajectory with neither
+        is refused: the window would stay on the previous loop's base."""
         states = getattr(trajectory, "states", None)
-        if states is None:
-            raise ValueError("the window model needs the rerun's per-step states (Trajectory.states) to "
-                             "relinearise; without them the TL and AD stay on the previous loop's trajectory")
+        start = getattr(trajectory, "start", None)
+        if states is None and start is None:
+            raise ValueError("the window model needs the rerun's per-step states (Trajectory.states) or the "
+                             "state its own rerun starts from (Trajectory.start) to relinearise; without them "
+                             "the TL and AD stay on the previous loop's trajectory")
+        if states is not None and start is not None:
+            raise ValueError("Trajectory.states and Trajectory.start are two bases: pass one")
         if self.halo is not None and self.halo_start == "wrfplus":
-            # WRFPLUS's start on an external trajectory: checked before the base moves, not changed
-            st = states[0]
+            # WRFPLUS's start: checked before the base moves, not changed
+            st = states[0] if states is not None else start
             if not bool(np.array_equal(self._host(st[self.halo]), self._host(st["mup"]))):
                 raise ValueError("halo_start='wrfplus': the rerun's state 0 carries a mu halo that is not mup "
                                  "(WRFPLUS's start resets it to the edge row); reset it, or pass "
                                  "halo_start='carried'")
-        self._end = self.window.forward(trajectory=states)
+        if start is not None:
+            self._end = self.window.forward(start)
+        else:
+            self._end = self.window.forward(trajectory=states)
         self.base_diff = None
         self._lbc_base = None
         return self._end
@@ -393,9 +456,9 @@ class WindowModel:
         ``{(n, name): max|base - grid| / max|grid|}``; refuses any over
         ``rtol``.
 
-        A window running its own base: reruns :meth:`Window.forward` (the
-        base the TL and AD then use is unchanged) and needs a checkpoint at
-        every slot state.  A window on an external trajectory
+        A window running its own base: reruns :meth:`Window.forward` from
+        its state 0 (the base the TL and AD then use is unchanged) and
+        needs a checkpoint at every slot state.  A window on an external trajectory
         (``Window.forward(trajectory=...)``, which holds every state but the
         last): reads the trajectory, never reruns ``forward`` (that would
         replace it), and compares the last slot with ``end``, the state
@@ -413,7 +476,8 @@ class WindowModel:
             if self.sps % every:
                 raise ValueError(f"the base check needs a checkpoint at every slot: checkpoint_every={every} "
                                  f"does not divide steps_per_slot={self.sps}")
-            final = self.window.forward()
+            # from state 0 as kept (a relinearised rerun's start, not the window's first)
+            final = self.window.forward(self.window._checkpoints[0])
         out, bad = {}, []
         for n, (k, (_, grid)) in enumerate(zip(states, slots)):
             st = final if k == nsteps else self.window._checkpoints[k]
@@ -432,6 +496,24 @@ class WindowModel:
             raise ValueError("the window's base is not the slots' first guesses (two trajectories): "
                              + "; ".join(bad) + f" > rtol {rtol:g}")
         return out
+
+    def checkpoint_report(self) -> dict:
+        """What the base costs to keep and rerun: ``every`` (the checkpoint
+        interval; 1 on an external trajectory), ``stored_states`` and
+        ``stored_bytes`` (the checkpoints held), ``peak_states`` (plus the
+        AD's one segment of step-start states), ``state_bytes`` (one
+        state's inputs) and ``ad_rerun_steps`` (untaped base steps each AD
+        reruns before its taped step-by-step sweep)."""
+        w = self.window
+        ext = bool(getattr(w, "_external", False))
+        every = 1 if ext else int(getattr(w, "every", 1))
+        state_bytes = int(sum(int(np.prod(w._start[n].shape)) * np.dtype(str(w._start[n].dtype)).itemsize
+                              for n in self._inputs()))
+        stored = len(w._checkpoints or {})
+        return {"policy": self.checkpoint, "every": every, "external": ext, "state_bytes": state_bytes,
+                "stored_states": stored, "stored_bytes": stored * state_bytes,
+                "peak_states": stored + min(every, w.nsteps) - 1,
+                "ad_rerun_steps": 0 if ext else w.nsteps - stored}
 
     def _halo_to_edge(self) -> None:
         """WRFPLUS's ``start_domain`` on a specified window: the primal mu
