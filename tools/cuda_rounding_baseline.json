@@ -22390,13 +22390,13 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "c4ce7794a3aa0ab95a72cad503820875c3dbd077ddb53d63ba632925932ea537",
+    "sha256": "db20ce32e1c0aad4f30fad4a5d8fa5264fb41f8f5d08160f19ef1f630cb6effb",
     "sites": {
      "100": 98
     }
    },
    "native_differences": {
-    "sha256": "a62a8cc8abdbe9f5290d4b32036862f37495b28a8246869d8ce81ddbcc99f799",
+    "sha256": "0e8f70b5411b9b7900b775ef985521e0aee41c907b75f5376c53c6e24bf6f6d2",
     "sites": {
      "100": 12
     }
@@ -22418,7 +22418,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "c66b49f1baa3411bcb736473b11cdb5e447dcff43f8a2b639e7f80a1ec515e07"
+   "source_sha256": "e70f21223bf6ae9b7bfc6128899554f0757966feda54ceed819471ac41c3da90"
   },
   "kernels:physics_exner": {
    "assessment": "static_diagnostic_only",
