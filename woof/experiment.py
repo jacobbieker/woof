@@ -357,6 +357,9 @@ _DOMAIN_RUN_OVERRIDES = (
     # The MYNN surface-layer Q2 land cap (FQ10), on the same terms: a
     # [shared] value reaches the sf_sfclay_physics = 5 domains only.
     "mynn_sfclay_q2_land_cap",
+    # The PD transport's west-face Courant order (FQ13), on the same terms:
+    # a [shared] value reaches the moist_adv_opt = 1 domains only.
+    "pd_adv_west_courant",
     # The umbrella over the opt-in quirk corrections (woof.quirk_corrections):
     # per domain like the corrections it turns on, each where its scheme runs.
     "woof_quirk_corrections",
@@ -4528,6 +4531,15 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
             "diff_opt",
             dom.get("diff_opt", shared.get("diff_opt", RunConfig.diff_opt))) in (1, 2)
         for dom in domain_tables)
+    # The PD transport's west-face Courant order is read only where
+    # advect_scalar_pd moves the moisture (moist_adv_opt = 1), on the same
+    # terms.
+    tree_runs_pd_moist = any(
+        physics_mode.settings.get(
+            "moist_adv_opt",
+            dom.get("moist_adv_opt",
+                    shared.get("moist_adv_opt", RunConfig.moist_adv_opt))) == 1
+        for dom in domain_tables)
     # The same rule for the Grell-family keys.  clos_choice and ishallow
     # are read only where cu_physics = 3, and the wizard writes them in
     # [shared]; on a tree whose cumulus-off child sits under a
@@ -5183,6 +5195,10 @@ def build_experiment(raw: dict, source: str) -> ExperimentConfig:
                 and kw.get("diff_opt", RunConfig.diff_opt) not in (1, 2)
                 and "diff_metrics_seam_slope" not in dom):
             kw["diff_metrics_seam_slope"] = False
+        if (tree_runs_pd_moist
+                and kw.get("moist_adv_opt", RunConfig.moist_adv_opt) != 1
+                and "pd_adv_west_courant" not in dom):
+            kw["pd_adv_west_courant"] = False
         # an explicit woof_quirk_corrections ('all' / 'none') sets every
         # correction key the domain does not set itself (quirk_corrections).
         from woof.quirk_corrections import apply_run_corrections
@@ -6606,6 +6622,7 @@ def _public_config_value(value):
                                   ("noah_land_ice_rain_runoff", False),
                                   ("mynn_sfclay_q2_land_cap", False),
                                   ("noah_snow_series_conductivity", False),
+                                  ("pd_adv_west_courant", False),
                                   *OBSTACLE_RUN_DEFAULTS.items()):
                 value = run_document.get(name, default)
                 if isinstance(value, list):

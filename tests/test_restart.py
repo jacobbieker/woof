@@ -3234,15 +3234,29 @@ def _member_names(path) -> list[str]:
 #: key_and_nothing_else, dropping that key recovers the previous pair
 #: (_PRE_HAILCAST_VERSION_*), and every older reconstruction drops it
 #: (_digest_without_config_keys unwind_hailcast_version).
+#:
+#: RE-PINNED for FQ13's pd_adv_west_courant echo key: the specified root and
+#: the nested child both carry it at the correct-mode default True, so both
+#: digests move.  The attribution is
+#: test_the_checkpoint_pins_moved_for_the_pd_west_courant_key_and_nothing_else:
+#: dropping that key recovers the previous pair (_PRE_FQ13_*), and every
+#: older reconstruction unwinds it (_digest_without_config_keys
+#: unwind_pd_west_courant).
 _LIFECYCLE_FREE_ROOT_DIGEST = \
-    "302d86acaf0d77d3d25e8f755de77ab95098c77e32cd58176626268020d330e8"
+    "2d637847c4530551e68477c4d4d14bea92dde6e43a33c521acc81ecb600f2941"
 _LIFECYCLE_FREE_CHILD_DIGEST = \
-    "43d111c85cd641c28611e414d07dfb955a81f4e52c5ebb11d95e62ad5190d989"
+    "06f963868073e95cbd7f50c0e561d3df8affb6e53d5210b017d3ae9e3c690e75"
 #: The pair above before the hailcast_version header key.
 _PRE_HAILCAST_VERSION_ROOT_DIGEST = \
     "72c1bf64128f7686fb82e04d6430d3140a899faa3c6aba319bfe73e1f01ef5e8"
 _PRE_HAILCAST_VERSION_CHILD_DIGEST = \
     "c63b17c9cb1bb4966f81f9f9ca15ca448629c483356ad828f3f824596d8c62d3"
+#: The pair above before FQ13's pd_adv_west_courant echo key (root and nested
+#: child both carry it at the correct-mode default True).
+_PRE_FQ13_ROOT_DIGEST = \
+    "302d86acaf0d77d3d25e8f755de77ab95098c77e32cd58176626268020d330e8"
+_PRE_FQ13_CHILD_DIGEST = \
+    "43d111c85cd641c28611e414d07dfb955a81f4e52c5ebb11d95e62ad5190d989"
 _PRE_NEST_ARCHIVE_CHILD_DIGEST = \
     "cce75c2551272396fa9cdbbb69701612922d73ce5e006054cb2a510546d05354"
 
@@ -3336,7 +3350,8 @@ def _digest_without_config_keys(path, keys, *, config_overrides=None,
                                 algorithm_overrides=None,
                                 unwind_hailcast=True,
                                 unwind_nest_archive=True,
-                                unwind_hailcast_version=True) -> str:
+                                unwind_hailcast_version=True,
+                                unwind_pd_west_courant=True) -> str:
     """The canonical member digest as it would read WITHOUT ``keys``.
 
     Same construction as :func:`_canonical_member_digest`, with exactly
@@ -3367,6 +3382,11 @@ def _digest_without_config_keys(path, keys, *, config_overrides=None,
     predates fix/hailcast-resume) drops the ``hailcast_version`` header key,
     and requires it to be there.
 
+    ``unwind_pd_west_courant`` (default on: every digest this reconstructs
+    predates FQ13) drops ``pd_adv_west_courant`` from the echo, which a
+    specified or nested domain with moist_adv_opt == 1 writes at its
+    correct-mode default True.
+
     ``algorithm_overrides`` reconstructs a declared scheme identity move
     (``physics_setup.algorithms``) the same way: the named components take
     their previous identity and the fingerprint is recomputed; nothing
@@ -3392,6 +3412,8 @@ def _digest_without_config_keys(path, keys, *, config_overrides=None,
             header["config"].pop(key, None)
         if unwind_nest_archive:
             header["config"].pop("nest_accumulation_archive", None)
+        if unwind_pd_west_courant:
+            header["config"].pop("pd_adv_west_courant", None)
         for key, value in (config_overrides or {}).items():
             assert key in header["config"], key
             header["config"][key] = value
@@ -3612,6 +3634,39 @@ def test_the_checkpoint_pins_moved_for_the_nest_archive_and_nothing_else(
     assert _LIFECYCLE_FREE_CHILD_DIGEST != _PRE_NEST_ARCHIVE_CHILD_DIGEST
     assert _digest_without_config_keys(
         child_path, (), unwind_hailcast=False) == _PRE_NEST_ARCHIVE_CHILD_DIGEST
+
+
+def test_the_checkpoint_pins_moved_for_the_pd_west_courant_key_and_nothing_else(
+        monkeypatch, tmp_path):
+    """FQ13's echo key moved the root's and child's echoes, not the format.
+
+    THE CONCRETE BREAKAGE THIS PREVENTS: a checkpoint-format change riding
+    in under the FQ13 re-pin.  Dropping exactly pd_adv_west_courant from
+    the current checkpoints must land on the previous pair; anything else
+    that moved leaves the reconstruction short.
+    """
+    source, start = _sealed_tree_fixture(
+        monkeypatch, forcing_count=2, run_seconds=3600.0, payload_seed=31,
+        run_overrides=_PINNED_UNDER_MEASURED_CLOCK)
+    root_path = restart.write_tree_restart(
+        tmp_path, source, start + timedelta(seconds=3600))
+    child_path = next(p for p in tmp_path.glob("gpuwmrst_d02_*.npz"))
+    for path, old_digest, current_digest in (
+            (root_path, _PRE_FQ13_ROOT_DIGEST, _LIFECYCLE_FREE_ROOT_DIGEST),
+            (child_path, _PRE_FQ13_CHILD_DIGEST,
+             _LIFECYCLE_FREE_CHILD_DIGEST)):
+        assert restart.read_restart_header(path)["config"][
+            "pd_adv_west_courant"] is True
+        assert _canonical_member_digest(path) == current_digest
+        assert current_digest != old_digest
+        assert _digest_without_config_keys(
+            path, (), unwind_hailcast=False, unwind_nest_archive=False,
+            unwind_hailcast_version=False,
+            unwind_pd_west_courant=False) == current_digest
+        assert _digest_without_config_keys(
+            path, ("pd_adv_west_courant",), unwind_hailcast=False,
+            unwind_nest_archive=False, unwind_hailcast_version=False,
+            unwind_pd_west_courant=False) == old_digest
 
 
 def test_the_checkpoint_pins_moved_for_the_moist_cq_default_and_nothing_else(

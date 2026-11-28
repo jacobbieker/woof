@@ -327,6 +327,7 @@ _RESOLVE_BESIDE_POINTERS = os.environ.get("WOOF_METAL_RESOLVE_DEVICE_TABLES", "1
 FLAT_ADDRESS_TABLES = frozenset({
     "rk_copy_words", "rk_zero_words",        # woof/core/kernels/rk_bookkeeping.cu
     "glue_add_arrays",                       # woof/core/kernels/bandwidth_glue.cu
+    "glue_accumulate_scaled_arrays", "glue_zero_frames",
     "diff6_multi",                           # woof/core/kernels/diff6.cu
     "state_relaxation_multi",                # woof/core/kernels/lbc_state.cu
     "finalize_state_multi",                  # woof/core/kernels/lbc_state.cu

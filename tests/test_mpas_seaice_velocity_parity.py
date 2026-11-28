@@ -27,7 +27,6 @@ THE BREAKAGES THESE PREVENT
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -36,6 +35,7 @@ import numpy as np
 import pytest
 
 from conftest import requires_gpu
+import _oracle_toolchains
 from woof.verify import mpas_seaice_velocity_oracle as vo
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -147,11 +147,7 @@ def test_a_mutated_evaluation_order_is_caught(monkeypatch, precision, original, 
 
 
 def _oracle_toolchain() -> tuple[str, Path] | None:
-    source = os.environ.get("WOOF_MPAS_V842_SOURCE")
-    gfortran = os.environ.get("GFORTRAN") or shutil.which("gfortran")
-    if not source or not gfortran or not Path(source, "src", "core_seaice").is_dir():
-        return None
-    return gfortran, Path(source)
+    return _oracle_toolchains.mpas_v842("core_seaice")
 
 
 @pytest.mark.skipif(_oracle_toolchain() is None,

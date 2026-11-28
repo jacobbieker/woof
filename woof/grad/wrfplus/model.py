@@ -504,6 +504,7 @@ def step_geometry(state, cfg, *, reuse_first: bool | None = None,
     from woof.core import dycore as D
     from woof.core.acoustic import damp_magnitude
     from woof.core.advection import scalar_horizontal_order, vertical_orders
+    from woof.core.moist import pd_west_symmetric
     _refuse(cfg, state)
     f32 = np.float32
     msf = int(bool(state.has_msf))
@@ -600,7 +601,9 @@ def step_geometry(state, cfg, *, reuse_first: bool | None = None,
                 if pd:
                     return PDGeometry(nz, ny, nx, dx, dy, sdt, vorder=vsca, horder=hsca,
                                       spec=int(spec), spec_zone=szone, has_msf=msf,
-                                      held=held)
+                                      held=held,
+                                      # the primal's open_x bit 2 (FQ13)
+                                      west_symmetric=int(pd_west_symmetric(cfg)))
                 return ScalarGeometry(nz, ny, nx, rdx, rdy, sdt, vorder=vsca, horder=hsca,
                                       open_x=bx, open_y=by, spec=int(spec),
                                       spec_zone=szone, has_msf=msf, held=held)
