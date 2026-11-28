@@ -77,15 +77,22 @@ def accumulate_scaled_rows(pairs, scale) -> bool:
     if (not _supported(arrays)
             or any(src.shape != dst.shape for dst, src in pairs)):
         return False
-    for row, (dst, src) in enumerate(pairs):
-        if _overlap(src, dst) and src.data.ptr != dst.data.ptr:
+    # Each address once: a facade array's address is not a free attribute.
+    spans = [((int(dst.data.ptr), dst.nbytes), (int(src.data.ptr), src.nbytes))
+             for dst, src in pairs]
+
+    def apart(a, b):
+        return a[0] + a[1] <= b[0] or b[0] + b[1] <= a[0]
+
+    for row, (dst, src) in enumerate(spans):
+        if not apart(src, dst) and src[0] != dst[0]:
             return False
-        if any(_overlap(dst, other)
-               for j, pair in enumerate(pairs) if j != row for other in pair):
+        if not all(apart(dst, other) for j, pair in enumerate(spans) if j != row
+                   for other in pair):
             return False
     rows = np.zeros((64, 3), dtype=np.uint64)
-    rows[:len(pairs)] = [(src.data.ptr, dst.data.ptr, dst.size)
-                        for dst, src in pairs]
+    rows[:len(pairs)] = [(src[0], dst[0], d.size)
+                        for (dst, src), (d, _s) in zip(spans, pairs)]
     nmax = max(dst.size for dst, _src in pairs)
     if nmax:
         table = rows.reshape(-1).view(np.dtype(('V', rows.nbytes)))
