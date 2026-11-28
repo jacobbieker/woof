@@ -31,7 +31,7 @@ BULK_FIELDS = ("latentHeatFlux", "sensibleHeatFlux", "longWaveHeatFluxUp", "long
                "seaIceSalinityFlux", "iceRunoffFlux", "riverRunoffFlux")
 BUDGET_FIELDS = ("activeTracerSurfaceFluxTendency", "temperatureShortWaveTendency", "activeTracerNonLocalTendency",
                  "activeTracerHorizontalAdvectionTendency", "activeTracerVerticalAdvectionTendency")
-FIELDS = (
+BASE_FIELDS = (
     ("mesh", "nVertLevels", DIM, ()), ("mesh", "nEdges", DIM, ()), ("mesh", "nCells", DIM, ()),
     ("mesh", "nCellsSolve", DIM, ()), ("mesh", "maxEdges", DIM, ()),
     ("mesh", "nCellsArray", DIMS, (4,)), ("mesh", "nEdgesArray", DIMS, (4,)),
@@ -76,7 +76,10 @@ FIELDS = (
     *(("scratch", name, SCRATCH, ("L", "C1")) for name in _ADV_SCRATCH),
     ("scratch", "highOrderFlux", SCRATCH, ("LP1", "E1")),
     ("scratch", "delsq_tracer", SCRATCH, ("T", "L", "C1")),
-    # ocn_compute_KPP_input_fields' (under config_use_cvmix_kpp)
+)
+#: ocn_compute_KPP_input_fields' (under config_use_cvmix_kpp), kept apart so the
+#: split-step oracles, which take BASE_FIELDS, keep their streams
+KPP_FIELDS = (
     ("diagnostics", "tracersSurfaceValue", REAL, ("T", "C1")),
     ("diagnostics", "surfaceBuoyancyForcing", REAL, ("C1",)),
     ("diagnostics", "surfaceFrictionVelocity", REAL, ("C1",)),
@@ -90,6 +93,7 @@ FIELDS = (
     *(("scratch", name, SCRATCH, ("L", "C1"))
       for name in ("densitySurfaceDisplaced", "thermalExpansionCoeff", "salineContractionCoeff")),
 )
+FIELDS = BASE_FIELDS + KPP_FIELDS
 
 BASE_CONFIG = {
     "config_density0": 1026.0, "oracle_active_tracers_only": True,
@@ -115,7 +119,10 @@ BASE_CONFIG = {
     "config_open_ocean_freezing_temperature_coeff_0": -1.8, "config_open_ocean_freezing_temperature_coeff_S": 0.0,
     "config_open_ocean_freezing_temperature_coeff_p": 0.0, "config_open_ocean_freezing_temperature_coeff_pS": 0.0,
     "config_open_ocean_freezing_temperature_reference_pressure": 0.0,
-    # the equation of state (KPP's input fields) and KPP's non-local flux
+}
+#: the equation of state (KPP's input fields) and KPP's non-local flux (Registry
+#: defaults), kept apart as KPP_FIELDS are
+KPP_CONFIG = {
     "config_eos_type": "linear", "config_eos_linear_densityref": 1000.0, "config_eos_linear_alpha": 0.2,
     "config_eos_linear_beta": 0.8, "config_eos_linear_Tref": 5.0, "config_eos_linear_Sref": 35.0,
     "config_disable_tr_nonlocalflux": False, "config_flux_attenuation_coefficient": 0.001,
@@ -165,7 +172,7 @@ def make_case(name: str, seed: int, n_cells: int, n_levels: int, overrides: dict
     real = PRECISIONS[precision]
     nc, nl, nt, me, na = n_cells, n_levels, 2, 7, 14
     ne = 3 * nc
-    config = dict(BASE_CONFIG, **{k: v for k, v in overrides.items() if not k.startswith("_")})
+    config = {**BASE_CONFIG, **KPP_CONFIG, **{k: v for k, v in overrides.items() if not k.startswith("_")}}
 
     def uniform(lo, hi, shp):
         return lo + (hi - lo) * rs.random_sample(shp)

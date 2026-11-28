@@ -120,7 +120,7 @@ def test_fixture_covers_kpp(precision):
 
 def test_options_not_ported_are_refused_by_name():
     from woof.hex.mpas_ocean import tend_tracer_v842 as tt
-    base = dict(oo.BASE_CONFIG)
+    base = dict(oo.BASE_CONFIG, **oo.KPP_CONFIG)
     tt.check_config(base)
     tt.check_config(dict(base, config_use_frazil_ice_formation=True))  # ported (frazil_v842)
     tt.check_config(dict(base, config_use_standardGM=True))  # Redi, ported (tracer_hmix_v842)

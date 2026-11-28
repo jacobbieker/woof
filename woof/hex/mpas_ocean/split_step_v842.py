@@ -45,9 +45,18 @@ verbatim with gfortran ``-O0 -ffp-contract=off`` at RKIND 4 and 8
 
 Refused by name, beyond what the pieces refuse: the high-frequency thickness
 filter, a time integrator other than 'split_explicit' or
-'unsplit_explicit', CVMix (``config_use_cvmix``: ported for
-``ocn_vmix_implicit`` alone, ``cvmix_v842``), and the sphere's reconstruction at RKIND 8
+'unsplit_explicit', and the sphere's reconstruction at RKIND 8
 without the glibc 2.39 opt-in (``WOOF_GLIBC239_LIBM64=1``).
+
+CVMix (``config_use_cvmix``, :mod:`~woof.hex.mpas_ocean.cvmix_v842`) runs in
+the implicit vertical mixing at RKIND 8 (refused by name at RKIND 4, as
+CVMix is real(8) throughout); with ``config_use_cvmix_kpp`` the tracer
+tendency computes KPP's input fields at time level 2 (the surface fluxes on
+time level 1's tracers, as v8.4.2 reads them) and its non-local flux, or
+leaves the flux to the implicit solve
+(``config_cvmix_kpp_nonlocal_with_implicit_mix``). The CVMix step is held to
+the step compiled with CVMix v0.84-beta (``run_split_step_cvmix_r8``,
+``tests/test_mpas_ocean_split_step_cvmix_parity.py``).
 """
 from __future__ import annotations
 
@@ -122,14 +131,7 @@ def check_config(configs: dict, precision: str, mesh: dict) -> None:
     if configs.get("config_use_freq_filtered_thickness", False):
         _refuse("config_use_freq_filtered_thickness", True, "the high-frequency thickness filter is not ported",
                 "config_use_freq_filtered_thickness = .false.")
-    if configs.get("config_cvmix_kpp_nonlocal_with_implicit_mix", False):
-        _refuse("config_cvmix_kpp_nonlocal_with_implicit_mix", True,
-                "KPP's non-local flux in the implicit solve is ported for ocn_vmix_implicit alone (vmix_v842)",
-                "config_cvmix_kpp_nonlocal_with_implicit_mix = .false.")
-    if configs.get("config_use_cvmix", False):
-        _refuse("config_use_cvmix", True,
-                "CVMix is ported for ocn_vmix_implicit alone (vmix_v842); in the split-explicit step it is not "
-                "yet held to the step compiled with CVMix", "config_use_cvmix = .false.")
+    vmix_v842.check_config(configs, precision)  # CVMix: RKIND 8 only, its unported options by name
     if configs.get("mesh:on_a_sphere", False) and precision == "r8" and not rkind.trig64():
         _refuse("on_a_sphere", True, rkind.trig_refusal("mpas_reconstruct calls glibc's double cos and sin"),
                 "on_a_sphere = .false. at RKIND 8, or WOOF_GLIBC239_LIBM64=1")
@@ -242,7 +244,8 @@ def split_step(*, dt: float, n_btr_subcycles: int, pools: dict, configs: dict, t
             forcing_v842.tend_thick(mesh=mesh_cut, diagnostics=_cut(d, sizes), forcing=_cut(f, sizes),
                                     tend=td["layerThickness"][:nc], configs=tend_configs)
         tend_tracer_v842.tend_tracer(dt=dt, mesh=m, state=state_at(2), tracers=tracers_at(2), tracers_tend=tt,
-                                     tracers_surface_flux=tsf, diagnostics=d, forcing=f, configs=configs)
+                                     tracers_surface_flux=tsf, diagnostics=d, forcing=f, configs=configs,
+                                     tracers_level1=tracers_at(1))
         del active_only  # one tracer group: the active tracers either way
         h_cur, h_new = st["layerThickness"], st["layerThickness@2"]
         tr_cur, tr_new = tr["activeTracers"], tr["activeTracers@2"]
@@ -280,7 +283,7 @@ def split_step(*, dt: float, n_btr_subcycles: int, pools: dict, configs: dict, t
         # the bolus velocity stage 2 of the next step adds (and k33, which vmix adds)
         gm_v842.compute_bolus_velocity(mesh=m, diagnostics=d, configs=configs)
     vmix_v842.vmix_implicit(dt=dt, mesh=m, state=state_at(2), tracers=tracers_at(2), diagnostics=d,
-                            configs=configs)
+                            configs=configs, forcing=f, tracers_surface_flux=tsf)
     if configs.get("config_prescribe_velocity", False):
         st["normalVelocity@2"][:ne] = st["normalVelocity"][:ne]
     if configs.get("config_prescribe_thickness", False):

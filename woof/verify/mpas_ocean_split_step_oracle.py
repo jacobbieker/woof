@@ -72,7 +72,7 @@ _EXTRA = (
 
 def _field_table():
     rows, seen = [], set()
-    for table in (_diag.FIELDS, _tt.FIELDS, _vm.FIELDS, _vt.FIELDS, _btr.FIELDS, _EXTRA):
+    for table in (_diag.FIELDS, _tt.BASE_FIELDS, _vm.FIELDS, _vt.FIELDS, _btr.FIELDS, _EXTRA):
         for pool, name, kind, fshape in table:
             base = name.split("@")[0]
             if (pool, base) in seen:

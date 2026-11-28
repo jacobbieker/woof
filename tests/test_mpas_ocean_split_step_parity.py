@@ -82,8 +82,10 @@ def test_fixture_covers_the_branches(precision):
 @pytest.mark.parametrize("overrides, knob", [
     ({"config_time_integrator": "RK4"}, "config_time_integrator"),
     ({"config_use_freq_filtered_thickness": True}, "config_use_freq_filtered_thickness"),
+    # CVMix is real(8) throughout: refused at RKIND 4 (it runs at 8, test_mpas_ocean_split_step_cvmix_parity.py)
     ({"config_use_cvmix": True}, "config_use_cvmix"),
-    ({"config_cvmix_kpp_nonlocal_with_implicit_mix": True}, "config_cvmix_kpp_nonlocal_with_implicit_mix"),
+    ({"config_use_cvmix": True, "config_use_cvmix_kpp": True, "config_cvmix_kpp_EkmanOBL": True},
+     "config_use_cvmix"),
 ])
 def test_what_the_step_does_not_carry_is_refused_by_name(overrides, knob):
     from woof.hex.mpas_ocean import split_step_v842 as ss
@@ -97,6 +99,16 @@ def test_what_the_step_does_not_carry_is_refused_by_name(overrides, knob):
     # nested halo extents run (tests/test_mpas_ocean_forward_parity.py holds them)
     nested = dict(mesh, nEdgesArray=np.array([mesh["nEdges"] - 3] + [mesh["nEdges"]] * 3, np.int32))
     ss.check_config(case["config"], "r4", nested)
+
+
+def test_cvmix_runs_in_the_step_at_rkind_8_with_its_own_refusals():
+    from woof.hex.mpas_ocean import split_step_v842 as ss
+    case = oo.cases("r8")[0]
+    mesh, config = case["pools"]["mesh"], dict(case["config"], config_use_cvmix=True, config_use_cvmix_kpp=True)
+    ss.check_config(config, "r8", mesh)
+    ss.check_config(dict(config, config_cvmix_kpp_nonlocal_with_implicit_mix=True), "r8", mesh)
+    with pytest.raises(ConfigurationRefusal, match="config_cvmix_kpp_EkmanOBL"):
+        ss.check_config(dict(config, config_cvmix_kpp_EkmanOBL=True), "r8", mesh)
 
 
 def test_the_sphere_at_rkind_8_needs_the_glibc_opt_in(monkeypatch):
