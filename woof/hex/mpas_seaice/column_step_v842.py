@@ -63,8 +63,9 @@ fields that exist, and the rest of the step is v8.4.2's word for word.
 v8.4.2's inert vertical salinity (``config_use_vertical_zsalinity``: never
 solved, never copied to the tracer arrays) is carried too, and so is the
 solved one (the ``zsal_solve`` correction). The vertical tracers with the
-nonreactive tracer alone are carried through every stage, its snow and ice
-layers separated for the advection and combined again before the ridging.
+nonreactive tracer, the z-aerosols or both are carried through every stage,
+each tracer's snow and ice layers separated for the advection and combined
+again before the ridging.
 
 Refused by name, besides each stage's own refusals: the ocean mixed
 layer (``coupling_prep_v842``) and, under the velocity solver, the weak-form
@@ -146,17 +147,29 @@ def check_config(configs: dict) -> None:
 #: tracers again after each dynamics subcycle
 SUBCYCLE_SNOW_ICE = "subcycle_snow_ice_tracers"
 #: the vertical tracers column_separate_snow_ice_tracers and column_combine_snow_ice_tracers
-#: move (mpas_seaice_column.F:12500-13266): the nonreactive tracer's, the one the port carries
-#: (column_v842.VT_PORTED); every other vertical tracer is refused by its stages
-_SNOW_ICE_TRACERS = (("verticalNonreactiveConc", "verticalNonreactiveSnow", "verticalNonreactiveIce"),)
+#: move (mpas_seaice_column.F:12500-13266), each under its flag: the z-aerosols (nzAerosols
+#: tracers, each nBioLayersP3 layers in the Conc field, 2 in the Snow and nBioLayersP1 in the
+#: Ice) and the nonreactive tracer, the ones the port carries (column_v842.VT_PORTED); every
+#: other vertical tracer is refused by its stages
+_SNOW_ICE_TRACERS = (
+    (cv.ZAERO_FLAG, "nzAerosols", "verticalAerosolsConc", "verticalAerosolsSnow", "verticalAerosolsIce"),
+    ("config_use_nonreactive", None, "verticalNonreactiveConc", "verticalNonreactiveSnow", "verticalNonreactiveIce"),
+)
 
 
-def _snow_ice_fields(pools: dict, state: "cv.ColumnState"):
+def _snow_ice_fields(pools: dict, configs: dict, state: "cv.ColumnState"):
+    """Per tracer on: its Conc, Snow and Ice fields' (n, nCategories, layers) slices."""
     d, t = state.dims, pools["tracers"]
     n1, ncat, p1 = d["nCells"] + 1, d["nCategories"], d["nBioLayers"] + 1
-    for conc, snow, ice in _SNOW_ICE_TRACERS:
-        yield (cv._need(t, conc, (n1, ncat, p1 + 2)), cv._need(t, snow, (n1, ncat, 2)),
-               cv._need(t, ice, (n1, ncat, p1)))
+    for flag, count, conc, snow, ice in _SNOW_ICE_TRACERS:
+        if not configs.get(flag, False):
+            continue
+        n = d[count] if count else 1
+        c, sn, ic = (cv._need(t, conc, (n1, ncat, n * (p1 + 2))), cv._need(t, snow, (n1, ncat, n * 2)),
+                     cv._need(t, ice, (n1, ncat, n * p1)))
+        for j in range(n):
+            yield (c[:, :, j * (p1 + 2):(j + 1) * (p1 + 2)], sn[:, :, j * 2:(j + 1) * 2],
+                   ic[:, :, j * p1:(j + 1) * p1])
 
 
 def separate_snow_ice_tracers(pools: dict, configs: dict, state: "cv.ColumnState") -> None:
@@ -166,7 +179,7 @@ def separate_snow_ice_tracers(pools: dict, configs: dict, state: "cv.ColumnState
     field, for the advection. Copies, word for word."""
     n = state.dims["nCellsSolve"]
     p1 = state.dims["nBioLayers"] + 1
-    for conc, snow, ice in _snow_ice_fields(pools, state):
+    for conc, snow, ice in _snow_ice_fields(pools, configs, state):
         snow[:n] = conc[:n, :, p1:p1 + 2]
         ice[:n] = conc[:n, :, :p1]
 
@@ -176,7 +189,7 @@ def combine_snow_ice_tracers(pools: dict, configs: dict, state: "cv.ColumnState"
     :func:`separate_snow_ice_tracers`, before the ridging."""
     n = state.dims["nCellsSolve"]
     p1 = state.dims["nBioLayers"] + 1
-    for conc, snow, ice in _snow_ice_fields(pools, state):
+    for conc, snow, ice in _snow_ice_fields(pools, configs, state):
         conc[:n, :, p1:p1 + 2] = snow[:n]
         conc[:n, :, :p1] = ice[:n]
 

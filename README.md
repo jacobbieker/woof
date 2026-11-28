@@ -552,11 +552,11 @@ Notes on the 1.1.7 sync:
     is the opposite of x86's, the one word not compared bitwise there). The
     z-aerosols
     (`config_use_zaerosols`: two black carbons and a dust, alone or with the
-    nonreactive tracer) run in the init, `column_biogeochemistry`, the ITD
-    thermodynamics and the ridging, word for word with v8.4.2; the opt-in correction `zaero_snow_scavenging`
-    gives each its own snow scavenging, where v8.4.2 indexes the table by
-    list position and gives all three 0.03. The other stages still refuse
-    them by name. The other biogeochemistry
+    nonreactive tracer) run through the same stages and steps, with the
+    dust's ocean flux in `oceanDustIronFlux`, word for word with v8.4.2;
+    the opt-in correction `zaero_snow_scavenging` gives each its own snow
+    scavenging, where v8.4.2 indexes the table by list position and gives
+    all three 0.03. The other biogeochemistry
     flags are
     refused by name until their phases land;
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,

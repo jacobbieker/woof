@@ -168,7 +168,7 @@ class CriticalAbort(MpasPortError):
 
 def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
     """Refuse, by name, what the brine height's port does not carry."""
-    cv.refuse_unported(configs, dims, biogeochemistry=True, z_tracers=cv.VT_INIT_PORTED)
+    cv.refuse_unported(configs, dims, biogeochemistry=True, z_tracers=True)
     if configs["config_use_column_biogeochemistry"] and not configs["config_use_brine"]:
         cv._refuse("config_use_brine", False,
                    "colpkg_biogeochemistry writes brineTopChange and brineBottomChange, which only the brine "

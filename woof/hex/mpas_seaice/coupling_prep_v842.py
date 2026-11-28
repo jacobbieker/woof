@@ -20,8 +20,11 @@ package is on. It works per cell over ``nCellsSolve``:
 - it forms the shortwave scaling factor;
 - under ``config_use_column_biogeochemistry`` it maps the column package's
   ocean biogeochemical fluxes onto the ``ocean*Flux`` fields: with the brine
-  height alone there are none (``nBioTracers`` is 0), and the nonreactive
-  vertical tracer's has no field (the mapping skips it), so each is zero.
+  height alone there are none (``nBioTracers`` is 0), the nonreactive
+  vertical tracer's and the z-aerosols' black carbons have no field (the
+  mapping skips them), and the first dust's is ``oceanDustIronFlux``, summed
+  over the four dust entries onto a zero (so a -0 flux becomes +0); every
+  other flux is zero.
 
 It then runs ``seaice_column_scale_fluxes``. Where there is ice, that divides
 the air stress, the atmospheric and ocean fluxes, the reference
@@ -41,7 +44,7 @@ Refused by name:
 - what :mod:`~woof.hex.mpas_seaice.ocean_mixed_layer_v842` refuses, under
   ``config_use_ocean_mixed_layer``;
 - ``config_use_column_biogeochemistry`` with biogeochemical tracers other
-  than the nonreactive vertical tracer (whose ocean flux has no field).
+  than the nonreactive vertical tracer and the z-aerosols.
 """
 from __future__ import annotations
 
@@ -144,11 +147,12 @@ def check_config(configs: dict) -> None:
         # the vertical salinity is no biogeochemical tracer: colpkg_init_zbgc leaves it out of
         # nbtrcr (nBioTracers), so its fluxes are not among oceanBioFluxes. The nonreactive
         # tracer is (bio_index_o 17), and coupling_prep's mapping skips that entry (PON has no
-        # ocean*Flux field, mpas_seaice_column.F:3998-3999): every ocean*Flux stays zero
+        # ocean*Flux field, mpas_seaice_column.F:3998-3999), as it skips the black carbons'
+        # (23-24, :4016); the first dust's (25) goes into oceanDustIronFlux (:4018-4021)
         # the flag list first, then the vertical tracers' own checks, in refuse_unported's order
         cv.refuse_uncarried_bgc(c, cv.carried_bgc_flags(c),
                                 "the column biogeochemistry's ocean fluxes are ported for the brine height, "
-                                "the vertical salinity and the nonreactive vertical tracer only")
+                                "the vertical salinity, the nonreactive vertical tracer and the z-aerosols only")
         if cv.vertical_tracers(c):
             cv._refuse_z_tracers(c)
 
@@ -161,17 +165,32 @@ BGC_OCEAN_FLUXES = ("oceanNitrateFlux", "oceanSilicateFlux", "oceanAmmoniumFlux"
                     "oceanDissolvedIronFlux")
 
 
-def _bgc_ocean_fluxes(bgc: dict, ice_area_cell, n_cells_solve: int, n_aggregate: int) -> None:
-    """The biogeochemistry's part of both routines without biogeochemical
-    tracers: coupling_prep sets each flux of the owned cells to zero (the
-    dust's to a sum of zeros), and scale_fluxes multiplies them by the
-    inverse ice area where there is ice and zeroes them where there is none,
-    so a cell of ice with an area whose inverse overflows gets 0 * inf."""
+def _dust_tracer(configs: dict) -> int | None:
+    """The first dust's place among the bio tracers (0-based), or None
+    without the z-aerosols: after the nonreactive tracer and the two black
+    carbons."""
+    # the Registry defaults of these three are .false.
+    if not (configs.get("config_use_vertical_tracers", False) and configs.get("config_use_zaerosols", False)):
+        return None
+    return (1 if configs.get("config_use_nonreactive", False) else 0) + 2
+
+
+def _bgc_ocean_fluxes(bgc: dict, ice_area_cell, n_cells_solve: int, n_aggregate: int,
+                      dust: int | None = None) -> None:
+    """The biogeochemistry's part of both routines: coupling_prep sets each
+    flux of the owned cells to zero, and the dust's to the sum over the four
+    dust entries (``dust``, the first dust's place among the bio tracers in
+    ``oceanBioFluxes``, or None: all zeros); scale_fluxes multiplies them by
+    the inverse ice area where there is ice and zeroes them where there is
+    none, so a cell of ice with an area whose inverse overflows gets 0 * inf."""
     import cupy as cp
     area = ice_area_cell[:n_aggregate]
     for name in BGC_OCEAN_FLUXES:
         flux = bgc[name]
         flux[:n_cells_solve] = 0
+        if name == "oceanDustIronFlux" and dust is not None:
+            # ((((0 + dust1) + 0) + 0) + 0): the other three dusts are no tracers
+            flux[:n_cells_solve] = flux[:n_cells_solve] + bgc["oceanBioFluxes"][:n_cells_solve, dust]
         rows = flux[:n_aggregate]
         ice = area > 0 if rows.ndim == 1 else (area > 0)[:, None]
         inverse = 1.0 / cp.where(area > 0, area, 1.0)
@@ -225,4 +244,4 @@ def coupling_prep(*, pools: dict, n_cells_solve: int, n_cells_solve_aggregate: i
         i32(n_aggregate), real(STEFAN_BOLTZMANN), real(FRESH_WATER_FREEZING_POINT)))
     if _config(configs, "config_use_column_biogeochemistry"):
         _bgc_ocean_fluxes(pools["biogeochemistry"], pools["tracers_aggregate"]["iceAreaCell"], n_cells_solve,
-                          n_aggregate)
+                          n_aggregate, _dust_tracer(configs))
