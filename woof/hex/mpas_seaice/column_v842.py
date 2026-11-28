@@ -499,6 +499,23 @@ ZAERO_FLAG = "config_use_zaerosols"
 VT_INIT_PORTED = VT_PORTED + (ZAERO_FLAG,)
 
 
+def carried_bgc_flags(configs: dict, z_tracers: tuple[str, ...] = VT_PORTED) -> tuple[str, ...]:
+    """The column-biogeochemistry flags a stage carries: the brine height,
+    the vertical salinity and, with ``config_use_vertical_tracers`` on, that
+    flag and the vertical tracers' ``z_tracers``. :func:`refuse_unported` and
+    :func:`woof.hex.mpas_seaice.coupling_prep_v842.check_config` both read it,
+    so a new tracer joins the two refusals at once."""
+    return BGC_PORTED + (ZSAL_FLAG,) + ((VT_FLAG,) + tuple(z_tracers) if configs[VT_FLAG] else ())
+
+
+def refuse_uncarried_bgc(configs: dict, carried: tuple[str, ...], reason: str) -> None:
+    """Refuse, by name, the first column-biogeochemistry flag on that is not
+    in ``carried`` (:func:`carried_bgc_flags`)."""
+    for flag in _BGC_FLAGS:
+        if flag not in carried and configs[flag]:
+            _refuse(flag, True, reason, f"{flag} = .false.")
+
+
 def vertical_tracers(configs: dict) -> bool:
     """Whether the column package's z_tracers are on (the column
     biogeochemistry with ``config_use_vertical_tracers``)."""
@@ -549,12 +566,10 @@ def refuse_unported(configs: dict, dims: dict[str, int], biogeochemistry: bool =
                     "(column_biogeochemistry, the vertical thermodynamics, the ITD, the ridging, the "
                     "shortwave), coupling_prep and the column and coupled steps, not for this stage",
                     f"{VT_FLAG} = .false.")
-        carried = BGC_PORTED + (ZSAL_FLAG,) + ((VT_FLAG,) + vt if c[VT_FLAG] else ())
-        for flag in _BGC_FLAGS:
-            if flag not in carried and c[flag]:
-                _refuse(flag, True, "of the column biogeochemistry only the brine height, the vertical "
-                        "salinity and the vertical tracers' nonreactive tracer (and in the init and "
-                        "column_biogeochemistry the z-aerosols) are ported", f"{flag} = .false.")
+        refuse_uncarried_bgc(c, carried_bgc_flags(c, vt),
+                             "of the column biogeochemistry only the brine height, the vertical salinity and "
+                             "the vertical tracers' nonreactive tracer (and in the init and "
+                             "column_biogeochemistry the z-aerosols) are ported")
         if c[VT_FLAG]:
             _refuse_z_tracers(c, vt)
         _refuse_bio_layers(c, dims)
