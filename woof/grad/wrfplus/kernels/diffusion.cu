@@ -955,7 +955,7 @@ extern "C" __global__ void hd_ad(const wreal* __restrict__ atend, const wreal* _
 // 5 BN2
 #define H2O_TWP 20
 #define H2O_K3P 40
-// the horizontal row's pieces (h2_rowp) at H2O_RWP + q
+// the horizontal row's pieces (h2_row_pieces) at H2O_RWP + q
 #define H2O_RWP 60
 
 #define H2S_MET 1
@@ -1509,7 +1509,7 @@ static __device__ wreal h2_hscoef(const H2Src& s, int id, int y, int q, int k, i
 
 // The HSP stage's h2_pairs (slot 7 y + q)
 template <class Visit>
-static __device__ __forceinline__ void h2_hspairs(int id, Visit&& visit)
+static __device__ __forceinline__ void h2_hspairs(int id, Visit visit)
 {
 #define H2_PAIR(sl, a, b, c, d, e, g) visit(sl, a, b, c, d, e, g);
     switch (id) {
@@ -1711,15 +1711,6 @@ static __device__ Dl h2_rowp_s(const H2Src& s, int q, int k, int j, int i)
                            h2_fy(s, kw - 1, j + 1, i) + h2_fy(s, kw - 1, j, i));
     }
     return m[0] - m[1];
-}
-
-// piece q of the horizontal row at (k, j, i)
-static __device__ Dl h2_rowp(const H2Src& s, int q, int k, int j, int i)
-{
-    if (s.row == 1) return h2_rowp_u(s, q, k, j, i);
-    if (s.row == 2) return h2_rowp_v(s, q, k, j, i);
-    if (s.row == 3) return h2_rowp_w(s, q, k, j, i);
-    return h2_rowp_s(s, q, k, j, i);
 }
 
 // the row of its pieces (msf: h2_row_msf)
@@ -2464,11 +2455,12 @@ static __device__ void h2_idims(const H2Src& s, int stage, int id, int* nl, int*
 
 // The output offsets (levels, rows, columns; lo..hi) whose stencil can read
 // an input word: per (input, output) of the stage, from the primal's reads
-// with its clamps and bounded-face copies.  Returns the number of outputs
-// the input feeds; slot[] indexes h2_outputs.
+// with its clamps and bounded-face copies.  Calls visit(slot, lo/hi of
+// levels, rows, columns) once per output the input feeds; slot indexes
+// h2_outputs.
 template <class Visit>
 static __device__ __forceinline__ void h2_pairs_v(const H2Src& s, int stage, int id,
-                                                 Visit&& visit)
+                                                 Visit visit)
 {
 #define H2_PAIR(sl, a, b, c, d, e, g) visit(sl, a, b, c, d, e, g);
     if (stage == H2S_MET) {
@@ -2595,10 +2587,10 @@ static __device__ int h2_pairs(const H2Src& s, int stage, int id, int* slot, int
 
 // The ROWP stage's h2_pairs (outputs: the six pieces, slot = piece).
 template <class Visit>
-static __device__ __forceinline__ void h2_rpairs(const H2Src& s, int id, Visit&& visit)
+static __device__ __forceinline__ void h2_rpairs(const H2Src& s, int id, Visit visit)
 {
 #define H2_PAIR(sl, a, b, c, d, e, g) visit(sl, a, b, c, d, e, g);
-    // per piece (h2_rowp): divh (3) and a vertical difference (4, 5)
+    // per piece (h2_row_pieces): divh (3) and a vertical difference (4, 5)
     // read the stresses or fluxes, the metric averages (u, v: 1, 2;
     // w, s: 0, 1) zx and zy, tmpdz (0) or rdz (2) the rz
     switch (s.row * 32 + id) {
@@ -2711,7 +2703,6 @@ static __device__ __forceinline__ wreal h2_gather(const H2Src& s, int stage, int
 // ---- the piece stages' gather (TWP, KM3P): the word's adjoint from the
 // pieces that read it, sum_piece sum_point P(point) d piece(point) / d word.
 
-// the output id of a piece stage's slot q (h2_outputs)
 // Rows vu and vv read one w stress each (h2_vrow_u: tau13, h2_vrow_v:
 // tau23).  Their AD's base forward, first pass and gather skip the other
 // (y: tau23's half), whose adjoint is zero: no word it would add changes.
@@ -2720,6 +2711,7 @@ static __device__ __forceinline__ bool h2_tw_skip(int row, int y)
     return (row == 4 && y) || (row == 5 && !y);
 }
 
+// the output id of a piece stage's slot q (h2_outputs)
 static __device__ __forceinline__ int h2_pout(int stage, int q)
 {
     if (stage == H2S_TWP) return H2O_TWP + q;
@@ -2785,7 +2777,7 @@ static __device__ __forceinline__ wreal h2_pgather(const H2Src& s, int stage, in
     return acc;
 }
 
-// d piece q (h2_rowp) at the row point (k, j, i) / d the word at (lw, jw,
+// d piece q (h2_row_pieces) at the row point (k, j, i) / d the word at (lw, jw,
 // iw) of input id: the pieces are linear in their reads (tmpdz in 1 /
 // rdzw: r is the word's value), so the derivative is the read's
 // coefficient where its clamped index is the word's (no other loads).
