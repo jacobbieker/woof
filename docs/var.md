@@ -464,6 +464,7 @@ print `Jb factor used`.
 - FGAT with outer loops, radiances or PREPBUFR observations.
 - WRFDA's `A2C` and cloud control variables; pseudo-observations other than `u`, `v`, `t`, `q`.
 - 4D-Var: the check against compiled WRFDA (L1), `var4d_lbc`, `jcdfi_use`,
-  `multi_inc`, outer loops on the CLI, and the checkpoint policy for long
-  windows.
+  `multi_inc`, outer loops on the CLI, and binomial checkpoint schedules
+  for long windows. The window's checkpoint policy is `WindowModel(checkpoint=)`
+  (docs/dev/WRFDA-4DVAR-PLAN.md section 6).
 - Nested domains.

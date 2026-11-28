@@ -62,10 +62,16 @@ class Trajectory:
     STEP_INPUTS dicts) to relinearise a
     :class:`~woof.da.var.window4d.WindowModel`; ``None`` for a TL model
     without a base state (:class:`~woof.da.var.fourd.IdentityModel`).
+
+    ``start``: instead of ``states``, the state the run started from (a
+    STEP_INPUTS dict) when the run is the window's own model: the
+    WindowModel reruns it under its checkpoint policy rather than holding
+    every step's state.
     """
 
     slots: Sequence
     states: Sequence | None = None
+    start: dict | None = None
 
 
 def relinearise(model, trajectory: Trajectory) -> None:
