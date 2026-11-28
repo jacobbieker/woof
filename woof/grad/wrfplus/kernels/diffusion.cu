@@ -1508,12 +1508,10 @@ static __device__ wreal h2_hscoef(const H2Src& s, int id, int y, int q, int k, i
 }
 
 // The HSP stage's h2_pairs (slot 7 y + q)
-static __device__ int h2_hspairs(int id, int* slot, int* win)
+template <class Visit>
+static __device__ __forceinline__ void h2_hspairs(int id, Visit&& visit)
 {
-    int n = 0;
-#define H2_PAIR(sl, a, b, c, d, e, f) \
-    { slot[n] = sl; win[6 * n] = a; win[6 * n + 1] = b; win[6 * n + 2] = c; \
-      win[6 * n + 3] = d; win[6 * n + 4] = e; win[6 * n + 5] = f; ++n; }
+#define H2_PAIR(sl, a, b, c, d, e, g) visit(sl, a, b, c, d, e, g);
     switch (id) {
     case H2_F:
         H2_PAIR(4, 0, 0, 0, 0, 0, 1); H2_PAIR(5, -2, 1, 0, 0, 0, 1);
@@ -1529,7 +1527,6 @@ static __device__ int h2_hspairs(int id, int* slot, int* win)
         break;
     }
 #undef H2_PAIR
-    return n;
 }
 
 // ---- the rows (wrf_smag_hd_u, wrf_smag_hd_v, wrf_smag_hd_w, wrf_smag_hd_s)
@@ -1742,11 +1739,10 @@ static __device__ Dl h2_row_f(const H2Src& s, int k, int j, int i, wreal msf, co
     return (DF_G / (s.dnw[k] * p[2])) * ((p[3] - first) - second);
 }
 
-static __device__ Dl h2_row(const H2Src& s, int k, int j, int i)
+// the six pieces by constant index (straight-line code for h2_eval and
+// the AD's first pass)
+static __device__ __forceinline__ void h2_row_pieces(const H2Src& s, int k, int j, int i, Dl* p)
 {
-    if (s.row == 3 && (k <= 0 || k >= s.nz)) return dl((wreal)0, (wreal)0);
-    // the pieces by constant index (straight-line code for h2_eval)
-    Dl p[ROWP_N];
     if (s.row == 1) {
         p[0] = h2_rowp_u(s, 0, k, j, i); p[1] = h2_rowp_u(s, 1, k, j, i);
         p[2] = h2_rowp_u(s, 2, k, j, i); p[3] = h2_rowp_u(s, 3, k, j, i);
@@ -1764,6 +1760,13 @@ static __device__ Dl h2_row(const H2Src& s, int k, int j, int i)
         p[2] = h2_rowp_s(s, 2, k, j, i); p[3] = h2_rowp_s(s, 3, k, j, i);
         p[4] = h2_rowp_s(s, 4, k, j, i); p[5] = h2_rowp_s(s, 5, k, j, i);
     }
+}
+
+static __device__ Dl h2_row(const H2Src& s, int k, int j, int i)
+{
+    if (s.row == 3 && (k <= 0 || k >= s.nz)) return dl((wreal)0, (wreal)0);
+    Dl p[ROWP_N];
+    h2_row_pieces(s, k, j, i, p);
     return h2_row_f(s, k, j, i, h2_row_msf(s, j, i), p);
 }
 
@@ -2118,14 +2121,45 @@ static __device__ void h2_km3_pieces(const H2Src& s, int k, int j, int i, Dl* p)
 }
 
 // the coefficients of the pieces (not at a bounded axis's outer row)
-static __device__ void h2_km3_f(const H2Src& s, int j, int i, const Dl* p, Dl* out)
+// h2_pow with its value y = wpow(a.v, p) given (the AD's first pass takes
+// it once for every seed)
+static __device__ __forceinline__ Dl h2_powv(Dl a, wreal p, wreal y)
+{
+    return dl(y, a.v > (wreal)0 ? wdiv((p * y) * a.d, a.v) : (wreal)0);
+}
+
+// the strain-rate argument of tmp's pow
+static __device__ __forceinline__ Dl h2_km3_x(const H2Src& s, const Dl* p)
 {
     Dl d11 = p[0], d22 = p[1], rw = p[2], d12 = p[4], d13 = p[5], d23 = p[6];
     Dl d33 = ((wreal)2.0f * p[3]) * rw;
     Dl def2 = (((((wreal)0.5f * (((d11 * d11) + (d22 * d22)) + (d33 * d33))) + (d12 * d12))
                 + (d13 * d13)) + (d23 * d23));
-    Dl x = def2 - p[7] / s.pr;
-    Dl tmp = h2_pow(x.v > (wreal)0 ? x : dl((wreal)0, (wreal)0), (wreal)0.5f);
+    return def2 - p[7] / s.pr;
+}
+
+// h2_km3_f's two pows' values: tmp's (y[0]) and, iso, deltas' (y[1])
+static __device__ __forceinline__ void h2_km3_pows(const H2Src& s, int j, int i, const Dl* p,
+                                                   wreal* y)
+{
+    wreal x = h2_km3_x(s, p).v;
+    y[0] = wpow(x > (wreal)0 ? x : (wreal)0, (wreal)0.5f);
+    y[1] = (wreal)0;
+    if (s.iso != 0) {
+        wreal map = s.msft[(size_t)h2_iy(s, j) * s.nx + h2_ix(s, i)];
+        wreal area = wdiv(wdiv(s.dxs, map) * s.dys, map);
+        y[1] = wpow((area / p[2]).v, (wreal)0.33333333);
+    }
+}
+
+// the coefficients; y: h2_km3_pows' values, or null to take them here
+static __device__ __forceinline__ void h2_km3_f(const H2Src& s, int j, int i, const Dl* p,
+                                                Dl* out, const wreal* y = nullptr)
+{
+    Dl rw = p[2];
+    Dl x = h2_km3_x(s, p);
+    Dl xp = x.v > (wreal)0 ? x : dl((wreal)0, (wreal)0);
+    Dl tmp = y ? h2_powv(xp, (wreal)0.5f, y[0]) : h2_pow(xp, (wreal)0.5f);
     wreal map = s.msft[(size_t)h2_iy(s, j) * s.nx + h2_ix(s, i)];
     wreal area = wdiv(wdiv(s.dxs, map) * s.dys, map);
     wreal cs2 = s.cs * s.cs;
@@ -2142,7 +2176,8 @@ static __device__ void h2_km3_f(const H2Src& s, int j, int i, const Dl* p, Dl* o
         khh = h2_min(kmh / s.pr, caph);
         khv = h2_min(kmv / s.pr, capv);
     } else {
-        Dl deltas = h2_pow(area / rw, (wreal)0.33333333);
+        Dl deltas = y ? h2_powv(area / rw, (wreal)0.33333333, y[1])
+                      : h2_pow(area / rw, (wreal)0.33333333);
         kmh = h2_max(((cs2 * deltas) * deltas) * tmp, ((wreal)1.0e-6 * deltas) * deltas);
         wreal caph = wdiv(wdiv(wdiv(s.mub * s.dxs, map) * s.dys, map), s.dt);
         kmh = h2_min(kmh, caph);
@@ -2431,12 +2466,11 @@ static __device__ void h2_idims(const H2Src& s, int stage, int id, int* nl, int*
 // an input word: per (input, output) of the stage, from the primal's reads
 // with its clamps and bounded-face copies.  Returns the number of outputs
 // the input feeds; slot[] indexes h2_outputs.
-static __device__ int h2_pairs(const H2Src& s, int stage, int id, int* slot, int* win)
+template <class Visit>
+static __device__ __forceinline__ void h2_pairs_v(const H2Src& s, int stage, int id,
+                                                 Visit&& visit)
 {
-    int n = 0;
-#define H2_PAIR(sl, a, b, c, d, e, f) \
-    { slot[n] = sl; win[6 * n] = a; win[6 * n + 1] = b; win[6 * n + 2] = c; \
-      win[6 * n + 3] = d; win[6 * n + 4] = e; win[6 * n + 5] = f; ++n; }
+#define H2_PAIR(sl, a, b, c, d, e, g) visit(sl, a, b, c, d, e, g);
     if (stage == H2S_MET) {
         H2_PAIR(0, 0, 0, 0, 0, 0, 2);      // zx: faces i, i+1 and the copied end face
         H2_PAIR(1, 0, 0, 0, 2, 0, 0);
@@ -2546,16 +2580,24 @@ static __device__ int h2_pairs(const H2Src& s, int stage, int id, int* slot, int
         }
     }
 #undef H2_PAIR
+}
+
+// h2_pairs_v as arrays (h2_gather's seeded walk)
+static __device__ int h2_pairs(const H2Src& s, int stage, int id, int* slot, int* win)
+{
+    int n = 0;
+    h2_pairs_v(s, stage, id, [&](int sl, int a, int b, int c, int d, int e, int g) {
+        slot[n] = sl; win[6 * n] = a; win[6 * n + 1] = b; win[6 * n + 2] = c;
+        win[6 * n + 3] = d; win[6 * n + 4] = e; win[6 * n + 5] = g; ++n;
+    });
     return n;
 }
 
 // The ROWP stage's h2_pairs (outputs: the six pieces, slot = piece).
-static __device__ int h2_rpairs(const H2Src& s, int id, int* slot, int* win)
+template <class Visit>
+static __device__ __forceinline__ void h2_rpairs(const H2Src& s, int id, Visit&& visit)
 {
-    int n = 0;
-#define H2_PAIR(sl, a, b, c, d, e, f) \
-    { slot[n] = sl; win[6 * n] = a; win[6 * n + 1] = b; win[6 * n + 2] = c; \
-      win[6 * n + 3] = d; win[6 * n + 4] = e; win[6 * n + 5] = f; ++n; }
+#define H2_PAIR(sl, a, b, c, d, e, g) visit(sl, a, b, c, d, e, g);
     // per piece (h2_rowp): divh (3) and a vertical difference (4, 5)
     // read the stresses or fluxes, the metric averages (u, v: 1, 2;
     // w, s: 0, 1) zx and zy, tmpdz (0) or rdz (2) the rz
@@ -2581,7 +2623,6 @@ static __device__ int h2_rpairs(const H2Src& s, int id, int* slot, int* win)
         H2_PAIR(3, 0, 0, -1, 0, 0, 0); H2_PAIR(5, -1, 1, -1, 0, 0, 0); break;
     }
 #undef H2_PAIR
-    return n;
 }
 
 // The distinct output coordinates c + lo .. c + hi on an axis of n mass
@@ -2671,6 +2712,14 @@ static __device__ __forceinline__ wreal h2_gather(const H2Src& s, int stage, int
 // pieces that read it, sum_piece sum_point P(point) d piece(point) / d word.
 
 // the output id of a piece stage's slot q (h2_outputs)
+// Rows vu and vv read one w stress each (h2_vrow_u: tau13, h2_vrow_v:
+// tau23).  Their AD's base forward, first pass and gather skip the other
+// (y: tau23's half), whose adjoint is zero: no word it would add changes.
+static __device__ __forceinline__ bool h2_tw_skip(int row, int y)
+{
+    return (row == 4 && y) || (row == 5 && !y);
+}
+
 static __device__ __forceinline__ int h2_pout(int stage, int q)
 {
     if (stage == H2S_TWP) return H2O_TWP + q;
@@ -2697,33 +2746,31 @@ static __device__ __forceinline__ int h2_axis(int c, int lo, int off, int n, int
     return (stag && x == 0) ? 2 : 1;
 }
 
-static __device__ wreal h2_pgather(const H2Src& s, int stage, int id, int k, int j, int i,
-                                   unsigned w, const wreal* P)
+static __device__ __forceinline__ wreal h2_pgather(const H2Src& s, int stage, int id, int k, int j,
+                                                   int i, unsigned w, const wreal* P)
 {
-    int slot[8], win[48];
-    int np = h2_pairs(s, stage, id, slot, win);
     size_t pst = h2_pstride(s);
     // the word's level and column (pcoef reads them for the mass and
     // w-level inputs only, where they are w / (ny nx) and its remainder)
     unsigned lw = (unsigned)k, cw = (unsigned)(j * s.nx + i);
     wreal acc = (wreal)0;
-    for (int p = 0; p < np; ++p) {
-        int o = h2_pout(stage, slot[p]);
+    h2_pairs_v(s, stage, id, [&](int sl, int w0, int w1, int w2, int w3, int w4, int w5) {
+        if (stage == H2S_TWP && h2_tw_skip(s.row, sl >= 7)) return;   // never written
+        int o = h2_pout(stage, sl);
         int nl, sy, sx;
         h2_odims(s, o, &nl, &sy, &sx);
-        size_t base = (size_t)slot[p] * pst;
-        const int* wp = win + 6 * p;
-        for (int ok = wp[0]; ok <= wp[1]; ++ok) {
+        size_t base = (size_t)sl * pst;
+        for (int ok = w0; ok <= w1; ++ok) {
             int kk, k1;
-            if (!h2_axis(k, wp[0], ok, nl, 0, 1, &kk, &k1)) continue;
-            for (int oj = wp[2]; oj <= wp[3]; ++oj) {
+            if (!h2_axis(k, w0, ok, nl, 0, 1, &kk, &k1)) continue;
+            for (int oj = w2; oj <= w3; ++oj) {
                 int j0, j1;
-                int nj = h2_axis(j, wp[2], oj, s.ny, sy, s.by, &j0, &j1);
+                int nj = h2_axis(j, w2, oj, s.ny, sy, s.by, &j0, &j1);
                 for (int bj = 0; bj < nj; ++bj) {
                     int jj = bj ? j1 : j0;
-                    for (int oi = wp[4]; oi <= wp[5]; ++oi) {
+                    for (int oi = w4; oi <= w5; ++oi) {
                         int i0, i1;
-                        int ni = h2_axis(i, wp[4], oi, s.nx, sx, s.bx, &i0, &i1);
+                        int ni = h2_axis(i, w4, oi, s.nx, sx, s.bx, &i0, &i1);
                         for (int bi = 0; bi < ni; ++bi) {
                             int ii = bi ? i1 : i0;
                             wreal a = P[base + R3(kk, jj, ii, s.ny + sy, s.nx + sx)];
@@ -2734,7 +2781,7 @@ static __device__ wreal h2_pgather(const H2Src& s, int stage, int id, int k, int
                 }
             }
         }
-    }
+    });
     return acc;
 }
 
@@ -2860,86 +2907,82 @@ static __device__ wreal h2_rcoef(const H2Src& s, int id, int q, int k, int j, in
 
 // The row pieces' gather (stage ROWP): sum_piece sum_point P(point) d
 // piece(point) / d word (h2_rcoef), h2_pgather's walk.
-static __device__ wreal h2_rgather(const H2Src& s, int id, int k, int j, int i, wreal r,
-                                   const wreal* P)
+static __device__ __forceinline__ wreal h2_rgather(const H2Src& s, int id, int k, int j, int i,
+                                                   wreal r, const wreal* P)
 {
-    int slot[4], win[24];
-    int np = h2_rpairs(s, id, slot, win);
     // the row's points (h2_odims of H2O_TEND), written out: the shared
     // helpers' extra call sites would cost the other gathers their inlining
     int nl = s.nz + (s.row == 3), sy = s.row == 2, sx = s.row == 1;
     size_t pst = h2_pstride(s);
     wreal acc = (wreal)0;
-    for (int p = 0; p < np; ++p) {
-        size_t base = (size_t)slot[p] * pst;
-        const int* wp = win + 6 * p;
-        for (int ok = wp[0]; ok <= wp[1]; ++ok) {
+    h2_rpairs(s, id, [&](int sl, int w0, int w1, int w2, int w3, int w4, int w5) {
+        size_t base = (size_t)sl * pst;
+        for (int ok = w0; ok <= w1; ++ok) {
             int kk, k1;
-            if (!h2_axis(k, wp[0], ok, nl, 0, 1, &kk, &k1)) continue;
-            for (int oj = wp[2]; oj <= wp[3]; ++oj) {
+            if (!h2_axis(k, w0, ok, nl, 0, 1, &kk, &k1)) continue;
+            for (int oj = w2; oj <= w3; ++oj) {
                 int j0, j1;
-                int nj = h2_axis(j, wp[2], oj, s.ny, sy, s.by, &j0, &j1);
+                int nj = h2_axis(j, w2, oj, s.ny, sy, s.by, &j0, &j1);
                 for (int bj = 0; bj < nj; ++bj) {
                     int jj = bj ? j1 : j0;
-                    for (int oi = wp[4]; oi <= wp[5]; ++oi) {
+                    for (int oi = w4; oi <= w5; ++oi) {
                         int i0, i1;
-                        int ni = h2_axis(i, wp[4], oi, s.nx, sx, s.bx, &i0, &i1);
+                        int ni = h2_axis(i, w4, oi, s.nx, sx, s.bx, &i0, &i1);
                         for (int bi = 0; bi < ni; ++bi) {
                             int ii = bi ? i1 : i0;
                             wreal a = P[base + R3(kk, jj, ii, s.ny + sy, s.nx + sx)];
                             if (a != (wreal)0)
-                                acc = acc + a * h2_rcoef(s, id, slot[p], kk, jj, ii, k, j, i, r);
+                                acc = acc + a * h2_rcoef(s, id, sl, kk, jj, ii, k, j, i, r);
                         }
                     }
                 }
             }
         }
-    }
+    });
     return acc;
 }
 
 // The flux pieces' gather (stage HSP): h2_rgather's walk over h1's (y 0)
 // and h2's (y 1) points with h2_hscoef.
-static __device__ wreal h2_hsgather(const H2Src& s, int id, int k, int j, int i, const wreal* P)
+static __device__ __forceinline__ wreal h2_hsgather(const H2Src& s, int id, int k, int j, int i,
+                                                    const wreal* P)
 {
-    int slot[4], win[24];
-    int np = h2_hspairs(id, slot, win);
     size_t pst = h2_pstride(s);
     wreal acc = (wreal)0;
-    for (int p = 0; p < np; ++p) {
-        int y = slot[p] >= HSP_N, sy = y, sx = 1 - y;
-        size_t base = (size_t)slot[p] * pst;
-        const int* wp = win + 6 * p;
-        for (int ok = wp[0]; ok <= wp[1]; ++ok) {
+    h2_hspairs(id, [&](int sl, int w0, int w1, int w2, int w3, int w4, int w5) {
+        int y = sl >= HSP_N, sy = y, sx = 1 - y;
+        size_t base = (size_t)sl * pst;
+        for (int ok = w0; ok <= w1; ++ok) {
             int kk, k1;
-            if (!h2_axis(k, wp[0], ok, s.nz, 0, 1, &kk, &k1)) continue;
-            for (int oj = wp[2]; oj <= wp[3]; ++oj) {
+            if (!h2_axis(k, w0, ok, s.nz, 0, 1, &kk, &k1)) continue;
+            for (int oj = w2; oj <= w3; ++oj) {
                 int j0, j1;
-                int nj = h2_axis(j, wp[2], oj, s.ny, sy, s.by, &j0, &j1);
+                int nj = h2_axis(j, w2, oj, s.ny, sy, s.by, &j0, &j1);
                 for (int bj = 0; bj < nj; ++bj) {
                     int jj = bj ? j1 : j0;
-                    for (int oi = wp[4]; oi <= wp[5]; ++oi) {
+                    for (int oi = w4; oi <= w5; ++oi) {
                         int i0, i1;
-                        int ni = h2_axis(i, wp[4], oi, s.nx, sx, s.bx, &i0, &i1);
+                        int ni = h2_axis(i, w4, oi, s.nx, sx, s.bx, &i0, &i1);
                         for (int bi = 0; bi < ni; ++bi) {
                             int ii = bi ? i1 : i0;
                             wreal a = P[base + R3(kk, jj, ii, s.ny + sy, s.nx + sx)];
                             if (a != (wreal)0)
-                                acc = acc + a * h2_hscoef(s, id, y, slot[p] - HSP_N * y,
+                                acc = acc + a * h2_hscoef(s, id, y, sl - HSP_N * y,
                                                           kk, jj, ii, k, j, i);
                         }
                     }
                 }
             }
         }
-    }
+    });
     return acc;
 }
 
 // One piece-stage AD thread: decode word t of the stage's concatenated
 // inputs and gather.  *slot_out is its position in h2_inputs, *at_out its
 // word.
-static __device__ bool h2_ad_pieces(const H2Src& s, int stage, size_t t, const wreal* P,
+static __device__ __forceinline__ bool h2_ad_pieces(const H2Src& s, int stage, size_t t,
+                                                    const wreal* P,
                                     int* slot_out, size_t* at_out, wreal* acc)
 {
     int ids[12];
@@ -3328,6 +3371,9 @@ extern "C" __global__ void h2_tw_tl(const wreal* __restrict__ u, const wreal* __
     s.rho = rho; s.rhod = rhod; s.km = km; s.kmd = kmd;
     s.msft = msft; s.msfu = msfu; s.msfv = msfv; s.fnm = fnm; s.fnp = fnp;
     size_t t = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    // the AD's base values (tl 0) of rows vu and vv: only the stress the
+    // row reads (vu tau13, vv tau23; h2_tw_skip)
+    if (!tl && h2_tw_skip(row, t >= (size_t)(nz + 1) * ny * (nx + 1))) return;
     int q;
     size_t at;
     Dl r;
@@ -3358,7 +3404,7 @@ extern "C" __global__ void h2_tw_lin(const wreal* __restrict__ at13,
     int y = t >= n13;
     size_t at = y ? t - n13 : t;
     size_t nyy = (size_t)(ny + y), nxx = (size_t)(nx + 1 - y);
-    if (at >= (size_t)(nz + 1) * nyy * nxx) return;
+    if (at >= (size_t)(nz + 1) * nyy * nxx || h2_tw_skip(row, y)) return;
     int i = (int)(at % nxx), j = (int)((at / nxx) % nyy), k = (int)(at / (nxx * nyy));
     h2_dlin(s, y, k, j, i, (y ? at23 : at13)[at], 1, P, at, 7 * y);
 }
@@ -3568,7 +3614,7 @@ extern "C" __global__ void h2_row_lin(const wreal* __restrict__ atend,
     Dl p[ROWP_N];
     wreal msf = (wreal)0;
     if (live) {
-        for (int q = 0; q < ROWP_N; ++q) p[q] = h2_rowp(s, q, k, j, i);
+        h2_row_pieces(s, k, j, i, p);
         msf = h2_row_msf(s, j, i);
     }
     for (int q = 0; q < ROWP_N; ++q) {
@@ -3739,23 +3785,23 @@ extern "C" __global__ void h2_vrow_wsad(const wreal* __restrict__ atend,
             vint);
     size_t t = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
     size_t m2 = (size_t)ny * nx, m = (size_t)nz * m2, m1 = m + m2;
-    // the inputs (h2_inputs of stage vrow), written out
-    int ids[5], n = 0;
-    size_t sz[5];
+    // the inputs (h2_inputs of stage vrow), written out as straight-line
+    // code (index arrays would sit in local memory)
+    int id = -1;
+    auto take = [&](size_t size, int input) {
+        if (id >= 0) return;
+        if (t < size) id = input;
+        else t -= size;
+    };
     if (row == 6) {
-        ids[0] = H2_W; ids[1] = H2_RZ; ids[2] = H2_RHO; ids[3] = H2_K; n = 4;
-        sz[0] = m1; sz[1] = sz[2] = sz[3] = m;
+        take(m1, H2_W); take(m, H2_RZ); take(m, H2_RHO); take(m, H2_K);
     } else if (vint) {
-        ids[0] = H2_F; ids[1] = H2_K; ids[2] = H2_RHO; ids[3] = H2_RZ; n = 4;
-        sz[0] = sz[1] = sz[2] = m; sz[3] = m1;
+        take(m, H2_F); take(m, H2_K); take(m, H2_RHO); take(m1, H2_RZ);
     } else {
-        ids[0] = H2_RHO; sz[0] = m; n = 1;
+        take(m, H2_RHO);
     }
-    if (moist && heat == 2 && row == 7) { ids[n] = H2_QV; sz[n] = m; ++n; }
-    int q = 0;
-    while (q < n && t >= sz[q]) { t -= sz[q]; ++q; }
-    if (q >= n) return;
-    int id = ids[q];
+    if (moist && heat == 2 && row == 7) take(m, H2_QV);
+    if (id < 0) return;
     size_t c = t % m2;
     int l = (int)(t / m2), j = (int)(c / nx), i = (int)(c % nx);
     wreal acc = (wreal)0;
@@ -4160,6 +4206,46 @@ static __device__ H2Src kc3_src(KC3_IN, KC_GEOM)
 #define KC3_ARGS d11, d22, d12, u, v, w, zx, zy, rdz, rdzw, bn2, msft, msfu, msfv, H2_GARGS, \
     dxs, dys, cs, pr, dt, mub, iso
 
+// The AD's base deformation at the defor13 then defor23 slots (values,
+// h2_km3_slot's layout): each slot once, where the first pass's averages
+// would evaluate it at four mass points.  --fmad=false: the same word.
+extern "C" __global__ void h2_km3_dfor(KC3_IN, wreal* __restrict__ Dv, KC_GEOM)
+{
+    H2Src s = kc3_src(KC3_ARGS);
+    s.mode = 2;
+    size_t t = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
+    size_t n13 = (size_t)(nz + 1) * ny * (nx + 1);
+    int y = t >= n13;
+    size_t at = y ? t - n13 : t;
+    size_t nyy = (size_t)(ny + y), nxx = (size_t)(nx + 1 - y);
+    if (at >= (size_t)(nz + 1) * nyy * nxx) return;
+    int i = (int)(at % nxx), j = (int)((at / nxx) % nyy), k = (int)(at / (nxx * nyy));
+    Dv[t] = h2_defor(s, y, k, j, i).v;
+}
+
+// h2_km3_pieces' values, the defor13 / defor23 averages from h2_km3_dfor's
+// slots in the same order
+static __device__ __forceinline__ void h2_km3_vpieces(const H2Src& s, int k, int j, int i,
+                                                      const wreal* Dv, Dl* p)
+{
+    p[0] = h2_mass(s, H2_DA, s.da, s.dad, k, j, i);
+    p[1] = h2_mass(s, H2_D22, s.db, s.dbd, k, j, i);
+    p[2] = h2_rw(s, k, j, i);
+    p[3] = h2_k3_w33(s, k, j, i);
+    p[4] = h2_d12m(s, k, j, i);
+    const wreal* d13 = Dv;
+    const wreal* d23 = Dv + (size_t)(s.nz + 1) * s.ny * (s.nx + 1);
+#define K3_D13(kk, jj, ii) d13[R3(kk, jj, ii, s.ny, s.nx + 1)]
+#define K3_D23(kk, jj, ii) d23[R3(kk, jj, ii, s.ny + 1, s.nx)]
+    p[5] = dl((wreal)0.25f * (((K3_D13(k + 1, j, i) + K3_D13(k, j, i)) + K3_D13(k + 1, j, i + 1))
+                              + K3_D13(k, j, i + 1)), (wreal)0);
+    p[6] = dl((wreal)0.25f * (((K3_D23(k + 1, j, i) + K3_D23(k, j, i)) + K3_D23(k + 1, j + 1, i))
+                              + K3_D23(k, j + 1, i)), (wreal)0);
+#undef K3_D13
+#undef K3_D23
+    p[7] = h2_mass(s, H2_BN, s.bn, s.bnd, k, j, i);
+}
+
 // The AD's first pass (stage KM3P) at a mass point: the four coefficients'
 // adjoints onto the pieces of h2_km3_pieces.  P's mass blocks 0-5 take
 // d11, d22, rdzw, w(k+1) - w(k), the d12 average and BN2; Dm (2 m words)
@@ -4167,7 +4253,8 @@ static __device__ H2Src kc3_src(KC3_IN, KC_GEOM)
 extern "C" __global__ void h2_km3_lin(const wreal* __restrict__ akmh,
                                       const wreal* __restrict__ akhh,
                                       const wreal* __restrict__ akmv,
-                                      const wreal* __restrict__ akhv, KC3_IN,
+                                      const wreal* __restrict__ akhv,
+                                      const wreal* __restrict__ Dv, KC3_IN,
                                       wreal* __restrict__ P, wreal* __restrict__ Dm, KC_GEOM)
 {
     H2Src s = kc3_src(KC3_ARGS);
@@ -4182,11 +4269,15 @@ extern "C" __global__ void h2_km3_lin(const wreal* __restrict__ akmh,
     if (!h2_outer(s, j, i)
         && (a0 != (wreal)0 || a1 != (wreal)0 || a2 != (wreal)0 || a3 != (wreal)0)) {
         Dl p[K3P_N];
-        h2_km3_pieces(s, k, j, i, p);
+        h2_km3_vpieces(s, k, j, i, Dv, p);
+        // the pows' values once; the seeds differ in their tangents only
+        wreal y[2];
+        h2_km3_pows(s, j, i, p, y);
+#pragma unroll
         for (int q = 0; q < K3P_N; ++q) {
             Dl x[K3P_N], out[4];
             for (int r = 0; r < K3P_N; ++r) x[r] = dl(p[r].v, r == q ? (wreal)1 : (wreal)0);
-            h2_km3_f(s, j, i, x, out);
+            h2_km3_f(s, j, i, x, out, y);
             g[q] = ((a0 * out[0].d + a1 * out[1].d) + a2 * out[2].d) + a3 * out[3].d;
         }
     }
@@ -4242,8 +4333,22 @@ extern "C" __global__ void h2_km3_ad(const wreal* __restrict__ P, KC3_IN,
     size_t at;
     wreal acc;
     if (!h2_ad_pieces(s, H2S_KM3P, t, P, &q, &at, &acc)) return;
-    wreal* outs[11] = {a11, a22, a12, au, av, aw, azx, azy, ardz, ardzw, abn2};
-    outs[q][at] = outs[q][at] + acc;
+    // a switch, not a pointer array (which would sit in local memory)
+    wreal* out;
+    switch (q) {
+    case 0: out = a11; break;
+    case 1: out = a22; break;
+    case 2: out = a12; break;
+    case 3: out = au; break;
+    case 4: out = av; break;
+    case 5: out = aw; break;
+    case 6: out = azx; break;
+    case 7: out = azy; break;
+    case 8: out = ardz; break;
+    case 9: out = ardzw; break;
+    default: out = abn2; break;
+    }
+    out[at] = out[at] + acc;
 }
 
 extern "C" __global__ void kc_zero4(wreal* __restrict__ a, wreal* __restrict__ b,
