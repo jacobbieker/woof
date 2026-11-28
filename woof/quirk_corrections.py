@@ -219,6 +219,9 @@ CORRECTIONS: tuple[QuirkCorrection, ...] = (
     QuirkCorrection(
         "zaero_snow_scavenging", "mpas_seaice", False, True, "z-aerosols",
         "each z-aerosol is scavenged from the melting snow with its own coefficient, not the table's first"),
+    QuirkCorrection(
+        "shortwave_bio_grid", "mpas_seaice", False, True, "shortwave bioabsorption of the z-aerosols",
+        "the z-aerosols are remapped onto the shortwave grid from the biology interface grid"),
     # MPAS-Seaice v8.4.2 velocity solver set-up (woof.hex.mpas_seaice.timestep_v842)
     QuirkCorrection(
         "planar_metric_terms", "mpas_seaice_velocity", False, True, "variational basis on a planar mesh",

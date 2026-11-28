@@ -124,6 +124,7 @@ BGC_ZAERO_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_zaero"
 BGC_ZAERO_CARRY_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_zaero_carry"
 #: the z-aerosols' through the time steps (BGC_ZAERO_STEP_CASES)
 BGC_ZAERO_STEP_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_zaero_step"
+BGC_ZAERO_SW_FIXTURE_DIR = FIXTURE_DIR.parent / "mpas_seaice_bgc_zaero_shortwave"
 PRECISIONS = {"r8": np.float64}
 REAL, INT, DIM = _stream.REAL, _stream.INT, _stream.DIM
 #: the Registry structs the column routines read and write, as oracle_stream pools
@@ -717,6 +718,27 @@ BGC_ZAERO_STEP_CASES = (
      (12, 6, 3)),
     ("seaice_zaero_bl99_dedd_rothrock", 20263212, _SEAICE_STEP, {
         **_COUPLED_BASE, **_ZA_STEP, "oracle_n_steps": 3, "config_start_time": "2001-06-01_10:00:00"},
+     (12, 6, 3)),
+)
+#: the shortwave bioabsorption (dEdd_algae) of the z-aerosols, with the bulk and the modal
+#: optics (modal_aero)
+_SW_BIO = {"config_use_shortwave_bioabsorption": True}
+_MODAL = {**_SW_BIO, "config_use_modal_aerosols": True}
+#: the z-aerosols in the delta-Eddington shortwave: the radiation (compute_shortwave_trcr and
+#: compute_dEdd's aerosol optics), the column step and the coupled step: name, seed, stage,
+#: overrides (and the coupled torus)
+BGC_ZAERO_SW_CASES = (
+    ("rad_zaero_bioabsorption_level_ponds", 20263301, "radiation", {**_BGC_ZA, **_SW_BIO}),
+    ("rad_zaero_nonreactive_modal_cesm_ponds_noon", 20263302, "radiation", {
+        **_BGC_ZA_NR, **_MODAL, **_BL99, **_CESM, "config_snow_to_ice_transition_depth": 0.03,
+        "config_calendar_type": "gregorian", "config_start_time": "2000-06-21_12:00:00"}),
+    ("rad_zaero_modal_topo_ponds_nine_layers", 20263303, "radiation", {
+        **_BGC_ZA, **_MODAL, **_BL99, **_TOPO_ONLY, "config_nIceLayers": 9,
+        "config_start_time": "2001-07-15_06:30:15"}),
+    ("step_zaero_modal_bl99_dedd", 20263311, _STEP, {
+        **_STEP_BASE, **_ZA_STEP, **_MODAL, "oracle_n_steps": 3, "config_start_time": "2001-06-01_10:00:00"}),
+    ("seaice_zaero_nonreactive_bioabsorption_bl99_dedd_rothrock", 20263321, _SEAICE_STEP, {
+        **_COUPLED_BASE, **_ZA_NR_STEP, **_SW_BIO, "oracle_n_steps": 3, "config_start_time": "2001-06-01_10:00:00"},
      (12, 6, 3)),
 )
 
@@ -1582,6 +1604,39 @@ def _nonreactive_carry_state(rs, case: dict) -> None:
         t["verticalAerosolsConc"] = aero
 
 
+def _zaero_shortwave_state(rs, case: dict) -> None:
+    """The shortwave bioabsorption's inputs, drawn last (so the stage's other
+    draws are the stage's own): the z-aerosols' layers at concentrations whose
+    optical depths are below 1 (ice 1e-8 to 1e-5, snow to 3e-5 kg/m^3), the
+    aerosols pool's optics tables (extinction cross sections of 50 to 2e4
+    m^2/kg, single scattering albedos, asymmetry parameters and the modal
+    black carbon's absorption enhancement of 1 to 2) and, for the radiation's
+    cases, ``colpkg_init_hbrine``'s grids and the brine fraction (0.3-1.1:
+    brine below and above the ice top), negative in cell 2's first category
+    (``remap_zbgc``'s stop: that category's shortwave tracers stay 0).
+    Separate numpy ufuncs only."""
+    pools, dims, stage = case["pools"], case["dims"], case["stage"]
+    n1, ncat, nil, nbl, nza = (dims["nCells"] + 1, dims["nCategories"], dims["nIceLayers"], dims["nBioLayers"],
+                               dims["nzAerosols"])
+    u = _uniform(rs)
+    t, bgc, aer = pools["tracers"], pools["biogeochemistry"], pools["aerosols"]
+    if stage == "radiation":
+        for key, value in cv.hbrine_grids(nbl, nil).items():
+            bgc[key] = value
+        fbri = u(0.3, 1.1, (n1, ncat, 1))
+        fbri[2, 0, 0] = -0.05
+        t["brineFraction"] = fbri
+    aero = u(1.0e-8, 1.0e-5, (n1, ncat, nza * (nbl + 3)))
+    for j in range(nza):
+        aero[:, :, j * (nbl + 3) + nbl + 1:(j + 1) * (nbl + 3)] = u(0.0, 3.0e-5, (n1, ncat, 2))
+    t["verticalAerosolsConc"] = aero
+    for key, lo, hi in (("aerosolMassExtinctionCrossSection", 50.0, 2.0e4), ("aerosolSingleScatterAlbedo", 0.2, 0.99),
+                        ("aerosolAsymmetryParameter", 0.3, 0.9), ("modalMassExtinctionCrossSection", 5.0e3, 2.0e4),
+                        ("modalSingleScatterAlbedo", 0.1, 0.5), ("modalAsymmetryParameter", 0.2, 0.8),
+                        ("modalBCabsorptionParameter", 1.0, 2.0)):
+        aer[key] = u(lo, hi, aer[key].shape)
+
+
 def _zsal_dtemp_band(case: dict) -> None:
     """Cell 5's ice 0.05 degC below each layer's melting point, in daylight:
     inside BL99's absorbed-shortwave band, which ``temperature_changes``'
@@ -1796,6 +1851,8 @@ def make_case(name, seed, stage, overrides, torus=None) -> dict:
         _zsal_solve_carry_state(rs, case)
     if stage in (_ITD, _RDG, _STEP, _SEAICE_STEP) and cv.vertical_tracers(config):
         _nonreactive_carry_state(rs, case)
+    if crad.shortwave_zaerosols(config):
+        _zaero_shortwave_state(rs, case)
     for key, on in active.items():
         config[f"package:{key}"] = on
     case["fields"] = [r[:4] for r in rows]
@@ -1979,7 +2036,7 @@ def run_gpu(case: dict) -> tuple[dict[str, np.ndarray], "cv.ColumnState"]:
     stage = case["stage"]
     # the stages that carry the brine height (each refuses the rest itself)
     state = cv.init_parameters(dev, config, biogeochemistry=stage not in ("aggregate", "update_state", _OML),
-                               z_tracers=stage in ("init", _BGC_STAGE, _ITD, _RDG, _STEP, _SEAICE_STEP))
+                               z_tracers=stage in ("init", _BGC_STAGE, _ITD, _RDG, "radiation", _STEP, _SEAICE_STEP))
     if stage == "init":
         cv.initialize_coupler_fields(dev, config, state)
         cv.init_variables(dev, config, state)
@@ -2148,11 +2205,12 @@ def measure_carry(reference: dict | None = None, logs: dict | None = None, *,
                   fixture_dir: Path = BGC_CARRY_FIXTURE_DIR) -> dict[str, dict[str, int]]:
     """The brine fraction's carry-through cases (``BGC_CARRY_CASES`` and
     ``BGC_CARRY_COUPLED_CASES`` by default), each measured as its stage's
-    own (:func:`measure_itd`, :func:`measure_ridge`, :func:`measure_step`,
-    :func:`measure_coupled`)."""
+    own (:func:`measure_itd`, :func:`measure_ridge`, :func:`measure` for the
+    radiation, :func:`measure_step`, :func:`measure_coupled`)."""
     reference = load_fixture(fixture_dir) if reference is None else reference
     logs = load_logs(fixture_dir) if logs is None else logs
-    by_stage = {_ITD: measure_itd, _RDG: measure_ridge, _STEP: measure_step, _SEAICE_STEP: measure_coupled}
+    by_stage = {_ITD: measure_itd, _RDG: measure_ridge, "radiation": measure, _STEP: measure_step,
+                _SEAICE_STEP: measure_coupled}
     report: dict[str, dict[str, int]] = {}
     for stage, measure_stage in by_stage.items():
         mine = tuple(row for row in rows if row[2] == stage)

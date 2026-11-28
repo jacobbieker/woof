@@ -556,7 +556,11 @@ Notes on the 1.1.7 sync:
     dust's ocean flux in `oceanDustIronFlux`, word for word with v8.4.2;
     the opt-in correction `zaero_snow_scavenging` gives each its own snow
     scavenging, where v8.4.2 indexes the table by list position and gives
-    all three 0.03. The other biogeochemistry
+    all three 0.03. With `config_use_shortwave_bioabsorption` (bulk or
+    `config_use_modal_aerosols` optics) the delta-Eddington shortwave
+    carries the z-aerosols' optics and `bioTracerShortwave`, word for word;
+    the opt-in correction `shortwave_bio_grid` remaps onto the biology grid,
+    where v8.4.2 passes the ice's vertical grid. The other biogeochemistry
     flags are
     refused by name until their phases land;
   - MALI: the shallow-ice velocity solver, masks and geometry diagnostics,
@@ -786,8 +790,8 @@ Notes on the 1.1.7 sync:
     `set_sfcflux_order`, `ice_velocity_at_cell`,
     `ccsm3_absorbed_solar_layers`, `dedd_zero_volume_ice`,
     `zbgc_c2n_proteins`, `bgc_inactive_diagnostics`, `zsal_solve`,
-    `bgc_snow_new_category`, `subcycle_snow_ice_tracers`, `zap_snow_area` and
-    `zaero_snow_scavenging`;
+    `bgc_snow_new_category`, `subcycle_snow_ice_tracers`, `zap_snow_area`,
+    `zaero_snow_scavenging` and `shortwave_bio_grid`;
     and the MPAS-Seaice velocity solver's `planar_metric_terms`,
     `periodic_local_coords` and `weak_ridge_delta`.
     The list and its values are in

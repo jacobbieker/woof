@@ -442,6 +442,12 @@ CORRECTIONS = {
         "ridging run their solve_zsal branches (add_new_ice's salt loss, add_new_ice_bgc's adjust_tracer_profile, "
         "lateral_melt_bgc, zap_small_areas' dfzsal). Held to the "
         "oracle built with tools/mpas_seaice_oracle/zsal_solve.patch"),
+    "shortwave_bio_grid": (
+        "column_radiation passes verticalGrid (the ice layers' midpoints, nIceLayers + 1 points) as "
+        "colpkg_step_radiation's igrid (mpas_seaice_column.F:2415), which compute_shortwave_trcr takes as the "
+        "biology interface grid i_grid(1:nblyr+1) (ice_shortwave.F90:3664-3712), so the z-aerosols are remapped "
+        "onto the shortwave grid from the wrong depths, and with fewer ice layers than biology layers read "
+        "past the array; the correction passes interfaceBiologyGrid"),
 }
 
 
@@ -494,15 +500,20 @@ VT_FLAG = "config_use_vertical_tracers"
 ZAERO_FLAG = "config_use_zaerosols"
 #: the vertical tracers' flags every vertical tracer stage carries
 VT_PORTED = ("config_use_nonreactive", ZAERO_FLAG)
+#: the shortwave bioabsorption (dEdd_algae) and the modal aerosol optics (modal_aero):
+#: only the delta-Eddington shortwave reads them, on the z-aerosols (the algae and the NCAR
+#: aerosols are refused), so every biogeochemistry stage carries them
+SW_BIO_PORTED = ("config_use_shortwave_bioabsorption", "config_use_modal_aerosols")
 
 
 def carried_bgc_flags(configs: dict, z_tracers: tuple[str, ...] = VT_PORTED) -> tuple[str, ...]:
     """The column-biogeochemistry flags a stage carries: the brine height,
-    the vertical salinity and, with ``config_use_vertical_tracers`` on, that
-    flag and the vertical tracers' ``z_tracers``. :func:`refuse_unported` and
+    the vertical salinity, the shortwave bioabsorption and modal optics
+    (:data:`SW_BIO_PORTED`) and, with ``config_use_vertical_tracers`` on,
+    that flag and the vertical tracers' ``z_tracers``. :func:`refuse_unported` and
     :func:`woof.hex.mpas_seaice.coupling_prep_v842.check_config` both read it,
     so a new tracer joins the two refusals at once."""
-    return BGC_PORTED + (ZSAL_FLAG,) + ((VT_FLAG,) + tuple(z_tracers) if configs[VT_FLAG] else ())
+    return BGC_PORTED + (ZSAL_FLAG,) + SW_BIO_PORTED + ((VT_FLAG,) + tuple(z_tracers) if configs[VT_FLAG] else ())
 
 
 def refuse_uncarried_bgc(configs: dict, carried: tuple[str, ...], reason: str) -> None:
@@ -563,8 +574,9 @@ def refuse_unported(configs: dict, dims: dict[str, int], biogeochemistry: bool =
                     "shortwave), coupling_prep and the column and coupled steps, not for this stage",
                     f"{VT_FLAG} = .false.")
         refuse_uncarried_bgc(c, carried_bgc_flags(c, vt),
-                             "of the column biogeochemistry only the brine height, the vertical salinity and "
-                             "the vertical tracers' nonreactive tracer and z-aerosols are ported")
+                             "of the column biogeochemistry only the brine height, the vertical salinity, the "
+                             "vertical tracers' nonreactive tracer and z-aerosols and the shortwave "
+                             "bioabsorption of the z-aerosols are ported")
         if c[VT_FLAG]:
             _refuse_z_tracers(c, vt)
         _refuse_bio_layers(c, dims)

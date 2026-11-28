@@ -158,7 +158,8 @@ def test_the_brine_fraction_is_the_last_tracer_with_the_ice_volume_parent():
     assert brine.layout[-1] == ("brineFraction", brine.nt_fbri, 1)
 
 
-@pytest.mark.parametrize("flag", [f for f in cv._BGC_FLAGS if f not in cv.BGC_PORTED and f != cv.ZSAL_FLAG])
+@pytest.mark.parametrize("flag", [f for f in cv._BGC_FLAGS
+                                  if f not in cv.BGC_PORTED + cv.SW_BIO_PORTED and f != cv.ZSAL_FLAG])
 def test_every_other_biogeochemistry_flag_is_refused_by_name(flag):
     case = _case("bgc_brine")
     with pytest.raises(ConfigurationRefusal, match=flag):

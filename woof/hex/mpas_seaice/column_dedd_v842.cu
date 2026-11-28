@@ -24,6 +24,7 @@
 //     2970-3440  solution_dEdd
 //     3450-3523  shortwave_dEdd_set_snow
 //     3533-3563  shortwave_dEdd_set_pond
+//     3571-3729  compute_shortwave_trcr (the z-aerosols)
 // (Bruce P. Briegleb, Elizabeth C. Hunke, Adrian K. Turner, Erik Kluzek and
 // the CICE Consortium). Copyright (c) 2013-2019, Los Alamos National
 // Security, LLC (LANS) and the University Corporation for Atmospheric
@@ -91,6 +92,40 @@
 #define DEDD_INITONLY 8
 #define DEDD_HEAT_CAPACITY 16
 #define DEDD_FIX_ZERO_DZ 32       // opt-in correction dedd_zero_volume_ice
+#define DEDD_MODAL 64             // config_use_modal_aerosols
+#define DEDD_MIN_BGC 0.01         // min_bgc
+
+// The shortwave bioabsorption's z-aerosols (config_use_shortwave_bioabsorption
+// with config_use_zaerosols: dEdd_algae and tr_zaero). zbio is the category's
+// bioTracerShortwave, each aerosol's nslyr + nilyr + 2 levels from nlt_zaero_sw
+// (no algae, so aerosol m's start at m*(nslyr + nilyr + 2)); the tables are
+// the aerosols pool's, C order: kaer[n*3 + ns] is kaer_tab(ns, n+1),
+// kbc[k*3 + ns] kaer_bc_tab(ns, k+1), bcenh[(ini*10 + ins)*3 + ns]
+// bcenh(ns, ins+1, ini+1).
+struct DeddZaero {
+    int nz;
+    bool modal;
+    const double *zbio;
+    const double *kaer, *waer, *gaer, *kbc, *wbc, *gbc, *bcenh;
+};
+
+// Fortran's nint for a non-negative argument (half away from zero)
+__device__ int dedd_nint(double x)
+{
+    int r = (int)x;
+    if (S(x, (double)r) >= 0.5) ++r;
+    return r;
+}
+
+// compute_dEdd's aerosol optics folded into a layer's (ice_shortwave.F90:2373-2382, 2552-2561)
+__device__ void dedd_zaer_mix(double *tz, double *wz, double *gz, double *tau, double *w0, double *g)
+{
+    *gz = D(*gz, A(*wz, PUNY));
+    *wz = D(*wz, A(*tz, PUNY));
+    *g = D(A(M(M(*g, *w0), *tau), M(M(*gz, *wz), *tz)), A(M(*w0, *tau), M(*wz, *tz)));
+    *w0 = D(A(M(*w0, *tau), M(*wz, *tz)), A(*tau, *tz));
+    *tau = A(*tau, *tz);
+}
 
 __device__ const double DEDD_RSNW_TAB[DEDD_NMBRAD] = {
     5., 7., 10., 15., 20., 30., 40., 50., 65., 80., 100., 120., 140., 170., 200., 240., 290., 350., 420., 500.,
@@ -465,14 +500,16 @@ __device__ void dedd_tune(double ki_mn, double wi_mn, double f, double R, bool c
     *wi = D(sigp, *ki);
 }
 
-// ice_shortwave.F90:1499-2961 compute_dEdd, without the aerosols and the
-// biogeochemistry (refused): kabs_chl is 0 except kabs_chl(1,klev).
+// ice_shortwave.F90:1499-2961 compute_dEdd, without the NCAR aerosols and the
+// algae (refused): kabs_chl is 0 except kabs_chl(1,klev). za (null without
+// them) carries the z-aerosols' optics.
 __device__ void dedd_compute(int nilyr, int nslyr, int klev, int klevp, bool heat_capacity, double fnidr,
                              double coszen, double R_ice, double R_pnd, double kalg, double exp_min, double swvdr,
                              double swvdf, double swidr, double swidf, int srftyp, double hs, const double *rhosnw,
                              const double *rsnw, double hi, double hp, double fi, double *alvdr, double *alvdf,
                              double *alidr, double *alidf, double *fswsfc, double *fswint, double *fswthru,
-                             double *Sswabs, double *Iswabs, double *fswpenl, bool fix_zero_dz)
+                             double *Sswabs, double *Iswabs, double *fswpenl, bool fix_zero_dz,
+                             const DeddZaero *za)
 {
     double tau[DEDD_NL], w0[DEDD_NL], g[DEDD_NL], dzk[DEDD_NL];
     double trndir[DEDD_NL], trntdr[DEDD_NL], trndif[DEDD_NL], rupdir[DEDD_NL], rupdif[DEDD_NL], rdndif[DEDD_NL];
@@ -525,6 +562,56 @@ __device__ void dedd_compute(int nilyr, int nslyr, int klev, int klevp, bool hea
     // such a layer no chlorophyll absorption
     const double kabs_chl_klev = (fix_zero_dz && !(dzk[klev] > 0.0)) ? 0.0 : M(kalg, D(0.50, dzk[klev]));
 #define KCHL(ns, k) (((ns) == 0 && (k) == klev) ? kabs_chl_klev : 0.0)
+    // tr_zaero .and. dEdd_algae: the aerosols' extinction, single scattering and
+    // asymmetry per band and level (ice_shortwave.F90:2214-2312)
+    const bool zaer = za != nullptr && za->nz > 0;
+    double tzaer[DEDD_NSPINT][DEDD_NL], wzaer[DEDD_NSPINT][DEDD_NL], gzaer[DEDD_NSPINT][DEDD_NL];
+    if (zaer) {
+        const int L = nslyr + nilyr + 2;
+        for (int ns = 0; ns < DEDD_NSPINT; ++ns)
+            for (int k = 0; k <= klev; ++k) {
+                tzaer[ns][k] = 0.0;
+                wzaer[ns][k] = 0.0;
+                gzaer[ns][k] = 0.0;
+            }
+        // k_bcexs and k_bcins are 2 (0-based 1); k_bcini by the snow grain radius
+        int k_bcini[DEDD_NL];
+        for (int k = 0; k <= klev; ++k) {
+            int ini = 8;
+            if (k < nslyr + 1) {
+                const int ksnow = k - min(k - 1, 0) - 1;
+                const double tmp_gs = frsnw[ksnow];
+                if (tmp_gs < 125.0) ini = dedd_nint(D(tmp_gs, 50.0));
+                else if (tmp_gs < 175.0) ini = 2;
+                else ini = dedd_nint(A(D(tmp_gs, 250.0), 2.0));
+            }
+            if (ini < 1) ini = 1;
+            if (ini > 8) ini = 8;
+            k_bcini[k] = ini - 1;
+        }
+        for (int m = 0; m < za->nz; ++m) {
+            const double *zb = za->zbio + m * L;
+            for (int k = 0; k <= klev; ++k)
+                for (int ns = 0; ns < DEDD_NSPINT; ++ns) {
+                    double kx, wx, gx, kt;
+                    if (za->modal && m < 2) {
+                        kx = za->kbc[1 * 3 + ns];
+                        wx = za->wbc[1 * 3 + ns];
+                        gx = za->gbc[1 * 3 + ns];
+                        // the within-ice black carbon's absorption enhanced (its extinction only)
+                        kt = m == 0 ? kx : M(kx, za->bcenh[(k_bcini[k] * 10 + 1) * 3 + ns]);
+                    } else {
+                        kx = za->kaer[m * 3 + ns];
+                        wx = za->waer[m * 3 + ns];
+                        gx = za->gaer[m * 3 + ns];
+                        kt = kx;
+                    }
+                    tzaer[ns][k] = A(tzaer[ns][k], M(M(kt, zb[k]), dzk[k]));
+                    wzaer[ns][k] = A(wzaer[ns][k], M(M(M(kx, wx), zb[k]), dzk[k]));
+                    gzaer[ns][k] = A(gzaer[ns][k], M(M(M(M(kx, wx), gx), zb[k]), dzk[k]));
+                }
+        }
+    }
 
     for (int ns = 0; ns < 3; ++ns) {
         if (srftyp == 0) {
@@ -561,6 +648,9 @@ __device__ void dedd_compute(int nilyr, int nslyr, int klev, int klevp, bool hea
                 w0[k] = M(D(ks, A(ks, KCHL(ns, k))), ws);
                 g[k] = gs;
             }
+            if (zaer)
+                for (int k = 0; k <= nslyr; ++k)
+                    dedd_zaer_mix(&tzaer[ns][k], &wzaer[ns][k], &gzaer[ns][k], &tau[k], &w0[k], &g[k]);
         } else {
             dz = D(hp, A(D(1.0, rnslyr), 1.0));
             for (int k = 0; k <= nslyr; ++k) {
@@ -591,6 +681,9 @@ __device__ void dedd_compute(int nilyr, int nslyr, int klev, int klevp, bool hea
             tau[k] = M(A(kabs, sig), dzk[k]);
             w0[k] = D(sig, A(sig, kabs));
             g[k] = DEDD_GI;
+            if (zaer)
+                for (k = kii; k <= klev; ++k)
+                    dedd_zaer_mix(&tzaer[ns][k], &wzaer[ns][k], &gzaer[ns][k], &tau[k], &w0[k], &g[k]);
         } else {
             int k = kii;
             tau[k] = M(io.ki_p_ssl[ns], dzk[k]);
@@ -742,7 +835,7 @@ __device__ void dedd_shortwave(int nslyr, int nilyr, double *coszen, bool heat_c
                                double swidr, double swidf, double *alvdr, double *alvdf, double *alidr,
                                double *alidf, double *fswsfc, double *fswint, double *fswthru, double *Sswabs,
                                double *Iswabs, double *albice, double *albsno, double *albpnd, double *fswpenl,
-                               bool fix_zero_dz)
+                               bool fix_zero_dz, const DeddZaero *za)
 {
     const int klev = nslyr + nilyr + 1;
     const int klevp = klev + 1;
@@ -795,7 +888,7 @@ __device__ void dedd_shortwave(int nslyr, int nilyr, double *coszen, bool heat_c
         }
         dedd_compute(nilyr, nslyr, klev, klevp, heat_capacity, fnidr, *coszen, R_ice, R_pnd, kalg, exp_min, swvdr,
                      swvdf, swidr, swidf, srftyp, hsx, rhosnw, rsnw, hi, hp, frac, &avdrl, &avdfl, &aidrl, &aidfl,
-                     fswsfc, fswint, fswthru, Sswabs, Iswabs, fswpenl, fix_zero_dz);
+                     fswsfc, fswint, fswthru, Sswabs, Iswabs, fswpenl, fix_zero_dz, za);
         *alvdr = A(*alvdr, M(avdrl, frac));
         *alvdf = A(*alvdf, M(avdfl, frac));
         *alidr = A(*alidr, M(aidrl, frac));
@@ -809,6 +902,39 @@ __device__ void dedd_shortwave(int nslyr, int nilyr, double *coszen, bool heat_c
         *alidr = 1.0;
         *alidf = 1.0;
     }
+}
+
+// compute_shortwave_trcr (ice_shortwave.F90:3571-3729) with z_tracers and
+// tr_zaero, no algae: each z-aerosol's ice layers (conc[0..nblyr], on the
+// biology interface grid bio_grid, nblyr + 1 points) remapped onto the
+// shortwave grid (swgrid, nilyr + 1 points, its top point thinned to the
+// surface scattering layer), below each aerosol's two snow levels. v8.4.2
+// passes column_radiation's verticalGrid as bio_grid (the opt-in correction
+// shortwave_bio_grid passes interfaceBiologyGrid; column_radiation_v842.py).
+// A remap stop (negative brine height) returns 1 with the later aerosols'
+// levels at their 0, as v8.4.2's early return does. colpkg_step_radiation
+// never resets its l_stop (an uninitialised local, false on the oracle's
+// entry to each cell), so after a stop every later category of the cell
+// returns at its first remap: all its levels stay 0 (the caller's l_stop).
+__device__ int dedd_shortwave_trcr(int nz, int nslyr, int nilyr, int nblyr, const double *conc, const double *swgrid,
+                                    const double *bio_grid, double hin, double hbri, double *trcrn_sw)
+{
+    double icegrid[DEDD_NL], bgrid[ZB_NBMAX + 2], out[DEDD_NL];
+    for (int k = 1; k <= nilyr + 1; ++k) icegrid[k] = swgrid[k - 1];
+    if (M(M(swgrid[0], hin), 2.0) > DEDD_HI_SSL) icegrid[1] = D(D(DEDD_HI_SSL, 2.0), hin);
+    for (int k = 1; k <= nblyr + 1; ++k) bgrid[k] = bio_grid[k - 1];
+    const int L = nslyr + nilyr + 2;
+    for (int m = 0; m < nz; ++m) {
+        const double *c = conc + m * (nblyr + 3);
+        for (int k = 0; k <= nilyr + 1; ++k) out[k] = 0.0;
+        const double top_conc = M(c[0], DEDD_MIN_BGC);
+        if (remap_zbgc(c, 1, nilyr + 1, nblyr + 1, hin, hbri, icegrid, bgrid, top_conc, out)) return 1;
+        double *sw = trcrn_sw + m * L;
+        for (int k = 1; k <= nilyr + 1; ++k) sw[nslyr + k] = out[k];
+        sw[0] = c[nblyr + 1];
+        for (int k = 1; k <= nslyr; ++k) sw[k] = c[nblyr + 2];
+    }
+    return 0;
 }
 
 // mpas_seaice_column.F:2118-2484 column_radiation's loop over the owned
@@ -827,7 +953,11 @@ extern "C" __global__ void seaice_column_radiation_dedd_v842(
     double *__restrict__ fswintnAll, double *__restrict__ fswthrunAll, double *__restrict__ fswpenlnAll,
     double *__restrict__ IswabsnAll, double *__restrict__ SswabsnAll, double *__restrict__ albicenAll,
     double *__restrict__ albsnonAll, double *__restrict__ albpndnAll, double *__restrict__ apeffnAll,
-    double *__restrict__ snowfracnAll, double *__restrict__ dhsnAll, double *__restrict__ zbionAll)
+    double *__restrict__ snowfracnAll, double *__restrict__ dhsnAll, double *__restrict__ zbionAll,
+    int nz, int nblyr, const double *__restrict__ aeroAll, const double *__restrict__ fbriAll,
+    const double *__restrict__ swgrid, const double *__restrict__ bio_grid, const double *__restrict__ kaer,
+    const double *__restrict__ waer, const double *__restrict__ gaer, const double *__restrict__ kbc,
+    const double *__restrict__ wbc, const double *__restrict__ gbc, const double *__restrict__ bcenh)
 {
     int c = blockIdx.x * blockDim.x + threadIdx.x;
     if (c >= nCellsSolve) return;
@@ -863,6 +993,18 @@ extern "C" __global__ void seaice_column_radiation_dedd_v842(
     const bool initonly = (flags & DEDD_INITONLY) != 0;
     const bool heat_capacity = (flags & DEDD_HEAT_CAPACITY) != 0;
     const double fsnow = fsnowAll[c];
+
+    // colpkg_step_radiation's compute_shortwave_trcr, every category with ice
+    bool l_stop = false;
+    if (nz > 0)
+        for (int n = 0; n < ncat; ++n)
+            if (aicenAll[cn + n] > PUNY && !l_stop) {
+                const double hin = D(vicenAll[cn + n], aicenAll[cn + n]);
+                const double hbri = M(fbriAll[cn + n], hin);
+                const double *conc = aeroAll + (cn + n) * (size_t)(nz * (nblyr + 3));
+                l_stop = dedd_shortwave_trcr(nz, nslyr, nilyr, nblyr, conc, swgrid, bio_grid, hin, hbri,
+                                             zbionAll + (cn + n) * nbio);
+            }
 
     // run_dEdd
     const double exp_min = glibc_exp(-10.0);
@@ -948,11 +1090,13 @@ extern "C" __global__ void seaice_column_radiation_dedd_v842(
                 hpn = 0.0;
             }
             snowfracn[n] = fsn;
+            DeddZaero za = {nz, (flags & DEDD_MODAL) != 0, zbionAll + (cn + n) * nbio, kaer, waer, gaer, kbc, wbc,
+                            gbc, bcenh};
             dedd_shortwave(nslyr, nilyr, &coszen, heat_capacity, aicen[n], vicen[n], hsn, fsn, rhosnwn, rsnwn, fpn,
                            hpn, R_ice, R_pnd, kalg, exp_min, swvdr, swvdf, swidr, swidf, &alvdrn[n], &alvdfn[n],
                            &alidrn[n], &alidfn[n], &fswsfcn[n], &fswintn[n], &fswthrun[n], &Sswabsn[n * nslyr],
                            &Iswabsn[n * nilyr], &albicenAll[cn + n], &albsnonAll[cn + n], &albpndnAll[cn + n],
-                           &fswpenln[n * (nilyr + 1)], (flags & DEDD_FIX_ZERO_DZ) != 0);
+                           &fswpenln[n * (nilyr + 1)], (flags & DEDD_FIX_ZERO_DZ) != 0, nz > 0 ? &za : nullptr);
         }
     }
     coszenAll[c] = coszen;

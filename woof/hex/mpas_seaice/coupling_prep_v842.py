@@ -149,6 +149,7 @@ def check_config(configs: dict) -> None:
         # tracer is (bio_index_o 17), and coupling_prep's mapping skips that entry (PON has no
         # ocean*Flux field, mpas_seaice_column.F:3998-3999), as it skips the black carbons'
         # (23-24, :4016); the first dust's (25) goes into oceanDustIronFlux (:4018-4021)
+        # the shortwave bioabsorption and the modal optics touch no ocean flux
         # the flag list first, then the vertical tracers' own checks, in refuse_unported's order
         cv.refuse_uncarried_bgc(c, cv.carried_bgc_flags(c),
                                 "the column biogeochemistry's ocean fluxes are ported for the brine height, "
