@@ -21,6 +21,16 @@ releases and is kept as upstream wrote it.
   the WRFPLUS diffusion TL/AD take WRF's cold seam word for word, and the
   WRFPLUS diffusion fixture grades the seam words it used to mask.
 
+- `pd_adv_west_courant` (correct-mode finding FQ13, read where
+  `moist_adv_opt = 1` runs on a bounded x axis): WRF's `advect_scalar_pd`
+  forms the second-order west face's Courant number as `(ru/mu)*dt/dx`,
+  every other face as `ru*dt/dx/mu`. On (correct mode) the west face takes
+  every face's order in the strict primal (`pd_fluxes`, CUDA and Metal) and
+  the WRFPLUS PD TL/AD together, so a mirrored flow gives the mirrored
+  fluxes; off (exact mode) both are WRF's and WRFPLUS's word for word and
+  the WRFPLUS PD fixture still matches. The default build never carried
+  WRF's order there.
+
 Merged upstream WOOF 1.1.5 (with 1.1.4). Where upstream built a feature the
 fork already had, upstream's keys and flags are now the only ones:
 

@@ -68,16 +68,22 @@ NO_MLX = [b for b in BACKENDS if b.values[0] != "mlx"]
 # specified (one- and two-point rings, the held source), every h order,
 # v orders 2, 4 and 6, one level and the 7-point minimum of a bounded
 # axis, periodic axes shorter than the stencil, and Courant numbers past
-# 0.5 on a share of the faces (``_wind``: flux_upwind's clamp).
+# 0.5 on a share of the faces (``_wind``: flux_upwind's clamp), and the
+# specified cases again with RunConfig.pd_adv_west_courant on
+# (``west_symmetric``, finding FQ13: the west face in every face's order).
 CONFIGS = {
     "pa": [dict(), dict(has_msf=1), dict(spec=1), dict(horder=3, vorder=2),
            dict(horder=6, vorder=6, has_msf=1), dict(horder=4, vorder=4, spec=1),
            dict(nz=1, ny=7, nx=7, spec=1), dict(nz=3, ny=2, nx=3),
-           dict(_wind=40.0, has_msf=1), dict(_wind=40.0, spec=1, horder=3)],
+           dict(_wind=40.0, has_msf=1), dict(_wind=40.0, spec=1, horder=3),
+           dict(spec=1, has_msf=1, west_symmetric=1),
+           dict(_wind=40.0, spec=1, horder=3, west_symmetric=1)],
     "pd": [dict(), dict(has_msf=1), dict(spec=1), dict(spec=1, held=1, has_msf=1),
            dict(spec=1, spec_zone=2, horder=3, vorder=2), dict(horder=6, vorder=6, held=1),
            dict(horder=4, vorder=4, held=1), dict(nz=1, ny=7, nx=7, spec=1, held=1),
-           dict(_wind=40.0, spec=1, held=1)],
+           dict(_wind=40.0, spec=1, held=1),
+           dict(spec=1, held=1, has_msf=1, west_symmetric=1),
+           dict(_wind=40.0, spec=1, spec_zone=2, horder=4, vorder=4, west_symmetric=1)],
 }
 
 STRICT_ENV = {"GPUWM_WRF_EXACT": "1", "WOOF_WRF_EXACT_DIAGNOSTICS": "1",
@@ -307,7 +313,8 @@ for i, over in enumerate({CONFIGS["pd"]!r}):
     st = run_nl("pd", g, tr)
     state = coord(g, tr, tr["q0"])
     cfg = NS(specified=bool(g.spec), nested=False, spec_zone=g.spec_zone, dx=g.dx, dy=g.dy,
-             cu_physics=0, v_sca_adv_order=g.vorder, h_sca_adv_order=g.horder)
+             cu_physics=0, v_sca_adv_order=g.vorder, h_sca_adv_order=g.horder,
+             moist_adv_opt=1, pd_adv_west_courant=bool(g.west_symmetric))
     mu0, mu = tr["mub2d"] + tr["mup0"], tr["mub2d"] + tr["mup"]
     chm0 = tr["c1h"][:, None, None] * mu0[None] + tr["c2h"][:, None, None]
     q, tend = tr["q"].copy(), cp.zeros_like(tr["q"])
@@ -340,7 +347,7 @@ for i, over in enumerate({CONFIGS["pa"]!r}):
     M.launch_pd_fluxes(tr["q"], tr["q0e"], tr["ru_m"], tr["rv_m"], tr["ww_m"], tr["muts"],
                        state, g.dx, g.dy, g.dt, *b, msft=tr["msft"], has_msf=bool(g.has_msf),
                        open_x=bool(g.spec), open_y=bool(g.spec), vorder=g.vorder,
-                       horder=g.horder)
+                       horder=g.horder, west_symmetric=bool(g.west_symmetric))
     M.launch_pd_renorm_apply(tr["q0e"], tr["mub2d"] + tr["mup0"], *b, tend=ref, coord=state,
                              dx=g.dx, dy=g.dy, dt=g.dt, msft=tr["msft"],
                              has_msf=bool(g.has_msf), open_x=bool(g.spec),
@@ -477,11 +484,148 @@ for key, over in (("pd", dict(moist_adv_opt=1)), ("v2", dict(moist_adv_opt=1, v_
 def test_geometry_rejects_unported_options():
     """v_sca_adv_order 5 (the HRRR fork's vertical arm), h order 2, a
     specified axis under 7 cells, a ring that does not fit or without a
-    specified domain, flags outside 0/1, a non-positive or non-finite dt
+    specified domain, flags outside 0/1 (west_symmetric included), a non-positive or non-finite dt
     or spacing, and empty axes are refused, not run."""
     from woof.grad.wrfplus import cases as C
     for over in (dict(vorder=5), dict(horder=2), dict(spec=1, nx=6), dict(spec=1, spec_zone=5),
                  dict(spec=1, spec_zone=0), dict(spec_zone=1), dict(has_msf=2), dict(held=2),
+                 dict(west_symmetric=2),
                  dict(dt=0.0), dict(dt=float("nan")), dict(dx=-1.0), dict(nz=0)):
         with pytest.raises(ValueError):
             C.pd_geometry(**over).validate()
+
+
+# RunConfig.pd_adv_west_courant (finding FQ13): specified cases, both
+# second-order bands, the clamp and map factors.
+WEST_CASES = [dict(spec=1), dict(spec=1, has_msf=1, horder=3),
+              dict(_wind=40.0, spec=1, horder=6, vorder=6),
+              dict(spec=1, spec_zone=2, horder=4, has_msf=1)]
+
+_MIRROR = '''
+def host(d):
+    return {k: cp.asnumpy(v) for k, v in d.items()}
+def mirror(tr):
+    # x -> nx-1-x: cells and y/eta faces reversed in i, x faces f -> nx-f
+    # with the mass flux negated
+    out = {}
+    for k, v in host(tr).items():
+        m = v[..., ::-1] if v.ndim >= 2 else v
+        out[k] = cp.asarray(np.ascontiguousarray(-m if k == "ru_m" else m))
+    return out
+def mirrored(f, fm, tend, tendm):
+    # numeric (0 == -0) mismatches of the mirrored run's fluxes against the
+    # mirror of the run's, by array; "tend" the tendency's largest relative
+    # mismatch (its divergence sums the four x terms of a cell in one
+    # order, (r - l) + r - l, so the mirror reassociates them)
+    f, fm = host(f), host(fm)
+    bad = {}
+    for n in P.FLUXES:
+        want = -f[n][..., ::-1] if n in ("fxl", "fxc") else f[n][..., ::-1]
+        bad[n] = int((fm[n] != want).sum())
+    a, b = cp.asnumpy(tendm).astype(np.float64), cp.asnumpy(tend)[..., ::-1].astype(np.float64)
+    bad["tend"] = float(np.abs(a - b).max()) / max(float(np.abs(b).max()), 1e-300)
+    return bad
+'''
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_west_courant_correction_moves_only_the_west_face(backend, tmp_path):
+    """FQ13 in the TL/AD's base: with west_symmetric the only flux words
+    that move are the upwind and correction fluxes of the x face i == 1
+    (WRF's ids+1), and some do (the two orders round differently); and
+    with it on a mirrored flow (x reversed, ru negated) gives the
+    mirrored fluxes word for word, which WRF's west face breaks, and the
+    mirrored tendency to the divergence's reassociation.  Binary64 and
+    binary32 (binary32 only on Metal)."""
+    dtypes = ["float32"] if backend == "mlx" else ["float64", "float32"]
+    out = _run(backend, _MIRROR + f'''
+import dataclasses
+for dtn in {dtypes!r}:
+    dt = np.dtype(dtn)
+    for i, over in enumerate({WEST_CASES!r}):
+        over = dict(over)
+        wind = over.pop("_wind", 1.0)
+        g0 = C.pd_geometry(**over)
+        g1 = dataclasses.replace(g0, west_symmetric=1)
+        tr = dev(C.pa_trajectory(g0, 91 + i, dt, hybrid=bool(i % 2), wind=wind))
+        t0, f0, _ = P._advect_base(tr, g0, dt)
+        t1, f1, _ = P._advect_base(tr, g1, dt)
+        key = f"{{dtn}}/{{i}}"
+        h0, h1 = host(f0), host(f1)
+        for n in P.FLUXES:
+            d = h0[n] != h1[n]
+            if n in ("fxl", "fxc"):
+                out[key + "/west/" + n] = int(d[..., 1].sum())
+                d[..., 1] = False
+            out[key + "/elsewhere/" + n] = int(d.sum())
+        trm = mirror(tr)
+        for name, g in (("wrf", g0), ("corrected", g1)):
+            tm, fm, _ = P._advect_base(trm, g, dt)
+            t, f, _ = (t0, f0, None) if g is g0 else (t1, f1, None)
+            out[key + "/mirror/" + name] = mirrored(f, fm, t, tm)
+''', tmp_path)
+    for dtn in (["float32"] if backend == "mlx" else ["float64", "float32"]):
+        moved = sum(out[f"{dtn}/{i}/west/fxl"] for i in range(len(WEST_CASES)))
+        assert moved > 0, (dtn, out)
+        asym = sum(out[f"{dtn}/{i}/mirror/wrf"]["fxl"] for i in range(len(WEST_CASES)))
+        assert asym > 0, (dtn, out)
+        for i in range(len(WEST_CASES)):
+            key = f"{dtn}/{i}"
+            assert all(out[f"{key}/elsewhere/{n}"] == 0 for n in
+                       ("fxl", "fxc", "fyl", "fyc", "fzl", "fzc")), (key, out)
+            mir = dict(out[f"{key}/mirror/corrected"])
+            assert mir.pop("tend") < (1e-12 if dtn == "float64" else 1e-5), (key, out)
+            assert all(v == 0 for v in mir.values()), (key, out)
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_west_courant_correction_strict_primal(backend, tmp_path):
+    """FQ13 in woof's strict primal (pd_fluxes, GPUWM_WRF_EXACT=1):
+    west_symmetric moves only the x face i == 1, and some of its words;
+    with it on a mirrored flow gives the mirrored fluxes word for word;
+    and woof.core.moist.pd_west_symmetric reads the key only where
+    moist_adv_opt = 1."""
+    out = _run(backend, _MIRROR + f'''
+from types import SimpleNamespace as NS
+from woof.core import moist as M
+f32 = np.float32
+out["read"] = [M.pd_west_symmetric(NS(pd_adv_west_courant=a, moist_adv_opt=b))
+               for a, b in ((True, 1), (False, 1), (True, 0))]
+def coord(tr):
+    return NS(c1h=tr["c1h"], c2h=tr["c2h"], rdnw=tr["rdnw"], fnm=tr["fnm"], fnp=tr["fnp"])
+def fluxes(g, tr, west):
+    nz, ny, nx = g.nz, g.ny, g.nx
+    b = [cp.zeros(s, f32) for s in ((nz, ny, nx + 1),) * 2 + ((nz, ny + 1, nx),) * 2
+         + ((nz + 1, ny, nx),) * 2]
+    M.launch_pd_fluxes(tr["q"], tr["q0e"], tr["ru_m"], tr["rv_m"], tr["ww_m"], tr["muts"],
+                       coord(tr), g.dx, g.dy, g.dt, *b, msft=tr["msft"],
+                       has_msf=bool(g.has_msf), open_x=True, open_y=True, vorder=g.vorder,
+                       horder=g.horder, west_symmetric=west)
+    return dict(zip(P.FLUXES, b))
+for i, over in enumerate({WEST_CASES!r}):
+    over = dict(over)
+    wind = over.pop("_wind", 1.0)
+    g = C.pd_geometry(**over)
+    tr = dev(C.pa_trajectory(g, 91 + i, f32, hybrid=bool(i % 2), wind=wind))
+    h0, h1 = host(fluxes(g, tr, False)), host(fluxes(g, tr, True))
+    for n in P.FLUXES:
+        d = h0[n] != h1[n]
+        if n in ("fxl", "fxc"):
+            out[f"{{i}}/west/{{n}}"] = int(d[..., 1].sum())
+            d[..., 1] = False
+        out[f"{{i}}/elsewhere/{{n}}"] = int(d.sum())
+    trm = mirror(tr)
+    z = cp.zeros((1,), f32)
+    for name, west in (("wrf", False), ("corrected", True)):
+        bad = mirrored(fluxes(g, tr, west), fluxes(g, trm, west), z, z)
+        bad.pop("tend")
+        out[f"{{i}}/mirror/{{name}}"] = bad
+''', tmp_path, extra_env=STRICT_ENV)
+    assert out["read"] == [True, False, False], out
+    n = len(WEST_CASES)
+    assert sum(out[f"{i}/west/fxl"] for i in range(n)) > 0, out
+    assert sum(out[f"{i}/mirror/wrf"]["fxl"] for i in range(n)) > 0, out
+    for i in range(n):
+        assert all(out[f"{i}/elsewhere/{f}"] == 0 for f in
+                   ("fxl", "fxc", "fyl", "fyc", "fzl", "fzc")), (i, out)
+        assert all(v == 0 for v in out[f"{i}/mirror/corrected"].values()), (i, out)

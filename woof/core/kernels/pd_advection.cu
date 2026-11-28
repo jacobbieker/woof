@@ -276,7 +276,10 @@ dxp = dx * 2.0f / (msft[(size_t)j * nx + i]
 #if GPUWM_WRF_EXACT_C_ADVECTION
             // The western second-order face divides the velocity by its
             // face mass before constructing its Courant number in WRF.
-            if (i == 1 && GPUWM_HORDER != 2) cr = __fdiv_rn(__fdiv_rn(vel, muf) * dt, dxp);
+            // open_x bit 2 (RunConfig.pd_adv_west_courant, finding FQ13)
+            // keeps every face's order there instead.
+            if (i == 1 && GPUWM_HORDER != 2 && !(open_x & 2))
+                cr = __fdiv_rn(__fdiv_rn(vel, muf) * dt, dxp);
 #endif
             real fl = muf * (dxp / dt)
                     * flux_upwind(q0[IDX3(k, j, i - 1)],

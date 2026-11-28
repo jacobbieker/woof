@@ -194,7 +194,7 @@ static __device__ __forceinline__ Dl upwind(Dl muf, wreal sp_dt, Dl qm1, Dl q0v,
 // A horizontal face's upwind flux: right/left column masses and map
 // factors, the cell spacing dx, the stage dt; ``west`` the western
 // second-order face of a bounded x axis (WRF divides ru by the face mass
-// before the Courant number there).
+// before the Courant number there; pd_west_wrf).
 static __device__ __forceinline__ Dl hface_low(Dl vel, Dl mr, Dl ml, wreal c1, wreal c2,
                                               wreal msr, wreal msl, int has_msf, wreal dx,
                                               wreal dt, Dl q0l, Dl q0r, int west)
@@ -205,6 +205,15 @@ static __device__ __forceinline__ Dl hface_low(Dl vel, Dl mr, Dl ml, wreal c1, w
     Dl cr = ddiv(ddivc(vel * dt, dxp), muf);
     if (west) cr = ddivc(ddiv(vel, muf) * dt, dxp);
     return upwind(muf, wdiv(dxp, dt), q0l, q0r, cr);
+}
+
+// Does a bounded x axis's west face (i == 1) take WRF's (ru/mu)*dt/dx?
+// open_x bit 2 is RunConfig.pd_adv_west_courant (finding FQ13): every
+// other face's order there, as the primal's pd_fluxes; second order
+// everywhere (ADV_H 2) has no such face in WRF.
+static __device__ __forceinline__ int pd_west_wrf(int open_x)
+{
+    return open_x && !(open_x & 2) && ADV_H != 2;
 }
 
 // pd_zface_half from s[0..5] = q at kf-3 .. kf+2 (the face's interior
@@ -333,7 +342,7 @@ extern "C" __global__ void pd_flux_tl(FLUX_TL_ARGS)
                               msft[(size_t)j * nx + h.r], msft[(size_t)j * nx + h.l],
                               has_msf, dx, dt, LD(q0, q0d, R3(k, j, h.l, ny, nx)),
                               LD(q0, q0d, R3(k, j, h.r, ny, nx)),
-                              open_x && i == 1 && ADV_H != 2);
+                              pd_west_wrf(open_x) && i == 1);
             Dl fh = hface_high(s, vel, h.band);
             put(fxl, fxld, at, fl);
             put(fxc, fxcd, at, fh - fl);
@@ -758,7 +767,7 @@ extern "C" __global__ void pd_flux_ad_face(
                               c1h[k], c2h[k], msft[(size_t)j * nx + h.r],
                               msft[(size_t)j * nx + h.l], has_msf, dx, dt,
                               cst(q0[R3(k, j, h.l, ny, nx)]), cst(q0[R3(k, j, h.r, ny, nx)]),
-                              open_x && i == 1 && ADV_H != 2);
+                              pd_west_wrf(open_x) && i == 1);
             Dl fh = hface_high(s, vel, h.band);
             aru[f] += afh * fh.d + afl * fl.d;
         }
@@ -900,7 +909,7 @@ extern "C" __global__ void pd_flux_ad_cell(
             s.s[o] = dl(rd ? q[R3(k, j, h.cell[o], ny, nx)] : 0, me_o ? 1 : 0);
         }
         if (hit) a_q += afxc[at] * hface_high(s, vel, h.band).d;
-        int west = open_x && f == 1 && ADV_H != 2;
+        int west = pd_west_wrf(open_x) && f == 1;
         wreal mr = mut[(size_t)j * nx + h.r], ml = mut[(size_t)j * nx + h.l];
         wreal sr = msft[(size_t)j * nx + h.r], sl = msft[(size_t)j * nx + h.l];
         wreal q0l = q0[R3(k, j, h.l, ny, nx)], q0r = q0[R3(k, j, h.r, ny, nx)];

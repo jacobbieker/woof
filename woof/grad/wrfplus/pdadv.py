@@ -70,7 +70,11 @@ class PDGeometry:
     kernels take ``DTYPE(dx)`` and ``DTYPE(1.0/dx)`` as the launchers
     do), the update's ``dt``, the orders, a specified domain (both axes
     bounded, the ring of ``spec_zone`` cleared), map factors and whether
-    the species has a held source."""
+    the species has a held source.  ``west_symmetric`` = 1 is
+    RunConfig.pd_adv_west_courant (finding FQ13): a specified domain's west
+    face (i == 1) forms its Courant number in every other face's order,
+    ru*dt/dx/mu, as the primal's pd_fluxes does with open_x bit 2; 0 is
+    WRF's and WRFPLUS's (ru/mu)*dt/dx.  It rides ``open_x`` as bit 2."""
     nz: int
     ny: int
     nx: int
@@ -83,10 +87,11 @@ class PDGeometry:
     spec_zone: int = 0
     has_msf: int = 0
     held: int = 0
+    west_symmetric: int = 0
 
     @property
     def open_x(self) -> int:
-        return self.spec
+        return self.spec | (2 if self.spec and self.west_symmetric else 0)
 
     @property
     def open_y(self) -> int:
@@ -101,7 +106,7 @@ class PDGeometry:
         for name in ("nz", "ny", "nx"):
             if getattr(self, name) < 1:
                 raise ValueError(f"{name} must be >= 1, got {getattr(self, name)}")
-        for name in ("spec", "has_msf", "held"):
+        for name in ("spec", "has_msf", "held", "west_symmetric"):
             if getattr(self, name) not in (0, 1):
                 raise ValueError(f"{name} must be 0 or 1, got {getattr(self, name)!r}")
         if self.spec and min(self.nx, self.ny) < 7:

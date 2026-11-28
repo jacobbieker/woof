@@ -1449,8 +1449,15 @@ Each step is one small PR, taken to merged before the next widens.
        nonlinear routine on hybrid levels.
      - WRF's west-face Courant asymmetry: at `i == ids+1` the upwind
        flux uses `vel = ru/mu` (`module_advect_em.F` ~6438). WRFPLUS
-       repeats it (`module_advect_em_tl.F` ~8581-8586), and woof's
-       primal and TL/AD follow it.
+       repeats it (`module_advect_em_tl.F` ~8581-8586). The correction
+       `pd_adv_west_courant` (finding FQ13, on in correct mode) gives that
+       face every other face's order, `ru*dt/dx/mu`, in the strict primal
+       (`pd_fluxes`) and the TL/AD together (`open_x` bit 2,
+       `PDGeometry.west_symmetric`); off (exact mode) both follow WRF, so
+       the fixture still grades the WRFPLUS words. With it on, the only
+       flux words that move are the x face `i == 1`'s, and a mirrored flow
+       gives the mirrored fluxes word for word
+       (`tests/test_grad_wrfplus_pdadv.py`).
      - Below Courant 0.5 the upwind flux does not depend on the face
        mass (`mu (dx/dt) cr = vel`). The muts adjoint is then roundoff
        noise in both WRFPLUS and woof (~1e-21 against O(1e-3) terms).
