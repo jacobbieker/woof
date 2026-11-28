@@ -302,7 +302,8 @@ def run_gpu(case: dict) -> dict[str, np.ndarray]:
     dev = _stream.on_device(FIELDS, case)
     tt.tend_tracer(dt=case["dt"], mesh=dev["mesh"], state=dev["state"], tracers=dev["tracers"],
                    tracers_tend=dev["tracersTend"], tracers_surface_flux=dev["tracersSurfaceFlux"],
-                   diagnostics=dev["diagnostics"], forcing=dev["forcing"], configs=case["config"])
+                   diagnostics=dev["diagnostics"], forcing=dev["forcing"], configs=case["config"],
+                   tracers_level1=dev["tracers"])  # one time level in the oracle: level 1 is level 2
     return {f"{pool}/{name}": cp.asnumpy(dev[pool][name]) for pool, name, kind, _ in FIELDS
             if kind in (REAL, INT) and dev[pool][name] is not None}
 

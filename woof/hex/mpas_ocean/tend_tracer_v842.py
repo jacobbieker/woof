@@ -145,11 +145,17 @@ def tend_tracer(*, dt: float, mesh: dict, state: dict, tracers: dict, tracers_te
     ``tracers_surface_flux``, the forcing's penetrative flux and the budgets.
 
     With ``config_use_cvmix_kpp``, ``ocn_compute_KPP_input_fields`` reads
-    ``tracers_level1`` (time level 1's tracers; ``tracers`` when not given)
-    for its surface fluxes, as the Fortran does, and ``tracers`` for its
-    equation of state."""
+    ``tracers_level1`` (time level 1's tracers, required then; a call with
+    one time level passes ``tracers`` again) for its surface fluxes, as the
+    Fortran does, and ``tracers`` for its equation of state. As in v8.4.2
+    this runs whether or not ``config_use_cvmix`` is on: without CVMix
+    nothing builds ``vertNonLocalFlux``, and the flux applied is whatever the
+    diagnostics pool holds (word-exact; QUIRKS)."""
     import cupy as cp
     check_config(configs)
+    if configs.get("config_use_cvmix_kpp", False) and tracers_level1 is None:
+        raise TypeError("tend_tracer: config_use_cvmix_kpp reads time level 1's tracers; pass tracers_level1 "
+                        "(the same tracers for a call with one time level)")
     if configs.get("config_disable_tr_all_tend", False):
         return
     h = state["layerThickness"]
@@ -223,7 +229,7 @@ def tend_tracer(*, dt: float, mesh: dict, state: dict, tracers: dict, tracers_te
         sw[:n_cells] = tend[:n_cells, :, it - 1] - sw[:n_cells]
     if configs.get("config_use_cvmix_kpp", False):
         _kpp_input_fields(precision=precision, mesh=mesh, layer_thickness=h, tracers=tracers,
-                          tracers_level1=tracers if tracers_level1 is None else tracers_level1,
+                          tracers_level1=tracers_level1,
                           tracers_surface_flux=tracers_surface_flux, diagnostics=d, forcing=f, configs=configs)
         if not configs.get("config_cvmix_kpp_nonlocal_with_implicit_mix", False):
             if budgets:
