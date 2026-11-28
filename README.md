@@ -774,7 +774,7 @@ Notes on the 1.1.7 sync:
     `--undriven-species-boundary wrf-flow-dependent` (hex, regional, where its drivers carry it; the only
     flag `--quirk-corrections` sets); `woof_land_ice_isomip_freezing_salinity`,
     `woof_bottom_drag_dry_edges`, `woof_rayleigh_bottom_friction` and
-    `woof_redi_k33` (MPAS-Ocean); `woof_sgh_init_mask`, `woof_enthalpy_advection_units`,
+    `woof_redi_k33` and `woof_kpp_surface_flux_time_level` (MPAS-Ocean); `woof_sgh_init_mask`, `woof_enthalpy_advection_units`,
     `woof_simple_velocity_bed`, `woof_statistics_extrema` and
     `woof_analysis_empty` (MALI); the MPAS-Seaice column's
     `set_sfcflux_order`, `ice_velocity_at_cell`,

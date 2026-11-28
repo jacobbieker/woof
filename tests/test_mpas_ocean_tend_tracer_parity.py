@@ -210,6 +210,54 @@ def test_a_mutated_port_is_caught(monkeypatch, precision, original, mutated, cas
         tend_tracer_v842._module_on.cache_clear()
 
 
+def _kpp_run(case_name, mode, shifted_level1):
+    """The KPP case through tend_tracer in physics mode ``mode``; with ``shifted_level1`` time level 1's
+    tracers differ from the current ones."""
+    import cupy as cp
+    from woof.hex.mpas_ocean import tend_tracer_v842 as tt
+    case = next(c for c in oo.cases("r8") if c["name"] == case_name)
+    config = dict(case["config"], config_physics_mode=mode)
+    dev = oo._stream.on_device(oo.FIELDS, case)
+    level1 = dev["tracers"]
+    if shifted_level1:
+        level1 = dict(level1, activeTracers=level1["activeTracers"] * 1.25 + 0.5)
+    tt.tend_tracer(dt=case["dt"], mesh=dev["mesh"], state=dev["state"], tracers=dev["tracers"],
+                   tracers_tend=dev["tracersTend"], tracers_surface_flux=dev["tracersSurfaceFlux"],
+                   diagnostics=dev["diagnostics"], forcing=dev["forcing"], configs=config, tracers_level1=level1)
+    return (cp.asnumpy(dev["tracersSurfaceFlux"]["nonLocalSurfaceTracerFlux"]),
+            cp.asnumpy(dev["tracersTend"]["activeTracersTend"]))
+
+
+@requires_gpu
+def test_kpp_surface_flux_time_level_correction():
+    """FQ14: v8.4.2 reads KPP's surface-flux tracers at time level 1; correct mode reads the current level."""
+    name = "kpp_nonlocal_bulk_budgets"
+    exact_same = _kpp_run(name, "exact", False)
+    exact_moved = _kpp_run(name, "exact", True)
+    fixed_same = _kpp_run(name, "correct", False)
+    fixed_moved = _kpp_run(name, "correct", True)
+    # the time levels differ: exact mode reads level 1 (the quirk), the correction does not
+    assert exact_moved[0].tobytes() != exact_same[0].tobytes()
+    assert exact_moved[0].tobytes() != fixed_moved[0].tobytes()
+    # the correction reads the current level whatever level 1 holds; level 1 = current is the oracle's call
+    assert fixed_moved[0].tobytes() == fixed_same[0].tobytes() == exact_same[0].tobytes()
+    assert fixed_moved[1].tobytes() == fixed_same[1].tobytes() == exact_same[1].tobytes()
+    # exact mode word for word: the oracle's fixture, with the two levels equal
+    ref = oo.load_fixture("r8")[name]
+    assert oo.word_mismatches(exact_same[0], ref["tracersSurfaceFlux/nonLocalSurfaceTracerFlux"]) == 0
+    # the correction needs no level-1 tracers; exact mode does
+    from woof.hex.mpas_ocean import tend_tracer_v842 as tt
+    case = next(c for c in oo.cases("r8") if c["name"] == name)
+    # (this module runs in exact mode by default; the correct-mode default is named)
+    assert tt.kpp_surface_flux_current_level(dict(case["config"], config_physics_mode="correct")) is True
+    assert tt.kpp_surface_flux_current_level(case["config"]) is False
+    assert tt.kpp_surface_flux_current_level(dict(case["config"], config_physics_mode="exact")) is False
+    assert tt.kpp_surface_flux_current_level(dict(case["config"], config_physics_mode="exact",
+                                                  woof_kpp_surface_flux_time_level="current")) is True
+    with pytest.raises(ConfigurationRefusal, match="woof_kpp_surface_flux_time_level"):
+        tt.kpp_surface_flux_current_level({"woof_kpp_surface_flux_time_level": "level2"})
+
+
 def _oracle_toolchain() -> tuple[str, Path] | None:
     return _oracle_toolchains.mpas_v842("core_ocean")
 

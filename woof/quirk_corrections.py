@@ -169,6 +169,10 @@ CORRECTIONS: tuple[QuirkCorrection, ...] = (
     QuirkCorrection(
         "woof_redi_k33", "mpas_ocean", "v842", "kappa", "config_use_Redi",
         "Redi's vertical diffusion adds config_Redi_kappa * k33 (a diffusivity), not the bare slope k33"),
+    QuirkCorrection(
+        "woof_kpp_surface_flux_time_level", "mpas_ocean", "level1", "current", "config_use_cvmix_kpp",
+        "KPP's non-local surface fluxes read the active tracers at the current time level, not at time "
+        "level 1 (finding FQ14)"),
     # MALI v8.4.2
     QuirkCorrection(
         "woof_sgh_init_mask", "mali", "v842", "corrected", "config_SGH",
