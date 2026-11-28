@@ -133,11 +133,14 @@ def main(lane: Path, work: Path, max_ext_its: int) -> dict:
     win = c.window
     # halo_start "wrfplus", moisture "advect"; lbc "wrfda" (WOOF_L1_LBC=fixed: the
     # tables unperturbed, to measure what WRFDA's boundary perturbation is worth)
-    model = w4.WindowModel(win, SPS, lbc=os.environ.get("WOOF_L1_LBC", "wrfda"))
+    # WOOF_L1_CHECKPOINT: the window's checkpoint policy (all, the default, or slot; the
+    # gradient is the same to the word under either, window4d's module docstring)
+    model = w4.WindowModel(win, SPS, lbc=os.environ.get("WOOF_L1_LBC", "wrfda"),
+                           checkpoint=os.environ.get("WOOF_L1_CHECKPOINT", "all"))
     assert model.moisture == "advect"
     fg = read_first_guess(lane / "fg")
-    states = {k: win._checkpoints[k] for k in range(win.nsteps)}
-    states[win.nsteps] = win.forward()
+    states = {k: win._checkpoints[k] for k in range(0, win.nsteps, win.every)}
+    states[win.nsteps] = win.forward(win._checkpoints[0])
     slots1 = slot_states(fg, states)
     analyses = {}
 
@@ -149,9 +152,10 @@ def main(lane: Path, work: Path, max_ext_its: int) -> dict:
                 x0[w][...] = cp.asarray(w4.to_window(state.fields[k]))
         x0[model.halo][...] = x0["mup"]                      # WRFPLUS's start (halo_start "wrfplus")
         x0["muts"][...] = win._start["mub2d"] + x0["mup"]
-        end = win.forward(x0)   # checkpoint_every 1: every state the rerun passes is kept
-        run = {**{k: win._checkpoints[k] for k in range(win.nsteps)}, win.nsteps: end}
-        return Trajectory(slots=slot_states(state, run), states=[run[k] for k in range(win.nsteps + 1)])
+        end = win.forward(x0)   # the slot states are checkpoints under either policy
+        run = {**{k: win._checkpoints[k] for k in range(0, win.nsteps, win.every)}, win.nsteps: end}
+        # the rerun is the window's own model: relinearise reruns it from x0 under the policy
+        return Trajectory(slots=slot_states(state, run), start=x0)
 
     lines = []
     r = analyse(lane / "be.dat", [lane / f"ob{n:02d}.ascii" for n in range(1, NSLOTS + 1)], fg, fgat=slots1,
