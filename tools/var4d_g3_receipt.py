@@ -211,6 +211,8 @@ def main(argv=None):
     rec = {"backend": backend.active(), "case": {"synthetic": [a.nx, a.ny, a.nz], "nsteps": a.nsteps,
                                                  "sps": a.sps, "moist": True, "periodic": True},
            "repeats": a.repeats, "window": window_rows(cfg, make, a.nsteps, a.sps, dtypes, a.repeats, metal)}
+    if a.out:   # the window rows survive a failing L1 part
+        a.out.write_text(json.dumps(rec, indent=1) + "\n")
     if a.l1_lane is not None:
         rec["l1_window_model"] = l1_rows(a.l1_lane, a.work, a.repeats)
     text = json.dumps(rec, indent=1)
