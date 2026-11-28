@@ -10,6 +10,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 from woof.hex.mpasphys import ysu_v842 as ysu
+from woof.hex.mpasphys.mmm_version import PINNED
 from oracle import Oracle, fixtures, branch_fixtures, OUTPUTS
 from replay_witness import replay as replay_raw
 from replay_wrapper import replay as replay_wrapper
@@ -75,7 +76,7 @@ def test_compiled_artifact_rejects_stale_source_and_ftz(tmp_path):
     metadata = json.loads(artifact.with_suffix('.json').read_text())
     architecture = metadata['compiler_options'][-1].split('sm_', 1)[1]
     expected = artifact.read_bytes()
-    assert ysu.validated_cuda_binary(artifact, header, architecture) == expected
+    assert ysu.validated_cuda_binary(artifact, header, architecture, mmm_version=PINNED) == expected
     changed = tmp_path / 'ysu.cubin'
     changed.write_bytes(expected)
     manifest = changed.with_suffix('.json')
@@ -86,11 +87,11 @@ def test_compiled_artifact_rejects_stale_source_and_ftz(tmp_path):
     ):
         manifest.write_text(json.dumps({**metadata, key: value}))
         with pytest.raises(ValueError, match=key):
-            ysu.validated_cuda_binary(changed, header, architecture)
+            ysu.validated_cuda_binary(changed, header, architecture, mmm_version=PINNED)
     manifest.write_text(json.dumps(metadata))
     changed.write_bytes(expected + b'corrupt')
     with pytest.raises(ValueError, match='binary SHA256'):
-        ysu.validated_cuda_binary(changed, header, architecture)
+        ysu.validated_cuda_binary(changed, header, architecture, mmm_version=PINNED)
 
 def complete_forecast_fixture():
     summary = {'model_execution': {'model_door_invoked': True, 'model_door_exit': 0,

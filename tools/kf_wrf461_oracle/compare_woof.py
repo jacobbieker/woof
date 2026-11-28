@@ -47,7 +47,8 @@ def ulp_distance(a, b):
     return np.abs(monotone_fp32_key(a) - monotone_fp32_key(b))
 
 
-def run(columns_path, oracle_path, label=None, meta_path=None):
+def run(columns_path, oracle_path, label=None, meta_path=None, *,
+        rain_floor=False):
     import cupy as cp
     from woof import wrf_exact
     wrf_exact.install()
@@ -93,7 +94,7 @@ def run(columns_path, oracle_path, label=None, meta_path=None):
                         stack("p"), stack("rho"), stack("pi"), stack("dz"),
                         w0, dx=dx, dt=dt, cudt_minutes=cudt,
                         phase_mode=mode, f_qr=bool(fqr),
-                        cloud_diagnostics=True)
+                        cloud_diagnostics=True, rain_floor=rain_floor)
         host = {k: cp.asnumpy(v) for k, v in res.items()}
         w0h = cp.asnumpy(w0)
         for j, i in enumerate(idx):

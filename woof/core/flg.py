@@ -4,6 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 import numpy as np
+from woof.core.flg_levels import DEEP_NVX, VERTICAL_LEVEL_BOUNDS, nvx_defines, nvx_tier, tier_defines
 
 TABLE_ROOT=Path(__file__).resolve().parents[1]/'data'/'wrf_radiation'/'flg'
 SOURCE_SHA256='c4977cdf2ddf3f2279c9be7e1fc659ef23bbb37376e5cf11f9a98a73d33b0266'
@@ -35,6 +36,13 @@ def load_tables(root=TABLE_ROOT):
         raise ValueError('FLG table manifest does not cover the coefficient file')
     return tables
 
+def _component(name, levels):
+    """A standalone component unit compiled at the FLG_NVX tier of a column of
+    ``levels`` interfaces (the shipped source through 101 interfaces)."""
+    from woof.core.kernels import load_module_unflushed
+    return load_module_unflushed(name, nvx_defines(int(levels)-1))
+
+
 def column_primitives(pressure,temperature,coszen,surface_temperature,*,table_root=TABLE_ROOT):
     """Evaluate thicks, rayle2, rayle, planck and all five ozone profiles on CUDA.
 
@@ -42,10 +50,9 @@ def column_primitives(pressure,temperature,coszen,surface_temperature,*,table_ro
     This does not produce a radiation tendency and is not a runtime adapter.
     """
     import cupy as cp
-    from woof.core.kernels import load_module
     pp=cp.asarray(pressure,dtype=cp.float32,order='C'); pt=cp.asarray(temperature,dtype=cp.float32,order='C')
-    if pp.ndim!=2 or pp.shape!=pt.shape or not 2<=pp.shape[1]<=101:
-        raise ValueError('FLG primitive profiles need matching column by level arrays with 2 to 101 levels')
+    if pp.ndim!=2 or pp.shape!=pt.shape or not 2<=pp.shape[1]<=DEEP_NVX+1:
+        raise ValueError(f'FLG primitive profiles need matching column by level arrays with 2 to {DEEP_NVX+1} levels')
     n,nv1=pp.shape; nv=nv1-1
     if not n:
         raise ValueError('FLG primitive deck must contain a column')
@@ -62,7 +69,7 @@ def column_primitives(pressure,temperature,coszen,surface_temperature,*,table_ro
     shapes={'dz':(n,nv),'trp':(n,nv),'tr':(n,18,nv),'wr':(n,18,nv),'wwr':(n,18,nv,4),
             'bf':(n,12,nv1),'bs':(n,12),'ozone':(n,5,nv1)}
     output={key:cp.empty(shape,dtype=cp.float32) for key,shape in shapes.items()}
-    load_module('flg').get_function('flg_primitives')((int((n+31)//32),),(32,),
+    _component('flg',nv1).get_function('flg_primitives')((int((n+31)//32),),(32,),
         (np.int32(n),np.int32(nv1),pp,pt,u0,pts,*args,*output.values()))
     return output
 
@@ -74,12 +81,11 @@ def cloud_optics(dz,liquid_radius,ice_size,liquid,ice,rain,graupel,*,table_root=
     g/m3, as in the WRF column core. This is not a radiation driver.
     """
     import cupy as cp
-    from woof.core.kernels import load_module
     inputs=[cp.asarray(value,dtype=cp.float32,order='C') for value in
             (dz,liquid_radius,ice_size,liquid,ice,rain,graupel)]
     shape=inputs[0].shape
-    if len(shape)!=2 or not shape[0] or not 1<=shape[1]<=100 or any(a.shape!=shape for a in inputs):
-        raise ValueError('FLG optics need matching nonempty column by layer arrays, at most 100 layers')
+    if len(shape)!=2 or not shape[0] or not 1<=shape[1]<=DEEP_NVX or any(a.shape!=shape for a in inputs):
+        raise ValueError(f'FLG optics need matching nonempty column by layer arrays, at most {DEEP_NVX} layers')
     if any(bool(cp.any(~cp.isfinite(a))) for a in inputs):
         raise ValueError('FLG optics need finite input operands')
     if bool(cp.any(inputs[0]<0)) or bool(cp.any(inputs[1]<0)) or bool(cp.any((inputs[4]>=np.float32(1.0e-5)) & (inputs[2]<=0))) or any(bool(cp.any(a<0)) for a in inputs[3:]):
@@ -103,7 +109,7 @@ def cloud_optics(dz,liquid_radius,ice_size,liquid,ice,rain,graupel,*,table_root=
     n,nv=shape; size=n*11*18*nv
     output={'tau':cp.empty((n,11,18,nv),dtype=cp.float32),'ssa':cp.empty((n,11,18,nv),dtype=cp.float32),
             'moments':cp.empty((n,11,18,nv,4),dtype=cp.float32)}
-    load_module('flg').get_function('flg_cloud_optics')((int((size+127)//128),),(128,),
+    _component('flg',nv+1).get_function('flg_cloud_optics')((int((size+127)//128),),(128,),
         (np.int32(n),np.int32(nv),*inputs,coefficients,addresses,*output.values()))
     return output
 
@@ -116,13 +122,12 @@ def absorption_interpolation(coefficients,pressure,temperature,method,*,table_ro
     carry into subsequent operations. Input arrays are preserved.
     """
     import cupy as cp
-    from woof.core.kernels import load_module
     methods={'shortwave':(0,'qks.stanp',11),'longwave':(1,'qki.stanp',19),'ozone':(2,'qkio3.stanp',19)}
     if method not in methods: raise ValueError('FLG coefficient interpolation method is unknown')
     arm,key,nodes=methods[method]
     p=cp.asarray(pressure,dtype=cp.float32,order='C'); t=cp.asarray(temperature,dtype=cp.float32,order='C')
-    if p.ndim!=2 or p.shape!=t.shape or not p.shape[0] or not 2<=p.shape[1]<=101:
-        raise ValueError('FLG interpolation needs matching nonempty column by level profiles, 2 to 101 levels')
+    if p.ndim!=2 or p.shape!=t.shape or not p.shape[0] or not 2<=p.shape[1]<=DEEP_NVX+1:
+        raise ValueError(f'FLG interpolation needs matching nonempty column by level profiles, 2 to {DEEP_NVX+1} levels')
     c=cp.asarray(coefficients,dtype=cp.float32,order='C')
     if c.shape!=(p.shape[0],nodes,3): raise ValueError('FLG coefficient slice shape does not match the interpolation nodes')
     if bool(cp.any(~cp.isfinite(p))) or bool(cp.any(p<=0)) or bool(cp.any(cp.diff(p,axis=1)<=0)) or bool(cp.any(~cp.isfinite(t))) or bool(cp.any(t<=0)) or bool(cp.any(~cp.isfinite(c))):
@@ -130,22 +135,21 @@ def absorption_interpolation(coefficients,pressure,temperature,method,*,table_ro
     stanp=cp.asarray(load_tables(table_root)[key],dtype=cp.float32)
     output={'fkg':cp.empty_like(p),'temperature_out':cp.empty_like(t)}
     n,nv1=p.shape
-    load_module('flg').get_function('flg_absorption_interpolation')((int((n+31)//32),),(32,),
+    _component('flg',nv1).get_function('flg_absorption_interpolation')((int((n+31)//32),),(32,),
         (np.int32(n),np.int32(nv1),np.int32(arm),np.int32(nodes),c,stanp,p,t,*output.values()))
     return output
 
 def continuum_depth(pressure,temperature,humidity,*,table_root=TABLE_ROOT):
     """WRF gascon water-vapor continuum for all 18 bands."""
     import cupy as cp
-    from woof.core.kernels import load_module
     p,t,h=[cp.asarray(a,dtype=cp.float32,order='C') for a in (pressure,temperature,humidity)]
-    if p.ndim!=2 or p.shape!=t.shape or p.shape!=h.shape or not p.shape[0] or not 2<=p.shape[1]<=101:
-        raise ValueError('FLG continuum needs matching nonempty column by level profiles, 2 to 101 levels')
+    if p.ndim!=2 or p.shape!=t.shape or p.shape!=h.shape or not p.shape[0] or not 2<=p.shape[1]<=DEEP_NVX+1:
+        raise ValueError(f'FLG continuum needs matching nonempty column by level profiles, 2 to {DEEP_NVX+1} levels')
     if any(bool(cp.any(~cp.isfinite(a))) for a in (p,t,h)) or bool(cp.any(p<=0)) or bool(cp.any(cp.diff(p,axis=1)<=0)) or bool(cp.any(t<=0)) or bool(cp.any(h<0)):
         raise ValueError('FLG continuum needs positive increasing pressure and temperature and nonnegative humidity')
     vv=cp.asarray(load_tables(table_root)['gascon.vv'],dtype=cp.float32)
     n,nv1=p.shape; output=cp.empty((n,18,nv1-1),dtype=cp.float32)
-    load_module('flg').get_function('flg_continuum')((int((n*18+31)//32),),(32,),
+    _component('flg',nv1).get_function('flg_continuum')((int((n*18+31)//32),),(32,),
         (np.int32(n),np.int32(nv1),vv,p,t,h,output))
     return output
 
@@ -172,10 +176,9 @@ def gas_optical_depth(pressure,temperature,humidity,ozone,gas_values,switches,*,
     to carry forward in its original band and g-point sequence.
     """
     import cupy as cp
-    from woof.core.kernels import load_module
     p,t,h,o=[cp.asarray(a,dtype=cp.float32,order='C') for a in (pressure,temperature,humidity,ozone)]
-    if p.ndim!=2 or not p.shape[0] or not 2<=p.shape[1]<=101 or any(a.shape!=p.shape for a in (t,h,o)):
-        raise ValueError('FLG gases need matching nonempty column by level profiles, 2 to 101 levels')
+    if p.ndim!=2 or not p.shape[0] or not 2<=p.shape[1]<=DEEP_NVX+1 or any(a.shape!=p.shape for a in (t,h,o)):
+        raise ValueError(f'FLG gases need matching nonempty column by level profiles, 2 to {DEEP_NVX+1} levels')
     values=cp.asarray(gas_values,dtype=cp.float32,order='C'); flags=cp.asarray(switches,dtype=cp.int32,order='C')
     n,nv1=p.shape
     if values.shape!=(n,11) or flags.shape!=(n,20): raise ValueError('FLG gas controls have incorrect column shape')
@@ -188,7 +191,7 @@ def gas_optical_depth(pressure,temperature,humidity,ozone,gas_values,switches,*,
     count=len(meta); size=n*count
     output={'optical_depth':cp.empty((n,count,nv1-1),dtype=cp.float32),'weights':cp.empty((n,count),dtype=cp.float32),
             'temperature_out':cp.empty((n,count,nv1),dtype=cp.float32)}
-    load_module('flg_gases').get_function('flg_gas_driver')((int((size+63)//64),),(64,),
+    _component('flg_gases',nv1).get_function('flg_gas_driver')((int((size+63)//64),),(64,),
         (np.int32(n),np.int32(nv1),np.int32(count),points,p,t,h,o,coefficients,addresses,values,flags,*output.values()))
     return output
 
@@ -206,13 +209,12 @@ def stream_fluxes(bands,albedo,coszen,f0,emissivity,bf,bs,moments,scattering,dep
     and is not exposed. Radiation drivers skip SW calls for night columns.
     """
     import cupy as cp
-    from woof.core.kernels import load_module
     b=cp.asarray(bands,dtype=cp.int32,order='C')
     a,u,s,e,bb=[cp.asarray(v,dtype=cp.float32,order='C') for v in (albedo,coszen,f0,emissivity,bs)]
     black=cp.asarray(bf,dtype=cp.float32,order='C'); phase=cp.asarray(moments,dtype=cp.float32,order='C')
     w=cp.asarray(scattering,dtype=cp.float32,order='C'); t=cp.asarray(depth,dtype=cp.float32,order='C')
-    if black.ndim!=2 or not black.shape[0] or not 2<=black.shape[1]<=101:
-        raise ValueError('FLG stream profiles need nonempty column by level arrays, 2 to 101 levels')
+    if black.ndim!=2 or not black.shape[0] or not 2<=black.shape[1]<=DEEP_NVX+1:
+        raise ValueError(f'FLG stream profiles need nonempty column by level arrays, 2 to {DEEP_NVX+1} levels')
     n,nv1=black.shape; nv=nv1-1
     if b.shape!=(n,2) or any(v.shape!=(n,) for v in (a,u,s,e,bb)) or phase.shape!=(n,4,nv) or w.shape!=(n,nv) or t.shape!=(n,nv):
         raise ValueError('FLG stream input shapes differ from the column interface')
@@ -229,7 +231,7 @@ def stream_fluxes(bands,albedo,coszen,f0,emissivity,bf,bs,moments,scattering,dep
     output={'up':cp.empty((n,4,nv1),dtype=cp.float32),'down':cp.empty((n,4,nv1),dtype=cp.float32),
             'direct':cp.empty((n,nv1),dtype=cp.float32),'diffuse':cp.empty((n,nv1),dtype=cp.float32)}
     errors=cp.empty((n,4),dtype=cp.int32)
-    load_module('flg_streams').get_function('flg_stream_driver')((int((n*4+31)//32),),(32,),
+    _component('flg_streams',nv1).get_function('flg_stream_driver')((int((n*4+31)//32),),(32,),
         (np.int32(n),np.int32(nv1),b,a,u,s,e,black,bb,phase,w,t,coefficients,addresses,*output.values(),errors))
     _refuse_stream_errors(errors)
     return output
@@ -250,11 +252,19 @@ class FLGColumn:
     scalar_names = ('coszen','solar_constant','skin_temperature')
     output_names = ('fds','fus','dts','fdir','fuir','dtir','fd','fu','dt','direct','diffuse')
 
-    def __init__(self, columns, layers, *, nice=2, ngas=0, table_root=TABLE_ROOT):
+    def __init__(self, columns, layers, *, nice=2, ngas=0, nvx=None, table_root=TABLE_ROOT):
         import cupy as cp
         from woof.core.kernels import load_module_unflushed
-        if not isinstance(columns,int) or columns<1 or not isinstance(layers,int) or not 4<=layers<=100:
-            raise ValueError('FLG needs positive columns and 4 to 100 layers for its three cloud groups')
+        low,high=VERTICAL_LEVEL_BOUNDS
+        if not isinstance(columns,int) or columns<1 or not isinstance(layers,int) or not low<=layers<=high:
+            raise ValueError(f'FLG needs positive columns and {low} to {high} layers: its three cloud groups '
+                             f'need a layer each and its deepest FLG_NVX tier is {high}')
+        # The FLG_NVX tier: the shipped (stock nvx=100) source through 100
+        # layers, 256 beyond. ``nvx`` forces a tier at least as deep, for proof.
+        tier=nvx_tier(layers) if nvx is None else int(nvx)
+        defines=tier_defines(tier)
+        if tier<layers:
+            raise ValueError(f'FLG_NVX={tier} cannot hold {layers} layers')
         if nice not in range(8) or ngas not in (0,1):
             raise ValueError('FLG ice and gas controls are outside the native choices')
         tables=load_tables(table_root); packed=[]; offsets=[]; pos=0
@@ -270,18 +280,18 @@ class FLGColumn:
         flags[:,20:27]=[1,0,0,1,0,0,0]
         flags[:,27]=nice; flags[:,28]=ngas
         self.controls=cp.asarray(flags)
-        self.columns=columns; self.layers=layers
+        self.columns=columns; self.layers=layers; self.nvx=tier
         self.outputs={name:cp.empty((columns,layers if name in ('dts','dtir','dt') else layers+1),dtype=cp.float32)
                       for name in self.output_names}
         self.errors=cp.empty(columns,dtype=cp.int32)
         from woof.core.kernels import module_source
         import re
-        source=module_source('flg_column')
+        source=module_source('flg_column')  # FLG_NVX does not move the workspace layout
         scale=int(re.search(r'#define FLG_WORKSPACE_SCALE (\d+)',source)[1])
         bias=int(re.search(r'#define FLG_WORKSPACE_BIAS (-?\d+)',source)[1])
         words=scale*(layers+1)+bias
         self.workspace=cp.empty((((columns+31)//32)*32,words),dtype=cp.float32)
-        self.kernel=load_module_unflushed('flg_column',(('FLG_NV1',layers+1),)).get_function('flg_column_driver')
+        self.kernel=load_module_unflushed('flg_column',(('FLG_NV1',layers+1),)+defines).get_function('flg_column_driver')
 
     def __call__(self, **fields):
         import cupy as cp

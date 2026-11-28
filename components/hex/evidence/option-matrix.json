@@ -1,4 +1,8 @@
 {
+ "backend_notes": {
+  "cuda": "The baseline and the rows of the 256-level families (cumulus.kf-cup, cumulus.multiscale-kf, microphysics.wsm3/wsm5/wsm7/wdm5/wdm7, pbl.boulac, pbl.qnse, surface_layer.qnse, radiation.fu-liou-gu, radiation.gsfc-shortwave, radiation.wrf-gfdleta) were re-run after the WRF 4.8.0 sync and are graded against that baseline; the other CUDA entries predate the sync and were graded against its earlier run.",
+  "metal": "Metal entries predate the WRF 4.8.0 sync. Since it, the default Grell-Freitas (cu_gf_version gfl_873b414) is refused on Metal, and this case's base selection runs it; the Metal entries refresh after the GF Metal port lands."
+ },
  "backends": [
   "cuda",
   "metal"
@@ -1063,9 +1067,9 @@
   "cumulus.kf-cup": {
    "backends": {
     "cuda": {
-     "outcome": "refused",
-     "reason": "woof hex: the forecast driver stopped with PhysicsVerticalPreflightError: resolved physics vertical preflight failed: - KF-CuP cumulus requires 8 <= nz <= 128, got nz=149  Full traceback: <path>  The scratch tree is kept at <path> and any frames already written are in <path>",
-     "wall_seconds": 20.6
+     "outcome": "non-finite",
+     "reason": "woof hex: the forecast driver stopped with FloatingPointError: negative accumulated precipitation in rainc  Full traceback: <path>  The scratch tree is kept at <path> and any frames already written are in <path>",
+     "wall_seconds": 63.5
     },
     "metal": {
      "outcome": "refused",
@@ -1212,9 +1216,9 @@
    "backends": {
     "cuda": {
      "budgets": {
-      "dry_rel_change": -0.00039347114609568834,
-      "dry_rel_change_interior": -0.00047118206802656415,
-      "precip_kg": 3996472.791798749,
+      "dry_rel_change": -0.00039627032768486703,
+      "dry_rel_change_interior": -0.0004751011930485995,
+      "precip_kg": 5441244.1411854075,
       "q_min_end": {
        "qc": 0.0,
        "qg": 0.0,
@@ -1231,8 +1235,8 @@
        "qs",
        "qg"
       ],
-      "water_residual_rel": 0.019076679515185033,
-      "water_residual_rel_interior": 0.01910688105264232
+      "water_residual_rel": 0.01903497838440729,
+      "water_residual_rel_interior": 0.019112688892325494
      },
      "call_counts": {
       "cumulus": 120,
@@ -1245,32 +1249,42 @@
      "graded": {
       "cells": "interior",
       "dry_tol": 0.001,
-      "dry_vs_baseline": 1.1570110613797879e-06,
+      "dry_vs_baseline": -3.8147474506566945e-08,
       "water_tol": 0.05,
-      "water_vs_baseline": -7.492160837130682e-05
+      "water_vs_baseline": 4.965081344925765e-05
      },
      "outcome": "ran",
      "sealed_physics": {
       "bl_pbl_physics": 1,
       "cu_physics": 11,
+      "gf_deep_rain_evaporation_booking": true,
       "gwd_opt": 0,
       "hydrometeor_handover_numbers": true,
       "icloud": 1,
       "mp_physics": 6,
+      "mynn_boulac_down_sign": true,
+      "mynn_fixes_v61": true,
+      "mynn_sfclay_psih_zolzt": true,
+      "noah_smc_floor_booking": true,
+      "noahmp_melt_reset_esat": true,
       "ntiedtke_dry_mass_coupling": true,
+      "pbl_boulac_down_sign": true,
       "ra_physics": 4,
       "ra_rrtmg_variant": "rrtmg_legacy",
+      "rrtmg_lw_model_top": true,
       "sf_sfclay_physics": 1,
       "sf_surface_physics": 4,
       "thompson_cloud_surface_booking": true,
+      "thompson_rain_snow_closure": true,
       "wdm6_conservative_surface": true,
       "wsm3_conservative_surface": true,
       "wsm5_conservative_surface": true,
       "wsm6_conservative_surface": true,
-      "wsm7_conservative_surface": true
+      "wsm7_conservative_surface": true,
+      "ysu_surface_heat_exner": true
      },
      "seam": "engine",
-     "wall_seconds": 114.5
+     "wall_seconds": 104.9
     },
     "metal": {
      "budgets": {
@@ -2578,14 +2592,130 @@
   "microphysics.cam-mg-mp11": {
    "backends": {
     "cuda": {
-     "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 1 value(s) the init file has no variable for: [\"ns\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 0.8
+     "budgets": {
+      "dry_rel_change": -0.00038659388373082313,
+      "dry_rel_change_interior": -0.00046113593128862727,
+      "precip_kg": 4809553949.8927555,
+      "q_min_end": {
+       "qc": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs"
+      ],
+      "water_residual_rel": 0.020344189050596827,
+      "water_residual_rel_interior": 0.01950843344524344
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 9.849566683440278e-06,
+      "water_tol": 0.05,
+      "water_vs_baseline": 0.00044719793219598347
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 11,
+      "mynn_boulac_down_sign": true,
+      "mynn_fixes_v61": true,
+      "noahmp_melt_reset_esat": true,
+      "ntiedtke_dry_mass_coupling": true,
+      "pbl_boulac_down_sign": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 623.1
     },
     "metal": {
-     "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 1 value(s) the init file has no variable for: [\"ns\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 1.1
+     "budgets": {
+      "dry_rel_change": -0.00038737970230332653,
+      "dry_rel_change_interior": -0.00046204559095747866,
+      "precip_kg": 1329809797.5286536,
+      "q_min_end": {
+       "qc": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs"
+      ],
+      "water_residual_rel": 0.019413223673410456,
+      "water_residual_rel_interior": 0.019588739556668466
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 1.0183098467902649e-05,
+      "water_tol": 0.05,
+      "water_vs_baseline": 0.0004079717430675693
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 11,
+      "ntiedtke_dry_mass_coupling": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 139.3
     }
    },
    "overrides": {
@@ -2596,13 +2726,13 @@
    "backends": {
     "cuda": {
      "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 1 value(s) the init file has no variable for: [\"qt\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 0.9
+     "reason": "woof hex: the forecast driver stopped with ConfigurationRefusal: scalar_names=('qv', 'qt') is refused: the model species row must begin with qv, qc and qr: the hex scalar block, the init emitter and the lateral-boundary species all key on that leading triple (MAD-WRF, mp_physics=96, passively advects qc<path> and starts from an init that carries none of them; Eta, mp_physics=95, carries total condensate qt and no qc/qr). To run, declare a microphysics scheme whose species row begins qv, qc, qr.  Full traceback: <path>  The scratch tree is kept at <path> and any frames already written are in <p",
+     "wall_seconds": 65.0
     },
     "metal": {
      "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 1 value(s) the init file has no variable for: [\"qt\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 1.1
+     "reason": "woof hex: the forecast driver stopped with ConfigurationRefusal: scalar_names=('qv', 'qt') is refused: the model species row must begin with qv, qc and qr: the hex scalar block, the init emitter and the lateral-boundary species all key on that leading triple (MAD-WRF, mp_physics=96, passively advects qc<path> and starts from an init that carries none of them; Eta, mp_physics=95, carries total condensate qt and no qc/qr). To run, declare a microphysics scheme whose species row begins qv, qc, qr.  Full traceback: <path>  The scratch tree is kept at <path> and any frames already written are in <p",
+     "wall_seconds": 2.8
     }
    },
    "overrides": {
@@ -2612,14 +2742,134 @@
   "microphysics.fast-sbm-mp30": {
    "backends": {
     "cuda": {
-     "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 144 value(s) the init file has no variable for: [\"ff1i01\", \"ff1i02\", \"ff1i03\", \"ff1i04\", \"ff1i05\", \"ff1i06\", \"ff1i07\", \"ff1i08\", \"ff1i09\", \"ff1i10\", \"ff1i11\", \"ff1i12\", \"ff1i13\", \"ff1i14\", \"ff1i15\", \"ff1i16\", \"ff1i17\", \"ff1i18\", \"ff1i19\", \"ff1i20\", \"ff1i21\", \"ff1i22\", \"ff1i23\", \"ff1i24\", \"ff1i25\", \"ff1i26\", \"ff1i27\", \"ff1i28\", \"ff1i29\", \"ff1i30\", \"ff1i31\", \"ff1i32\", \"ff1i33\", \"ff5i01\", \"ff5i02\", \"ff5i03\", \"ff5i04\", \"ff5i05\", \"ff5i06\", \"ff5i07\", \"ff5i08\", \"ff5i09\", \"ff5i10\", \"ff5i11\", \"ff5i12\", \"ff5i13\", \"ff5i14\", \"",
-     "wall_seconds": 0.9
+     "budgets": {
+      "dry_rel_change": -0.0003935567010693604,
+      "dry_rel_change_interior": -0.0004703699532699762,
+      "precip_kg": 4519677443.140475,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg"
+      ],
+      "water_residual_rel": 0.02002135455668545,
+      "water_residual_rel_interior": 0.01895499708294485
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 6.155447020913542e-07,
+      "water_tol": 0.05,
+      "water_vs_baseline": -0.00010623843010260786
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 30,
+      "mynn_boulac_down_sign": true,
+      "mynn_fixes_v61": true,
+      "noahmp_melt_reset_esat": true,
+      "ntiedtke_dry_mass_coupling": true,
+      "pbl_boulac_down_sign": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 880.8
     },
     "metal": {
-     "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 144 value(s) the init file has no variable for: [\"ff1i01\", \"ff1i02\", \"ff1i03\", \"ff1i04\", \"ff1i05\", \"ff1i06\", \"ff1i07\", \"ff1i08\", \"ff1i09\", \"ff1i10\", \"ff1i11\", \"ff1i12\", \"ff1i13\", \"ff1i14\", \"ff1i15\", \"ff1i16\", \"ff1i17\", \"ff1i18\", \"ff1i19\", \"ff1i20\", \"ff1i21\", \"ff1i22\", \"ff1i23\", \"ff1i24\", \"ff1i25\", \"ff1i26\", \"ff1i27\", \"ff1i28\", \"ff1i29\", \"ff1i30\", \"ff1i31\", \"ff1i32\", \"ff1i33\", \"ff5i01\", \"ff5i02\", \"ff5i03\", \"ff5i04\", \"ff5i05\", \"ff5i06\", \"ff5i07\", \"ff5i08\", \"ff5i09\", \"ff5i10\", \"ff5i11\", \"ff5i12\", \"ff5i13\", \"ff5i14\", \"",
-     "wall_seconds": 1.1
+     "budgets": {
+      "dry_rel_change": -0.000394647571192998,
+      "dry_rel_change_interior": -0.0004715976078480443,
+      "precip_kg": 995814263.8205448,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg"
+      ],
+      "water_residual_rel": 0.019167846779045875,
+      "water_residual_rel_interior": 0.01918592848663584
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 6.310815773370227e-07,
+      "water_tol": 0.05,
+      "water_vs_baseline": 5.16067303494433e-06
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 30,
+      "ntiedtke_dry_mass_coupling": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 682.0
     }
    },
    "overrides": {
@@ -2629,14 +2879,126 @@
   "microphysics.ferrier-aligo-advect-mp15": {
    "backends": {
     "cuda": {
-     "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 1 value(s) the init file has no variable for: [\"qrimef\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 0.9
+     "budgets": {
+      "dry_rel_change": -0.0003914168354071173,
+      "dry_rel_change_interior": -0.0004664556718701723,
+      "precip_kg": 4488689740.76556,
+      "q_min_end": {
+       "qc": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi"
+      ],
+      "water_residual_rel": 0.020070014001619833,
+      "water_residual_rel_interior": 0.019053411711838032
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 4.529826101895248e-06,
+      "water_tol": 0.05,
+      "water_vs_baseline": -7.823801209425746e-06
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 15,
+      "mynn_boulac_down_sign": true,
+      "mynn_fixes_v61": true,
+      "noahmp_melt_reset_esat": true,
+      "ntiedtke_dry_mass_coupling": true,
+      "pbl_boulac_down_sign": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 368.4
     },
     "metal": {
-     "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 1 value(s) the init file has no variable for: [\"qrimef\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 1.1
+     "budgets": {
+      "dry_rel_change": -0.0003925694957296889,
+      "dry_rel_change_interior": -0.0004680097356095812,
+      "precip_kg": 1002319039.1288856,
+      "q_min_end": {
+       "qc": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi"
+      ],
+      "water_residual_rel": 0.019137947940169566,
+      "water_residual_rel_interior": 0.01917532719650485
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 4.218953815800111e-06,
+      "water_tol": 0.05,
+      "water_vs_baseline": -5.44061709604679e-06
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 15,
+      "ntiedtke_dry_mass_coupling": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 45.5
     }
    },
    "overrides": {
@@ -2771,14 +3133,138 @@
   "microphysics.goddard4ice-mp7": {
    "backends": {
     "cuda": {
-     "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 1 value(s) the init file has no variable for: [\"qh\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 0.9
+     "budgets": {
+      "dry_rel_change": -0.00039371159539929994,
+      "dry_rel_change_interior": -0.000471746971342692,
+      "precip_kg": 4384894212.768578,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": 0.0,
+       "qh": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg",
+       "qh"
+      ],
+      "water_residual_rel": 0.020261642413810576,
+      "water_residual_rel_interior": 0.019094520174324014
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": -7.614733706244386e-07,
+      "water_tol": 0.05,
+      "water_vs_baseline": 3.328466127655583e-05
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 7,
+      "mynn_boulac_down_sign": true,
+      "mynn_fixes_v61": true,
+      "noahmp_melt_reset_esat": true,
+      "ntiedtke_dry_mass_coupling": true,
+      "pbl_boulac_down_sign": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 826.3
     },
     "metal": {
-     "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 1 value(s) the init file has no variable for: [\"qh\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 1.1
+     "budgets": {
+      "dry_rel_change": -0.00039505888955175495,
+      "dry_rel_change_interior": -0.00047320883412087705,
+      "precip_kg": 875570492.6402509,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": 0.0,
+       "qh": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg",
+       "qh"
+      ],
+      "water_residual_rel": 0.019302407830782707,
+      "water_residual_rel_interior": 0.019188972318378576
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": -9.801446954957457e-07,
+      "water_tol": 0.05,
+      "water_vs_baseline": 8.204504777679228e-06
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 7,
+      "ntiedtke_dry_mass_coupling": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 50.1
     }
    },
    "overrides": {
@@ -2921,14 +3407,126 @@
   "microphysics.ishmael-mp55": {
    "backends": {
     "cuda": {
-     "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 10 value(s) the init file has no variable for: [\"ni2\", \"ni3\", \"qaoli\", \"qaoli2\", \"qaoli3\", \"qi2\", \"qi3\", \"qvoli\", \"qvoli2\", \"qvoli3\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 1.3
+     "budgets": {
+      "dry_rel_change": -0.00039068597296912117,
+      "dry_rel_change_interior": -0.00046502098247043017,
+      "precip_kg": 4776132727.987791,
+      "q_min_end": {
+       "qc": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi"
+      ],
+      "water_residual_rel": 0.0200279976445632,
+      "water_residual_rel_interior": 0.01918590234376431
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 5.964515501637375e-06,
+      "water_tol": 0.05,
+      "water_vs_baseline": 0.00012466683071685192
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 55,
+      "mynn_boulac_down_sign": true,
+      "mynn_fixes_v61": true,
+      "noahmp_melt_reset_esat": true,
+      "ntiedtke_dry_mass_coupling": true,
+      "pbl_boulac_down_sign": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 722.7
     },
     "metal": {
-     "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 10 value(s) the init file has no variable for: [\"ni2\", \"ni3\", \"qaoli\", \"qaoli2\", \"qaoli3\", \"qi2\", \"qi3\", \"qvoli\", \"qvoli2\", \"qvoli3\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 1.1
+     "budgets": {
+      "dry_rel_change": -0.0003921001825671922,
+      "dry_rel_change_interior": -0.0004665462585867173,
+      "precip_kg": 1026946049.1353251,
+      "q_min_end": {
+       "qc": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi"
+      ],
+      "water_residual_rel": 0.019043837599044336,
+      "water_residual_rel_interior": 0.01924299412433271
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 5.682430838664025e-06,
+      "water_tol": 0.05,
+      "water_vs_baseline": 6.222631073181384e-05
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 55,
+      "ntiedtke_dry_mass_coupling": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 116.6
     }
    },
    "overrides": {
@@ -3209,14 +3807,138 @@
   "microphysics.milbrandt2mom-mp9": {
    "backends": {
     "cuda": {
-     "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 3 value(s) the init file has no variable for: [\"nh\", \"ns\", \"qh\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 1.0
+     "budgets": {
+      "dry_rel_change": -0.0003897221789796607,
+      "dry_rel_change_interior": -0.00046410396499893254,
+      "precip_kg": 4550079065.67484,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": 0.0,
+       "qh": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg",
+       "qh"
+      ],
+      "water_residual_rel": 0.019998665154429465,
+      "water_residual_rel_interior": 0.01918619218106518
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 6.881532973135004e-06,
+      "water_tol": 0.05,
+      "water_vs_baseline": 0.00012495666801772345
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 9,
+      "mynn_boulac_down_sign": true,
+      "mynn_fixes_v61": true,
+      "noahmp_melt_reset_esat": true,
+      "ntiedtke_dry_mass_coupling": true,
+      "pbl_boulac_down_sign": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 716.0
     },
     "metal": {
-     "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 3 value(s) the init file has no variable for: [\"nh\", \"ns\", \"qh\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 1.1
+     "budgets": {
+      "dry_rel_change": -0.0003908613722053483,
+      "dry_rel_change_interior": -0.00046531327547897873,
+      "precip_kg": 1003069081.3262959,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": 0.0,
+       "qh": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg",
+       "qh"
+      ],
+      "water_residual_rel": 0.01905365016255649,
+      "water_residual_rel_interior": 0.01927846824342157
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 6.9154139464025705e-06,
+      "water_tol": 0.05,
+      "water_vs_baseline": 9.770042982067476e-05
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 9,
+      "ntiedtke_dry_mass_coupling": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 50.2
     }
    },
    "overrides": {
@@ -3226,14 +3948,134 @@
   "microphysics.morrison-aero-mp40": {
    "backends": {
     "cuda": {
-     "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 1 value(s) the init file has no variable for: [\"ns\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 0.9
+     "budgets": {
+      "dry_rel_change": -0.00039152157832999217,
+      "dry_rel_change_interior": -0.00046625048467961765,
+      "precip_kg": 4542371162.582266,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg"
+      ],
+      "water_residual_rel": 0.019990799276722322,
+      "water_residual_rel_interior": 0.019100249620530578
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 4.735013292449892e-06,
+      "water_tol": 0.05,
+      "water_vs_baseline": 3.9014107483120036e-05
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 40,
+      "mynn_boulac_down_sign": true,
+      "mynn_fixes_v61": true,
+      "noahmp_melt_reset_esat": true,
+      "ntiedtke_dry_mass_coupling": true,
+      "pbl_boulac_down_sign": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 904.9
     },
     "metal": {
-     "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 1 value(s) the init file has no variable for: [\"ns\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 1.1
+     "budgets": {
+      "dry_rel_change": -0.00039324087277392317,
+      "dry_rel_change_interior": -0.0004683825813766255,
+      "precip_kg": 1024374422.0921447,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg"
+      ],
+      "water_residual_rel": 0.01905827275929768,
+      "water_residual_rel_interior": 0.01923637408195112
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 3.846108048755818e-06,
+      "water_tol": 0.05,
+      "water_vs_baseline": 5.56062683502237e-05
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 40,
+      "ntiedtke_dry_mass_coupling": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 86.7
     }
    },
    "overrides": {
@@ -3243,14 +4085,134 @@
   "microphysics.morrison-mp10": {
    "backends": {
     "cuda": {
-     "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 1 value(s) the init file has no variable for: [\"ns\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 0.9
+     "budgets": {
+      "dry_rel_change": -0.00039185628048465183,
+      "dry_rel_change_interior": -0.000466922589473087,
+      "precip_kg": 4549118022.997384,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg"
+      ],
+      "water_residual_rel": 0.019996467236790893,
+      "water_residual_rel_interior": 0.01905794679776835
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 4.06290849898057e-06,
+      "water_tol": 0.05,
+      "water_vs_baseline": -3.2887152791073737e-06
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 10,
+      "mynn_boulac_down_sign": true,
+      "mynn_fixes_v61": true,
+      "noahmp_melt_reset_esat": true,
+      "ntiedtke_dry_mass_coupling": true,
+      "pbl_boulac_down_sign": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 631.9
     },
     "metal": {
-     "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 1 value(s) the init file has no variable for: [\"ns\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 1.1
+     "budgets": {
+      "dry_rel_change": -0.00039350207546535895,
+      "dry_rel_change_interior": -0.0004689677142491026,
+      "precip_kg": 1050961212.8549649,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg"
+      ],
+      "water_residual_rel": 0.019060421600003444,
+      "water_residual_rel_interior": 0.019185936025393667
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 3.2609751762786962e-06,
+      "water_tol": 0.05,
+      "water_vs_baseline": 5.1682117927706606e-06
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 10,
+      "ntiedtke_dry_mass_coupling": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 41.8
     }
    },
    "overrides": {
@@ -3260,14 +4222,138 @@
   "microphysics.nssl2-mp18": {
    "backends": {
     "cuda": {
-     "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 10 value(s) the init file has no variable for: [\"qh\", \"qndrop\", \"qng\", \"qnh\", \"qni\", \"qnn\", \"qnr\", \"qns\", \"qvolg\", \"qvolh\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 0.9
+     "budgets": {
+      "dry_rel_change": -0.00039133967731090375,
+      "dry_rel_change_interior": -0.0004658183875797945,
+      "precip_kg": 4535206420.158025,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": 0.0,
+       "qh": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg",
+       "qh"
+      ],
+      "water_residual_rel": 0.019946951101024128,
+      "water_residual_rel_interior": 0.019066548157821342
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 5.167110392273054e-06,
+      "water_tol": 0.05,
+      "water_vs_baseline": 5.312644773883962e-06
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 18,
+      "mynn_boulac_down_sign": true,
+      "mynn_fixes_v61": true,
+      "noahmp_melt_reset_esat": true,
+      "ntiedtke_dry_mass_coupling": true,
+      "pbl_boulac_down_sign": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 838.4
     },
     "metal": {
-     "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 10 value(s) the init file has no variable for: [\"qh\", \"qndrop\", \"qng\", \"qnh\", \"qni\", \"qnn\", \"qnr\", \"qns\", \"qvolg\", \"qvolh\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 1.1
+     "budgets": {
+      "dry_rel_change": -0.0003930952463452635,
+      "dry_rel_change_interior": -0.00046799552452132727,
+      "precip_kg": 983172439.7568538,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": 0.0,
+       "qh": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg",
+       "qh"
+      ],
+      "water_residual_rel": 0.018966510152878927,
+      "water_residual_rel_interior": 0.01907484303449851
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 4.233164904054033e-06,
+      "water_tol": 0.05,
+      "water_vs_baseline": -0.00010592477910238707
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 18,
+      "ntiedtke_dry_mass_coupling": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 54.7
     }
    },
    "overrides": {
@@ -3277,14 +4363,138 @@
   "microphysics.ntu-mp56": {
    "backends": {
     "cuda": {
-     "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 18 value(s) the init file has no variable for: [\"ag\", \"ah\", \"ai\", \"as_\", \"fi\", \"fs\", \"i3m\", \"nh\", \"ns\", \"qccn\", \"qdcn\", \"qh\", \"qnin\", \"qrcn\", \"qtcn\", \"vg\", \"vi\", \"vs\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 0.9
+     "budgets": {
+      "dry_rel_change": -0.000387564557713586,
+      "dry_rel_change_interior": -0.00046125788602053436,
+      "precip_kg": 4506374094.555789,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": 0.0,
+       "qh": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg",
+       "qh"
+      ],
+      "water_residual_rel": 0.019905980963199548,
+      "water_residual_rel_interior": 0.019121480077653723
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 9.727611951533186e-06,
+      "water_tol": 0.05,
+      "water_vs_baseline": 6.024456460626548e-05
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 56,
+      "mynn_boulac_down_sign": true,
+      "mynn_fixes_v61": true,
+      "noahmp_melt_reset_esat": true,
+      "ntiedtke_dry_mass_coupling": true,
+      "pbl_boulac_down_sign": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 937.2
     },
     "metal": {
-     "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 18 value(s) the init file has no variable for: [\"ag\", \"ah\", \"ai\", \"as_\", \"fi\", \"fs\", \"i3m\", \"nh\", \"ns\", \"qccn\", \"qdcn\", \"qh\", \"qnin\", \"qrcn\", \"qtcn\", \"vg\", \"vi\", \"vs\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 1.1
+     "budgets": {
+      "dry_rel_change": -0.00039001490034691833,
+      "dry_rel_change_interior": -0.00046436314362450343,
+      "precip_kg": 991339681.0784756,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": 0.0,
+       "qh": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg",
+       "qh"
+      ],
+      "water_residual_rel": 0.018938002865843608,
+      "water_residual_rel_interior": 0.019158669361163762
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 7.865545800877876e-06,
+      "water_tol": 0.05,
+      "water_vs_baseline": -2.209845243713454e-05
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 56,
+      "ntiedtke_dry_mass_coupling": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 183.6
     }
    },
    "overrides": {
@@ -3415,14 +4625,126 @@
   "microphysics.p3-mp50": {
    "backends": {
     "cuda": {
-     "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 2 value(s) the init file has no variable for: [\"qib\", \"qir\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 0.9
+     "budgets": {
+      "dry_rel_change": -0.00039032286480617846,
+      "dry_rel_change_interior": -0.0004655433211266547,
+      "precip_kg": 4613613739.158218,
+      "q_min_end": {
+       "qc": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi"
+      ],
+      "water_residual_rel": 0.020020068377259472,
+      "water_residual_rel_interior": 0.01908582124478295
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 5.442176845412859e-06,
+      "water_tol": 0.05,
+      "water_vs_baseline": 2.4585731735492222e-05
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 50,
+      "mynn_boulac_down_sign": true,
+      "mynn_fixes_v61": true,
+      "noahmp_melt_reset_esat": true,
+      "ntiedtke_dry_mass_coupling": true,
+      "pbl_boulac_down_sign": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 1009.2
     },
     "metal": {
-     "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 2 value(s) the init file has no variable for: [\"qib\", \"qir\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 1.1
+     "budgets": {
+      "dry_rel_change": -0.00039195555207199097,
+      "dry_rel_change_interior": -0.0004675296522987391,
+      "precip_kg": 1042302449.9705479,
+      "q_min_end": {
+       "qc": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi"
+      ],
+      "water_residual_rel": 0.01906338628744554,
+      "water_residual_rel_interior": 0.019165718729648985
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 4.699037126642191e-06,
+      "water_tol": 0.05,
+      "water_vs_baseline": -1.5049083951911013e-05
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 50,
+      "ntiedtke_dry_mass_coupling": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 124.6
     }
    },
    "overrides": {
@@ -3432,14 +4754,126 @@
   "microphysics.p3-mp51": {
    "backends": {
     "cuda": {
-     "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 2 value(s) the init file has no variable for: [\"qib\", \"qir\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 0.9
+     "budgets": {
+      "dry_rel_change": -0.0003903986421762819,
+      "dry_rel_change_interior": -0.0004655423197131323,
+      "precip_kg": 4595475852.137945,
+      "q_min_end": {
+       "qc": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi"
+      ],
+      "water_residual_rel": 0.020013326325804874,
+      "water_residual_rel_interior": 0.019089820634499252
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 5.443178258935223e-06,
+      "water_tol": 0.05,
+      "water_vs_baseline": 2.8585121451794177e-05
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 51,
+      "mynn_boulac_down_sign": true,
+      "mynn_fixes_v61": true,
+      "noahmp_melt_reset_esat": true,
+      "ntiedtke_dry_mass_coupling": true,
+      "pbl_boulac_down_sign": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 357.0
     },
     "metal": {
-     "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 2 value(s) the init file has no variable for: [\"qib\", \"qir\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 1.1
+     "budgets": {
+      "dry_rel_change": -0.000391942817330124,
+      "dry_rel_change_interior": -0.0004674208204607277,
+      "precip_kg": 1038327474.6825292,
+      "q_min_end": {
+       "qc": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi"
+      ],
+      "water_residual_rel": 0.01905662915844002,
+      "water_residual_rel_interior": 0.019166009299782263
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 4.807868964653607e-06,
+      "water_tol": 0.05,
+      "water_vs_baseline": -1.4758513818633606e-05
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 51,
+      "ntiedtke_dry_mass_coupling": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 36.9
     }
    },
    "overrides": {
@@ -3449,14 +4883,126 @@
   "microphysics.p3-mp52": {
    "backends": {
     "cuda": {
-     "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 6 value(s) the init file has no variable for: [\"ni2\", \"qi2\", \"qib\", \"qib2\", \"qir\", \"qir2\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 1.1
+     "budgets": {
+      "dry_rel_change": -0.00039025791417529387,
+      "dry_rel_change_interior": -0.0004657289214453359,
+      "precip_kg": 4719675529.951403,
+      "q_min_end": {
+       "qc": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi"
+      ],
+      "water_residual_rel": 0.01999098577734011,
+      "water_residual_rel_interior": 0.01905497808025046
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 5.256576526731661e-06,
+      "water_tol": 0.05,
+      "water_vs_baseline": -6.257432796998724e-06
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 52,
+      "mynn_boulac_down_sign": true,
+      "mynn_fixes_v61": true,
+      "noahmp_melt_reset_esat": true,
+      "ntiedtke_dry_mass_coupling": true,
+      "pbl_boulac_down_sign": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 354.5
     },
     "metal": {
-     "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 6 value(s) the init file has no variable for: [\"ni2\", \"qi2\", \"qib\", \"qib2\", \"qir\", \"qir2\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 1.1
+     "budgets": {
+      "dry_rel_change": -0.0003917774040906396,
+      "dry_rel_change_interior": -0.0004674274938153581,
+      "precip_kg": 1092346185.6742702,
+      "q_min_end": {
+       "qc": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi"
+      ],
+      "water_residual_rel": 0.01902786009098756,
+      "water_residual_rel_interior": 0.01913688181941079
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 4.801195610023212e-06,
+      "water_tol": 0.05,
+      "water_vs_baseline": -4.388599419010569e-05
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 52,
+      "ntiedtke_dry_mass_coupling": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 83.8
     }
    },
    "overrides": {
@@ -3466,14 +5012,126 @@
   "microphysics.p3-mp53": {
    "backends": {
     "cuda": {
-     "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 3 value(s) the init file has no variable for: [\"qib\", \"qir\", \"qzi\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 0.9
+     "budgets": {
+      "dry_rel_change": -0.00039090511108430315,
+      "dry_rel_change_interior": -0.00046597585518682515,
+      "precip_kg": 4567709856.426092,
+      "q_min_end": {
+       "qc": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi"
+      ],
+      "water_residual_rel": 0.020026383223022717,
+      "water_residual_rel_interior": 0.01905669312070098
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 5.009642785242397e-06,
+      "water_tol": 0.05,
+      "water_vs_baseline": -4.542392346477964e-06
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 53,
+      "mynn_boulac_down_sign": true,
+      "mynn_fixes_v61": true,
+      "noahmp_melt_reset_esat": true,
+      "ntiedtke_dry_mass_coupling": true,
+      "pbl_boulac_down_sign": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 379.3
     },
     "metal": {
-     "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 3 value(s) the init file has no variable for: [\"qib\", \"qir\", \"qzi\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 1.1
+     "budgets": {
+      "dry_rel_change": -0.000392568716592915,
+      "dry_rel_change_interior": -0.00046803986573986127,
+      "precip_kg": 1035866125.8876668,
+      "q_min_end": {
+       "qc": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi"
+      ],
+      "water_residual_rel": 0.0190812325122158,
+      "water_residual_rel_interior": 0.019164465015824212
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 4.18882368552004e-06,
+      "water_tol": 0.05,
+      "water_vs_baseline": -1.630279777668428e-05
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 53,
+      "ntiedtke_dry_mass_coupling": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 37.8
     }
    },
    "overrides": {
@@ -3897,14 +5555,14 @@
   "microphysics.thompson-graupel-hail-mp38": {
    "backends": {
     "cuda": {
-     "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 1 value(s) the init file has no variable for: [\"qvolg\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 0.9
+     "outcome": "error",
+     "reason": "woof hex: the forecast driver stopped with CompositeTransactionError: composite step at 0.0 s was refused and aborted without publication; this run armed no physics rollback, so the physics seam is retired and the run stops at the last committed step (--stop-on-refusal arms it and keeps that step's frame)  Underlying cause: TableAssetError: mp_physics = 38 needs the hail-aware Thompson table qr_acr_qg_mp38V1.dat (643 MiB) in <path>, and staging it failed: The hail-aware Thompson table build needs GNU Fortran (gfortran) and dpkg-deb, or a directory holding the pinned qr_acr_qg_mp38V1.dat (WOOF_",
+     "wall_seconds": 360.0
     },
     "metal": {
-     "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 1 value(s) the init file has no variable for: [\"qvolg\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 1.1
+     "outcome": "error",
+     "reason": "woof hex: the forecast driver stopped with CompositeTransactionError: composite step at 0.0 s was refused and aborted without publication; this run armed no physics rollback, so the physics seam is retired and the run stops at the last committed step (--stop-on-refusal arms it and keeps that step's frame)  Underlying cause: TableAssetError: mp_physics = 38 needs the hail-aware Thompson table qr_acr_qg_mp38V1.dat (643 MiB) in <path>, and staging it failed: The hail-aware Thompson table build needs Linux x86_64 with gfortran and dpkg-deb, or a directory holding the pinned qr_acr_qg_mp38V1.dat (W",
+     "wall_seconds": 18.0
     }
    },
    "overrides": {
@@ -4047,14 +5705,138 @@
   "microphysics.udm-mp27": {
    "backends": {
     "cuda": {
-     "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 2 value(s) the init file has no variable for: [\"nn\", \"qh\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 0.9
+     "budgets": {
+      "dry_rel_change": -0.0003938145621008057,
+      "dry_rel_change_interior": -0.00047049817657721956,
+      "precip_kg": 4517212753.851682,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": 0.0,
+       "qh": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg",
+       "qh"
+      ],
+      "water_residual_rel": 0.020112185654849173,
+      "water_residual_rel_interior": 0.019009406470538885
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 4.873213948479883e-07,
+      "water_tol": 0.05,
+      "water_vs_baseline": -5.1829042508572815e-05
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 27,
+      "mynn_boulac_down_sign": true,
+      "mynn_fixes_v61": true,
+      "noahmp_melt_reset_esat": true,
+      "ntiedtke_dry_mass_coupling": true,
+      "pbl_boulac_down_sign": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 382.1
     },
     "metal": {
-     "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 2 value(s) the init file has no variable for: [\"nn\", \"qh\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 1.1
+     "budgets": {
+      "dry_rel_change": -0.00039570501058142023,
+      "dry_rel_change_interior": -0.0004727786173835142,
+      "precip_kg": 1013354247.2801602,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": 0.0,
+       "qh": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg",
+       "qh"
+      ],
+      "water_residual_rel": 0.019179724400870023,
+      "water_residual_rel_interior": 0.019152908873192445
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": -5.499279581328855e-07,
+      "water_tol": 0.05,
+      "water_vs_baseline": -2.785894040845116e-05
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 27,
+      "ntiedtke_dry_mass_coupling": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 65.6
     }
    },
    "overrides": {
@@ -4064,14 +5846,80 @@
   "microphysics.wdm5-mp14": {
    "backends": {
     "cuda": {
-     "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 1 value(s) the init file has no variable for: [\"nn\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 0.9
+     "budgets": {
+      "dry_rel_change": -0.00039611331732560077,
+      "dry_rel_change_interior": -0.00047512626462217425,
+      "precip_kg": 4424307757.427406,
+      "q_min_end": {
+       "qc": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs"
+      ],
+      "water_residual_rel": 0.0202118254765981,
+      "water_residual_rel_interior": 0.019060446554698886
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": -6.321904808133903e-08,
+      "water_tol": 0.05,
+      "water_vs_baseline": -2.591524177350535e-06
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gf_deep_rain_evaporation_booking": true,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 14,
+      "mynn_boulac_down_sign": true,
+      "mynn_fixes_v61": true,
+      "mynn_sfclay_psih_zolzt": true,
+      "noah_smc_floor_booking": true,
+      "noahmp_melt_reset_esat": true,
+      "ntiedtke_dry_mass_coupling": true,
+      "pbl_boulac_down_sign": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "rrtmg_lw_model_top": true,
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "thompson_rain_snow_closure": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true,
+      "ysu_surface_heat_exner": true
+     },
+     "seam": "engine",
+     "wall_seconds": 362.2
     },
     "metal": {
      "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 1 value(s) the init file has no variable for: [\"nn\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 1.1
+     "reason": "woof hex: the forecast driver stopped with PhysicsVerticalPreflightError: resolved physics vertical preflight failed: - WDM5 microphysics requires 2 <= nz <= 80, got nz=149  Full traceback: <path>  The scratch tree is kept at <path> and any frames already written are in <path>",
+     "wall_seconds": 2.3
     }
    },
    "overrides": {
@@ -4081,78 +5929,10 @@
   "microphysics.wdm6-mp16": {
    "backends": {
     "cuda": {
-     "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 1 value(s) the init file has no variable for: [\"nn\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 1.1
-    },
-    "metal": {
-     "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 1 value(s) the init file has no variable for: [\"nn\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 1.1
-    }
-   },
-   "overrides": {
-    "mp_physics": "16"
-   }
-  },
-  "microphysics.wdm7-mp26": {
-   "backends": {
-    "cuda": {
-     "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 2 value(s) the init file has no variable for: [\"nn\", \"qh\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 0.9
-    },
-    "metal": {
-     "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 2 value(s) the init file has no variable for: [\"nn\", \"qh\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 1.1
-    }
-   },
-   "overrides": {
-    "mp_physics": "26"
-   }
-  },
-  "microphysics.wsm3-mp3": {
-   "backends": {
-    "cuda": {
-     "outcome": "refused",
-     "reason": "woof hex: the forecast driver stopped with PhysicsVerticalPreflightError: resolved physics vertical preflight failed: - WSM3 microphysics requires 2 <= nz <= 80, got nz=149  Full traceback: <path>  The scratch tree is kept at <path> and any frames already written are in <path>",
-     "wall_seconds": 19.1
-    },
-    "metal": {
-     "outcome": "refused",
-     "reason": "woof hex: the forecast driver stopped with PhysicsVerticalPreflightError: resolved physics vertical preflight failed: - WSM3 microphysics requires 2 <= nz <= 80, got nz=149  Full traceback: <path>  The scratch tree is kept at <path> and any frames already written are in <path>",
-     "wall_seconds": 3.1
-    }
-   },
-   "overrides": {
-    "mp_physics": "3"
-   }
-  },
-  "microphysics.wsm5-mp4": {
-   "backends": {
-    "cuda": {
-     "outcome": "refused",
-     "reason": "woof hex: the forecast driver stopped with PhysicsVerticalPreflightError: resolved physics vertical preflight failed: - WSM5 microphysics requires 2 <= nz <= 80, got nz=149  Full traceback: <path>  The scratch tree is kept at <path> and any frames already written are in <path>",
-     "wall_seconds": 18.7
-    },
-    "metal": {
-     "outcome": "refused",
-     "reason": "woof hex: the forecast driver stopped with PhysicsVerticalPreflightError: resolved physics vertical preflight failed: - WSM5 microphysics requires 2 <= nz <= 80, got nz=149  Full traceback: <path>  The scratch tree is kept at <path> and any frames already written are in <path>",
-     "wall_seconds": 2.6
-    }
-   },
-   "overrides": {
-    "mp_physics": "4"
-   }
-  },
-  "microphysics.wsm6-mp6": {
-   "backends": {
-    "cuda": {
      "budgets": {
-      "dry_rel_change": -0.0003944606581672507,
-      "dry_rel_change_interior": -0.00047233907908794394,
-      "precip_kg": 964988210.9027002,
+      "dry_rel_change": -0.0003931392400712448,
+      "dry_rel_change_interior": -0.00047091548062192564,
+      "precip_kg": 4421035399.456053,
       "q_min_end": {
        "qc": 0.0,
        "qg": 0.0,
@@ -4169,8 +5949,394 @@
        "qs",
        "qg"
       ],
-      "water_residual_rel": 0.019304016540824837,
-      "water_residual_rel_interior": 0.019181802661013627
+      "water_residual_rel": 0.02024476593094354,
+      "water_residual_rel_interior": 0.019063672813031292
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 7.001735014190323e-08,
+      "water_tol": 0.05,
+      "water_vs_baseline": 2.4372999838338794e-06
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 16,
+      "mynn_boulac_down_sign": true,
+      "mynn_fixes_v61": true,
+      "noahmp_melt_reset_esat": true,
+      "ntiedtke_dry_mass_coupling": true,
+      "pbl_boulac_down_sign": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 384.4
+    },
+    "metal": {
+     "budgets": {
+      "dry_rel_change": -0.00039432644702673347,
+      "dry_rel_change_interior": -0.0004721879533129832,
+      "precip_kg": 964169223.0101367,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg"
+      ],
+      "water_residual_rel": 0.019303150953196554,
+      "water_residual_rel_interior": 0.019181886879175485
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 4.073611239812074e-08,
+      "water_tol": 0.05,
+      "water_vs_baseline": 1.1190655745882405e-06
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 16,
+      "ntiedtke_dry_mass_coupling": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true
+     },
+     "seam": "engine",
+     "wall_seconds": 49.3
+    }
+   },
+   "overrides": {
+    "mp_physics": "16"
+   }
+  },
+  "microphysics.wdm7-mp26": {
+   "backends": {
+    "cuda": {
+     "budgets": {
+      "dry_rel_change": -0.000396059316286021,
+      "dry_rel_change_interior": -0.00047509426736042976,
+      "precip_kg": 4418600725.700808,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": 0.0,
+       "qh": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg",
+       "qh"
+      ],
+      "water_residual_rel": 0.02020899397320889,
+      "water_residual_rel_interior": 0.019063017562111113
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": -3.1221786336854684e-08,
+      "water_tol": 0.05,
+      "water_vs_baseline": -2.051676512362932e-08
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gf_deep_rain_evaporation_booking": true,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 26,
+      "mynn_boulac_down_sign": true,
+      "mynn_fixes_v61": true,
+      "mynn_sfclay_psih_zolzt": true,
+      "noah_smc_floor_booking": true,
+      "noahmp_melt_reset_esat": true,
+      "ntiedtke_dry_mass_coupling": true,
+      "pbl_boulac_down_sign": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "rrtmg_lw_model_top": true,
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "thompson_rain_snow_closure": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true,
+      "ysu_surface_heat_exner": true
+     },
+     "seam": "engine",
+     "wall_seconds": 399.0
+    },
+    "metal": {
+     "outcome": "refused",
+     "reason": "woof hex: the forecast driver stopped with PhysicsVerticalPreflightError: resolved physics vertical preflight failed: - WDM7 microphysics requires 2 <= nz <= 80, got nz=149  Full traceback: <path>  The scratch tree is kept at <path> and any frames already written are in <path>",
+     "wall_seconds": 2.5
+    }
+   },
+   "overrides": {
+    "mp_physics": "26"
+   }
+  },
+  "microphysics.wsm3-mp3": {
+   "backends": {
+    "cuda": {
+     "budgets": {
+      "dry_rel_change": -0.0003958202429653747,
+      "dry_rel_change_interior": -0.0004746447754517737,
+      "precip_kg": 4426616979.647132,
+      "q_min_end": {
+       "qc": 0.0,
+       "qr": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr"
+      ],
+      "water_residual_rel": 0.020308179788099536,
+      "water_residual_rel_interior": 0.019102494295155998
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 4.1827012231922863e-07,
+      "water_tol": 0.05,
+      "water_vs_baseline": 3.9456216279761674e-05
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gf_deep_rain_evaporation_booking": true,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 3,
+      "mynn_boulac_down_sign": true,
+      "mynn_fixes_v61": true,
+      "mynn_sfclay_psih_zolzt": true,
+      "noah_smc_floor_booking": true,
+      "noahmp_melt_reset_esat": true,
+      "ntiedtke_dry_mass_coupling": true,
+      "pbl_boulac_down_sign": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "rrtmg_lw_model_top": true,
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "thompson_rain_snow_closure": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true,
+      "ysu_surface_heat_exner": true
+     },
+     "seam": "engine",
+     "wall_seconds": 427.3
+    },
+    "metal": {
+     "outcome": "refused",
+     "reason": "woof hex: the forecast driver stopped with PhysicsVerticalPreflightError: resolved physics vertical preflight failed: - WSM3 microphysics requires 2 <= nz <= 80, got nz=149  Full traceback: <path>  The scratch tree is kept at <path> and any frames already written are in <path>",
+     "wall_seconds": 3.1
+    }
+   },
+   "overrides": {
+    "mp_physics": "3"
+   }
+  },
+  "microphysics.wsm5-mp4": {
+   "backends": {
+    "cuda": {
+     "budgets": {
+      "dry_rel_change": -0.00039615076488795,
+      "dry_rel_change_interior": -0.0004750826773360451,
+      "precip_kg": 4418808072.592272,
+      "q_min_end": {
+       "qc": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs"
+      ],
+      "water_residual_rel": 0.02020738269713193,
+      "water_residual_rel_interior": 0.0190648367358611
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": -1.9631761952187965e-08,
+      "water_tol": 0.05,
+      "water_vs_baseline": 1.7986569848631173e-06
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gf_deep_rain_evaporation_booking": true,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 4,
+      "mynn_boulac_down_sign": true,
+      "mynn_fixes_v61": true,
+      "mynn_sfclay_psih_zolzt": true,
+      "noah_smc_floor_booking": true,
+      "noahmp_melt_reset_esat": true,
+      "ntiedtke_dry_mass_coupling": true,
+      "pbl_boulac_down_sign": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "rrtmg_lw_model_top": true,
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "thompson_rain_snow_closure": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true,
+      "ysu_surface_heat_exner": true
+     },
+     "seam": "engine",
+     "wall_seconds": 365.9
+    },
+    "metal": {
+     "outcome": "refused",
+     "reason": "woof hex: the forecast driver stopped with PhysicsVerticalPreflightError: resolved physics vertical preflight failed: - WSM5 microphysics requires 2 <= nz <= 80, got nz=149  Full traceback: <path>  The scratch tree is kept at <path> and any frames already written are in <path>",
+     "wall_seconds": 2.6
+    }
+   },
+   "overrides": {
+    "mp_physics": "4"
+   }
+  },
+  "microphysics.wsm6-mp6": {
+   "backends": {
+    "cuda": {
+     "budgets": {
+      "dry_rel_change": -0.00039612442285876225,
+      "dry_rel_change_interior": -0.0004750630455740929,
+      "precip_kg": 4417638960.268391,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg"
+      ],
+      "water_residual_rel": 0.020206141710556437,
+      "water_residual_rel_interior": 0.019063038078876236
      },
      "call_counts": {
       "cumulus": 120,
@@ -4191,25 +6357,35 @@
      "sealed_physics": {
       "bl_pbl_physics": 1,
       "cu_physics": 3,
+      "gf_deep_rain_evaporation_booking": true,
       "gwd_opt": 0,
       "hydrometeor_handover_numbers": true,
       "icloud": 1,
       "ishallow": 1,
       "mp_physics": 6,
+      "mynn_boulac_down_sign": true,
+      "mynn_fixes_v61": true,
+      "mynn_sfclay_psih_zolzt": true,
+      "noah_smc_floor_booking": true,
+      "noahmp_melt_reset_esat": true,
       "ntiedtke_dry_mass_coupling": true,
+      "pbl_boulac_down_sign": true,
       "ra_physics": 4,
       "ra_rrtmg_variant": "rrtmg_legacy",
+      "rrtmg_lw_model_top": true,
       "sf_sfclay_physics": 1,
       "sf_surface_physics": 4,
       "thompson_cloud_surface_booking": true,
+      "thompson_rain_snow_closure": true,
       "wdm6_conservative_surface": true,
       "wsm3_conservative_surface": true,
       "wsm5_conservative_surface": true,
       "wsm6_conservative_surface": true,
-      "wsm7_conservative_surface": true
+      "wsm7_conservative_surface": true,
+      "ysu_surface_heat_exner": true
      },
      "seam": "engine",
-     "wall_seconds": 109.4
+     "wall_seconds": 342.5
     },
     "metal": {
      "budgets": {
@@ -4413,14 +6589,84 @@
   "microphysics.wsm7-mp24": {
    "backends": {
     "cuda": {
-     "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 1 value(s) the init file has no variable for: [\"qh\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 1.0
+     "budgets": {
+      "dry_rel_change": -0.0003961051726391064,
+      "dry_rel_change_interior": -0.0004750501872688382,
+      "precip_kg": 4420588661.420382,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": 0.0,
+       "qh": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg",
+       "qh"
+      ],
+      "water_residual_rel": 0.02020635736427515,
+      "water_residual_rel_interior": 0.01906431694453723
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 1.2858305254695359e-08,
+      "water_tol": 0.05,
+      "water_vs_baseline": 1.2788656609946658e-06
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gf_deep_rain_evaporation_booking": true,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 24,
+      "mynn_boulac_down_sign": true,
+      "mynn_fixes_v61": true,
+      "mynn_sfclay_psih_zolzt": true,
+      "noah_smc_floor_booking": true,
+      "noahmp_melt_reset_esat": true,
+      "ntiedtke_dry_mass_coupling": true,
+      "pbl_boulac_down_sign": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "rrtmg_lw_model_top": true,
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "thompson_rain_snow_closure": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true,
+      "ysu_surface_heat_exner": true
+     },
+     "seam": "engine",
+     "wall_seconds": 353.3
     },
     "metal": {
      "outcome": "refused",
-     "reason": "woof hex: native physics initialization failed: rw_mpas_init: this run computed 1 value(s) the init file has no variable for: [\"qh\"].  Writing                  the file anyway would silently drop them and leave the capsule's own numbers in                  their place",
-     "wall_seconds": 1.1
+     "reason": "woof hex: the forecast driver stopped with PhysicsVerticalPreflightError: resolved physics vertical preflight failed: - WSM7 microphysics requires 2 <= nz <= 80, got nz=149  Full traceback: <path>  The scratch tree is kept at <path> and any frames already written are in <path>",
+     "wall_seconds": 2.5
     }
    },
    "overrides": {
@@ -4563,9 +6809,77 @@
   "pbl.boulac": {
    "backends": {
     "cuda": {
-     "outcome": "refused",
-     "reason": "woof hex: the forecast driver stopped with PhysicsVerticalPreflightError: resolved physics vertical preflight failed: - BouLac PBL requires 3 <= nz <= 128, got nz=149  Full traceback: <path>  The scratch tree is kept at <path> and any frames already written are in <path>",
-     "wall_seconds": 19.1
+     "budgets": {
+      "dry_rel_change": -0.00038519445314626183,
+      "dry_rel_change_interior": -0.0004591582042153891,
+      "precip_kg": 4491026970.273563,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg"
+      ],
+      "water_residual_rel": 0.02023010422022354,
+      "water_residual_rel_interior": 0.019162012484937013
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 1.5904841358703806e-05,
+      "water_tol": 0.05,
+      "water_vs_baseline": 9.897440606077695e-05
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 8,
+      "cu_physics": 3,
+      "gf_deep_rain_evaporation_booking": true,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 6,
+      "mynn_boulac_down_sign": true,
+      "mynn_fixes_v61": true,
+      "mynn_sfclay_psih_zolzt": true,
+      "noah_smc_floor_booking": true,
+      "noahmp_melt_reset_esat": true,
+      "ntiedtke_dry_mass_coupling": true,
+      "pbl_boulac_down_sign": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "rrtmg_lw_model_top": true,
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "thompson_rain_snow_closure": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true,
+      "ysu_surface_heat_exner": true
+     },
+     "seam": "engine",
+     "wall_seconds": 350.5
     },
     "metal": {
      "outcome": "refused",
@@ -5737,9 +8051,77 @@
   "pbl.qnse": {
    "backends": {
     "cuda": {
-     "outcome": "refused",
-     "reason": "woof hex: the forecast driver stopped with PhysicsVerticalPreflightError: resolved physics vertical preflight failed: - QNSE PBL requires 4 <= nz <= 128, got nz=149  Full traceback: <path>  The scratch tree is kept at <path> and any frames already written are in <path>",
-     "wall_seconds": 19.6
+     "budgets": {
+      "dry_rel_change": -0.0003952304619564232,
+      "dry_rel_change_interior": -0.00047155391668644663,
+      "precip_kg": 4440879717.073101,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg"
+      ],
+      "water_residual_rel": 0.016588190273980227,
+      "water_residual_rel_interior": 0.013907608530003208
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 3.5091288876462796e-06,
+      "water_tol": 0.05,
+      "water_vs_baseline": -0.005155429548873028
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 4,
+      "cu_physics": 3,
+      "gf_deep_rain_evaporation_booking": true,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 6,
+      "mynn_boulac_down_sign": true,
+      "mynn_fixes_v61": true,
+      "mynn_sfclay_psih_zolzt": true,
+      "noah_smc_floor_booking": true,
+      "noahmp_melt_reset_esat": true,
+      "ntiedtke_dry_mass_coupling": true,
+      "pbl_boulac_down_sign": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "rrtmg_lw_model_top": true,
+      "sf_sfclay_physics": 4,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "thompson_rain_snow_closure": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true,
+      "ysu_surface_heat_exner": true
+     },
+     "seam": "engine",
+     "wall_seconds": 605.1
     },
     "metal": {
      "outcome": "refused",
@@ -6578,9 +8960,77 @@
   "radiation.fu-liou-gu": {
    "backends": {
     "cuda": {
-     "outcome": "refused",
-     "reason": "woof hex: the forecast driver stopped with ConfigurationRefused: WRF FLG needs 4 to 100 model layers: its three cloud groups need a layer each and its native scratch bound is nvx=100.  Full traceback: <path>  The scratch tree is kept at <path> and any frames already written are in <path>",
-     "wall_seconds": 17.2
+     "budgets": {
+      "dry_rel_change": -0.0003992149259272024,
+      "dry_rel_change_interior": -0.0004794204346474764,
+      "precip_kg": 4431067387.632019,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg"
+      ],
+      "water_residual_rel": 0.020146757581374374,
+      "water_residual_rel_interior": 0.019001388127778365
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": -4.357389073383509e-06,
+      "water_tol": 0.05,
+      "water_vs_baseline": -6.164995109787103e-05
+     },
+     "outcome": "ran",
+     "sealed_physics": {
+      "bl_pbl_physics": 1,
+      "cu_physics": 3,
+      "gf_deep_rain_evaporation_booking": true,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 6,
+      "mynn_boulac_down_sign": true,
+      "mynn_fixes_v61": true,
+      "mynn_sfclay_psih_zolzt": true,
+      "noah_smc_floor_booking": true,
+      "noahmp_melt_reset_esat": true,
+      "ntiedtke_dry_mass_coupling": true,
+      "pbl_boulac_down_sign": true,
+      "ra_lw_physics": 7,
+      "ra_sw_physics": 7,
+      "rrtmg_lw_model_top": true,
+      "sf_sfclay_physics": 1,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "thompson_rain_snow_closure": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true,
+      "ysu_surface_heat_exner": true
+     },
+     "seam": "engine",
+     "wall_seconds": 1211.8
     },
     "metal": {
      "outcome": "refused",
@@ -6597,8 +9047,8 @@
    "backends": {
     "cuda": {
      "outcome": "refused",
-     "reason": "woof hex: the forecast driver stopped with ConfigurationRefused: GSFC shortwave requires 2 to 128 layers; larger columns exceed its allocated CUDA workspace  Full traceback: <path>  The scratch tree is kept at <path> and any frames already written are in <path>",
-     "wall_seconds": 17.2
+     "reason": "woof hex: the forecast driver stopped with ConfigurationRefused: downward longwave (GLW) has no source: ra_lw_physics=0, so no longwave scheme computes it, and sf_surface_physics=4 (Noah-MP) reads GLW every surface step. initialize_physics will not invent one. REMEDY, in preference order: (1) run a longwave scheme -- set ra_lw_physics=4 with ra_sw_physics=4 (RRTMG-class), which is what every nocturnally valid shipped profile does; or (2) if this is an idealised column that genuinely wants a fixed longwave, declare it by passing glw=<W m-2> explicitly (woof.core.physics.DECLARED_CONSTANT_GLW_WM",
+     "wall_seconds": 29.6
     },
     "metal": {
      "outcome": "refused",
@@ -7247,7 +9697,7 @@
     "cuda": {
      "outcome": "refused",
      "reason": "woof hex: the forecast driver stopped with ConfigurationRefused: GFDL-Eta radiation needs a strictly decreasing nominal eta: p_top_pa=1215.607177734375 is above the standard-atmosphere pressure of the nominal top, so the upper layers clip to eta 0; pass a p_top_pa at or below that pressure  Full traceback: <path>  The scratch tree is kept at <path> and any frames already written are in <path>",
-     "wall_seconds": 20.5
+     "wall_seconds": 22.2
     },
     "metal": {
      "outcome": "refused",
@@ -8204,10 +10654,78 @@
   "surface_layer.qnse": {
    "backends": {
     "cuda": {
-     "outcome": "refused",
-     "reason": "woof hex: the forecast driver stopped with PhysicsVerticalPreflightError: resolved physics vertical preflight failed: - QNSE PBL requires 4 <= nz <= 128, got nz=149  Full traceback: <path>  The scratch tree is kept at <path> and any frames already written are in <path>",
+     "budgets": {
+      "dry_rel_change": -0.0003952304619564232,
+      "dry_rel_change_interior": -0.00047155391668644663,
+      "precip_kg": 4440879717.073101,
+      "q_min_end": {
+       "qc": 0.0,
+       "qg": 0.0,
+       "qi": 0.0,
+       "qr": 0.0,
+       "qs": 0.0,
+       "qv": 1.3860648095942452e-06
+      },
+      "species": [
+       "qv",
+       "qc",
+       "qr",
+       "qi",
+       "qs",
+       "qg"
+      ],
+      "water_residual_rel": 0.016588190273980227,
+      "water_residual_rel_interior": 0.013907608530003208
+     },
+     "call_counts": {
+      "cumulus": 120,
+      "cumulus_history": 0,
+      "noah": 120,
+      "radiation": 2,
+      "sfclay": 120,
+      "ysu": 120
+     },
+     "graded": {
+      "cells": "interior",
+      "dry_tol": 0.001,
+      "dry_vs_baseline": 3.5091288876462796e-06,
+      "water_tol": 0.05,
+      "water_vs_baseline": -0.005155429548873028
+     },
+     "outcome": "ran",
      "same_run_as": "pbl.qnse",
-     "wall_seconds": 19.6
+     "sealed_physics": {
+      "bl_pbl_physics": 4,
+      "cu_physics": 3,
+      "gf_deep_rain_evaporation_booking": true,
+      "gwd_opt": 0,
+      "hydrometeor_handover_numbers": true,
+      "icloud": 1,
+      "ishallow": 1,
+      "mp_physics": 6,
+      "mynn_boulac_down_sign": true,
+      "mynn_fixes_v61": true,
+      "mynn_sfclay_psih_zolzt": true,
+      "noah_smc_floor_booking": true,
+      "noahmp_melt_reset_esat": true,
+      "ntiedtke_dry_mass_coupling": true,
+      "pbl_boulac_down_sign": true,
+      "ra_physics": 4,
+      "ra_rrtmg_variant": "rrtmg_legacy",
+      "rrtmg_lw_model_top": true,
+      "sf_sfclay_physics": 4,
+      "sf_surface_physics": 4,
+      "thompson_cloud_surface_booking": true,
+      "thompson_rain_snow_closure": true,
+      "wdm6_conservative_surface": true,
+      "wsm3_conservative_surface": true,
+      "wsm5_conservative_surface": true,
+      "wsm6_conservative_surface": true,
+      "wsm7_conservative_surface": true,
+      "ysu_surface_heat_exner": true
+     },
+     "seam": "engine",
+     "wall_seconds": 605.1
     },
     "metal": {
      "outcome": "refused",

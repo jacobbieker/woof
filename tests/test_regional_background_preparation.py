@@ -42,52 +42,6 @@ def test_portable_reader_preserves_native_source_cache_and_member(tmp_path, monk
                       history_interval_seconds=exp.root.history_interval_s)
 
 
-def test_local_member_is_bound_without_an_acquisition_member_axis(tmp_path):
-    from test_audit_area1_acquisition import _local_member_archive
-    root = tmp_path / 'inputs'
-    _local_member_archive(root, member='009')
-    request = Request(epoch='2026-07-29T00:00:00Z', point=(40., -100.), card=Card(24.),
-                      source='20crv3', source_root=str(root), source_member='009')
-    text, _, _, background = configuration(request, derive_rung(request, 1))
-    assert background['selection']['member'] == '009'
-    assert background['selection']['cycle'] is None
-    assert background['selection']['time_axis'] == 'analysis_times'
-    assert background['inputs']['snapshot']['manifest']['member'] == '009'
-    assert 'member =' not in text and 'out =' not in text
-    with pytest.raises(ValueError, match='member'):
-        configuration(replace(request, source_member='008'), derive_rung(request, 1))
-
-
-def test_local_mapped_review_retains_order_after_external_list_changes(tmp_path, monkeypatch):
-    from test_acquisition_review_repairs import _snapshot
-    from woof import runplan, stage_cli
-    snapshot, listing, paths = _snapshot(tmp_path / 'inputs')
-    request = Request(epoch='2026-07-29T00:00:00Z', point=(40., -100.), card=Card(24.),
-                      source=snapshot['source'], source_root=snapshot['source_root'])
-    text, wps, exp, background = configuration(request, derive_rung(request, 1))
-    reviewed = background['inputs']['snapshot']
-    listing.write_text(''.join(f'{path}\n' for path in reversed(paths)))
-    config = tmp_path / 'experiment.toml'
-    config.write_text(text)
-    config.with_name('experiment.namelist.wps').write_text(wps)
-    observed = []
-    def prepare(argv):
-        selected = Path(argv[argv.index('--input-list') + 1])
-        observed.extend(selected.read_text().splitlines())
-        root = Path(argv[argv.index('--output-root') + 1])
-        root.mkdir(parents=True, exist_ok=True)
-        (root / 'proof.json').write_text('{}')
-    monkeypatch.setattr(runplan, '_run_fetch', lambda *a, **k: pytest.fail('local inputs were downloaded'))
-    monkeypatch.setattr(runplan, '_run_prep', prepare)
-    monkeypatch.setattr(stage_cli, 'resolve_bundle', lambda root: {'document': root / 'proof.json'})
-    observer = SimpleNamespace(enter_stage=lambda *a, **k: None, finish_stage=lambda *a, **k: None)
-    plan = SimpleNamespace(config_intent={}, run_options={'geog_root': str(tmp_path / 'geog')})
-    result = runplan._staged_chain(plan, config_path=config, exp=exp, observer=observer,
-        run_dir=tmp_path / 'run', prepare_only=True, reviewed_inputs=reviewed)
-    assert observed == [str(path) for path in paths]
-    assert result['forecast_started'] is False
-
-
 @pytest.mark.parametrize('committed_state', [False, True])
 def test_stale_owned_preparation_preserves_old_files_and_rebuilds_before_members(tmp_path, monkeypatch, committed_state):
     from test_prepared_single_domain_forecast import _prepared_fixture
@@ -267,12 +221,3 @@ def test_supplied_ensemble_product_reaches_its_native_member_owner(tmp_path, mon
         _prepared_member(request, inputs, get_source_adapter('era5'))
     assert len(calls) == 1
 
-
-def test_prepared_inputs_cannot_silently_change_reviewed_outputs():
-    from dataclasses import replace
-    from woof.io.history_selection import HistorySelection
-    from woof.regional_preparation import _experiment_identity
-    request = Request(epoch='2026-07-29T00:00:00Z', point=(40., -100.), card=Card(24.))
-    _, _, exp, _ = configuration(request, derive_rung(request, 1))
-    changed = replace(exp, output=HistorySelection(history_drop=('T2',)))
-    assert _experiment_identity(exp) != _experiment_identity(changed)

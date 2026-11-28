@@ -17,6 +17,8 @@ are tests/test_correct_mode_water_budget.py, on the GPU shard.
 """
 from __future__ import annotations
 
+import dataclasses
+
 from dataclasses import replace
 from pathlib import Path
 
@@ -26,6 +28,16 @@ from woof import correct_mode
 from woof.config import RunConfig, validate_run_config
 
 ROOT = Path(__file__).resolve().parents[1]
+#: the fork's quirk ledger on the WRF route (woof.quirk_corrections), FQ1-FQ12
+_FQ = ("FQ1", "FQ2", "FQ3", "FQ4", "FQ5", "FQ6", "FQ7", "FQ8", "FQ9", "FQ10", "FQ11", "FQ12")
+_FQ_KEYS = ("gf_deep_rain_evaporation_booking", "ysu_surface_heat_exner",
+            "mynn_sfclay_psih_zolzt", "noah_smc_floor_booking",
+            "thompson_rain_snow_closure", "rrtmg_lw_model_top",
+            "thompson_lamc_updated_rc", "noah_land_ice_rain_runoff",
+            "noah_snow_series_conductivity",
+            "mynn_sfclay_q2_land_cap",
+            "kf_capped_downdraft_rain_floor",
+            "diff_metrics_seam_slope")
 
 # -------------------------------------------------------------- the switch --
 def test_exact_mode_authors_every_key_off():
@@ -39,7 +51,12 @@ def test_exact_mode_authors_every_key_off():
                             "wsm3_conservative_surface": False,
                             "wsm5_conservative_surface": False,
                             "wsm7_conservative_surface": False,
-                            "hydrometeor_handover_numbers": False}
+                            "hydrometeor_handover_numbers": False,
+                            "noahmp_melt_reset_esat": False,
+                            "mynn_fixes_v61": False,
+                            "mynn_boulac_down_sign": False,
+                            "pbl_boulac_down_sign": False,
+                            **dict.fromkeys(_FQ_KEYS, False)}
     assert res.applied == ()
     assert "forced_by" not in res.receipt()
 
@@ -53,8 +70,13 @@ def test_correct_mode_sets_every_registered_key():
                             "wsm3_conservative_surface": True,
                             "wsm5_conservative_surface": True,
                             "wsm7_conservative_surface": True,
-                            "hydrometeor_handover_numbers": True}
-    assert res.receipt()["applied_findings"] == ["WB1", "WB4", "WB5", "HN1"]
+                            "hydrometeor_handover_numbers": True,
+                            "noahmp_melt_reset_esat": True,
+                            "mynn_fixes_v61": True,
+                            "mynn_boulac_down_sign": True,
+                            "pbl_boulac_down_sign": True,
+                            **dict.fromkeys(_FQ_KEYS, True)}
+    assert res.receipt()["applied_findings"] == ["WB1", "WB4", "WB5", "HN1", "SN1", "MY1", "ML1", *_FQ]
 
 
 def test_correct_skip_drops_one_correction():
@@ -66,7 +88,12 @@ def test_correct_skip_drops_one_correction():
                             "wsm3_conservative_surface": False,
                             "wsm5_conservative_surface": False,
                             "wsm7_conservative_surface": False,
-                            "hydrometeor_handover_numbers": True}
+                            "hydrometeor_handover_numbers": True,
+                            "noahmp_melt_reset_esat": True,
+                            "mynn_fixes_v61": True,
+                            "mynn_boulac_down_sign": True,
+                            "pbl_boulac_down_sign": True,
+                            **dict.fromkeys(_FQ_KEYS, True)}
     assert res.receipt()["physics.correct_skip"] == ["WB5"]
 
 
@@ -77,7 +104,7 @@ def test_the_default_is_correct_in_a_default_process():
         pytest.skip("strict process; see the strict subprocess test")
     assert correct_mode.PHYSICS_MODE_DEFAULT == "correct"
     assert correct_mode.resolve() == correct_mode.resolve("correct")
-    assert correct_mode.resolve(None, ["WB4"]).applied == ("WB1", "WB5", "HN1")
+    assert correct_mode.resolve(None, ["WB4"]).applied == ("WB1", "WB5", "HN1", "SN1", "MY1", "ML1", *_FQ)
 
 
 def test_strict_wrf_mode_forces_exact_and_records_it():
@@ -189,14 +216,19 @@ def test_wb5_spans_wsm6_and_wdm6_and_a_one_key_arm_reads_as_itself():
                     **{**correct_mode.resolve("correct").settings,
                        "wsm6_conservative_surface": False})
     receipt = correct_mode.resolution_of(arm).receipt()
-    assert receipt["applied_findings"] == ["WB1", "WB4", "WB5", "HN1"]
+    assert receipt["applied_findings"] == ["WB1", "WB4", "WB5", "HN1", "SN1", "MY1", "ML1", *_FQ]
     assert receipt["keys"] == {"thompson_cloud_surface_booking": True,
                                "ntiedtke_dry_mass_coupling": True,
                                "wdm6_conservative_surface": True,
                                "wsm3_conservative_surface": True,
                                "wsm5_conservative_surface": True,
                                "wsm7_conservative_surface": True,
-                               "hydrometeor_handover_numbers": True}
+                               "hydrometeor_handover_numbers": True,
+                            "noahmp_melt_reset_esat": True,
+                            "mynn_fixes_v61": True,
+                            "mynn_boulac_down_sign": True,
+                            "pbl_boulac_down_sign": True,
+                            **dict.fromkeys(_FQ_KEYS, True)}
 
 
 def test_run_receipt_names_each_domains_mode():
@@ -225,10 +257,13 @@ def test_run_receipt_says_which_corrections_reached_the_run():
     cases = (
         ({"mp_physics": 6}, ["WB5"], ["wsm6_conservative_surface"]),
         ({"mp_physics": 16}, ["WB5"], ["wdm6_conservative_surface"]),
-        ({"mp_physics": 8}, ["WB1", "HN1"], ["thompson_cloud_surface_booking",
-                                             "hydrometeor_handover_numbers"]),
-        ({"mp_physics": 28}, ["WB1", "HN1"], ["thompson_cloud_surface_booking",
-                                              "hydrometeor_handover_numbers"]),
+        ({"mp_physics": 8}, ["WB1", "HN1", "FQ5"], ["thompson_cloud_surface_booking",
+                                             "hydrometeor_handover_numbers",
+                                             "thompson_rain_snow_closure"]),
+        ({"mp_physics": 28}, ["WB1", "HN1", "FQ5", "FQ7"], ["thompson_cloud_surface_booking",
+                                              "hydrometeor_handover_numbers",
+                                              "thompson_rain_snow_closure",
+                                              "thompson_lamc_updated_rc"]),
         ({"mp_physics": 3}, ["WB5"], ["wsm3_conservative_surface"]),
         ({"mp_physics": 4}, ["WB5"], ["wsm5_conservative_surface"]),
         ({"mp_physics": 24}, ["WB5"], ["wsm7_conservative_surface"]),
@@ -347,12 +382,14 @@ def test_wb1_is_output_only_and_moves_no_thompson_identity():
                                   _require_config_match, configuration_echo)
     assert set(correct_mode.OUTPUT_ONLY_KEYS) <= CONFIG_DIAGNOSTIC_FIELDS
     thompson = RunConfig(**{**_TINY, "mp_physics": 8})
-    # Every key off but HN1 (a trajectory key, which binds; its own test
-    # is above): WB1 alone flips between the two.
+    # Every key off but HN1 and FQ5 (trajectory keys, which bind; their
+    # own tests are elsewhere): WB1 alone flips between the two.
     exact = RunConfig(**{**_TINY, "mp_physics": 8},
                       **{**correct_mode.resolve("exact").settings,
                          "hydrometeor_handover_numbers":
-                             thompson.hydrometeor_handover_numbers})
+                             thompson.hydrometeor_handover_numbers,
+                         "thompson_rain_snow_closure":
+                             thompson.thompson_rain_snow_closure})
     assert configuration_echo(thompson) == configuration_echo(exact)
     assert (_configuration_digest_values(dataclasses.asdict(thompson))
             == _configuration_digest_values(dataclasses.asdict(exact)))
@@ -396,11 +433,25 @@ def _shipped(component):
     return sorted(v for v in implemented_selector_values(component) if v != 0)
 
 
+def _shipped_lw():
+    from woof.physics_registry import component_options
+    return {int(option["selectors"]["ra_lw_physics"])
+            for option in component_options("radiation").values()
+            if "ra_lw_physics" in option.get("selectors", {})} - {0}
+
+
 def test_every_carrier_scheme_is_a_shipped_scheme():
     """The carrier registry names only schemes the engine ships, so a typo
     cannot hide a carrier from the gate below."""
     shipped = {"mp_physics": set(_shipped("microphysics")),
-               "cu_physics": set(_shipped("cumulus"))}
+               "cu_physics": set(_shipped("cumulus")),
+               "sf_surface_physics": set(_shipped("land_surface")),
+               "bl_pbl_physics": set(_shipped("pbl")),
+               "sf_sfclay_physics": set(_shipped("surface_layer")),
+               # radiation selects on a (LW, SW) pair: the LW values
+               "ra_lw_physics": _shipped_lw(),
+               # FQ12: the diffusion options with compute_diff_metrics
+               "diff_opt": {1, 2}}
     for c in correct_mode.CORRECTIONS:
         assert c.carriers, c.finding
         for selector, schemes in c.carriers:
@@ -483,3 +534,142 @@ def test_wsm3_5_7_keys_bind_only_their_scheme_and_a_290_checkpoint_resumes_exact
         _require_config_match(stored, cfg, "ckpt.nc")
     assert key in str(refused.value)
     _require_config_match(stored, exact, "ckpt.nc")
+
+
+# ------------------------------------------------ 2.9.14: SN1, Noah-MP reset --
+def test_sn1_is_a_noahmp_correction_on_by_default_and_off_in_exact():
+    """SN1 (the Noah-MP land snowmelt reset's stale ESTG) is a correct-mode
+    key scoped to sf_surface_physics = 4.  Breakage prevented: a default run
+    keeping WRF's stale-ESTG reset (Q2 near zero, about -60 C dewpoint, at
+    sunlit melting snow edges), or an exact/strict proof running the fix."""
+    from woof.core.noahmp_runtime import NoahmpRuntimeParameters
+    assert correct_mode.FINDING_BY_KEY["noahmp_melt_reset_esat"] == "SN1"
+    assert correct_mode.key_in_scope("noahmp_melt_reset_esat",
+                                     {"sf_surface_physics": 4})
+    assert not correct_mode.key_in_scope("noahmp_melt_reset_esat",
+                                         {"sf_surface_physics": 2})
+    assert RunConfig.noahmp_melt_reset_esat is correct_mode.CORRECT_KEYS_DEFAULT
+    assert correct_mode.resolve("exact").settings["noahmp_melt_reset_esat"] is False
+    on = NoahmpRuntimeParameters(melt_reset_esat=True)
+    assert on.land_options["melt_reset_esat"] is True
+    assert "melt_reset_esat" not in NoahmpRuntimeParameters().land_options
+
+
+# --------------------------------------- 3.0.3: MY1, MYNN dew and frost --
+_MYNN = dict(_TINY, bl_pbl_physics=5, sf_sfclay_physics=5)
+
+
+def test_my1_a_default_mynn_run_limits_dew_instead_of_deleting_it():
+    """MY1 (WRF 4.6.1's MYNN deletes every downward surface vapour flux:
+    ``min(0.9*sqv - 1e-8, 0)`` is 0 for any sqv above 1.1e-8; NCAR/MYNN-EDMF
+    f3c9d9e) is correct-mode key ``mynn_fixes_v61``.  Breakage prevented: a
+    plain MYNN run that still deletes dew and frost (too much overnight
+    fog), and an exact or strict WRF proof that runs the fix.  Before 3.0.3
+    the key defaulted off, so a default run took the WRF 4.6.1 limiter."""
+    from woof.core.mynn_pbl_v61 import pbl_fixes_active, sfclay_fixes_active
+    assert correct_mode.FINDING_BY_KEY["mynn_fixes_v61"] == "MY1"
+    if correct_mode.STRICT:
+        pytest.skip("strict process; exact is forced there")
+    default = RunConfig(**_MYNN)
+    assert default.mynn_fixes_v61 is True
+    assert pbl_fixes_active(default) and sfclay_fixes_active(default)
+    # MY1 and ML1 (the BouLac length sign) both apply on a default MYNN run.
+    # (FQ3 and FQ10, the fork's MYNN surface-layer corrections, follow them.)
+    assert correct_mode.in_effect(default)["findings"][-4:] == ["MY1", "ML1", "FQ3", "FQ10"]
+    assert correct_mode.uncorrected(default) == []
+    exact = RunConfig(**_MYNN, **correct_mode.resolve("exact").settings)
+    assert exact.mynn_fixes_v61 is False and not pbl_fixes_active(exact)
+    skip = RunConfig(**_MYNN, **correct_mode.resolve("correct", ["MY1"]).settings)
+    assert not pbl_fixes_active(skip)
+    assert correct_mode.uncorrected(skip) == []
+
+
+@pytest.mark.parametrize("version,carried", [
+    ("wrf_461", False), ("wrf_471", True), ("wrf_480", True), ("gsd_41", False)])
+def test_my1_is_read_only_at_wrf_461_and_named_where_it_is_not(version, carried):
+    """The fixes are edits of the wrf_461 unit.  WRF 4.7.1's and 4.8.0's MYNN
+    hold the same limiter (data/mynn471, data/mynn480 model.cu) and run it
+    as WRF ships it: listed as uncorrected, never as applied.  GSD 4.1 adds
+    the flux with its sign: neither applied nor uncorrected."""
+    from woof.core.mynn_pbl_v61 import pbl_fixes_active
+    if correct_mode.STRICT:
+        pytest.skip("strict process; exact is forced there")
+    cfg = RunConfig(**_MYNN, bl_mynn_version=version)
+    on = version == "wrf_461"
+    assert pbl_fixes_active(cfg) is on
+    assert correct_mode.key_in_scope("mynn_fixes_v61", dataclasses.asdict(cfg)) is on
+    assert ("MY1" in correct_mode.in_effect(cfg)["findings"]) is on
+    assert ("MY1" in correct_mode.uncorrected(cfg)) is carried
+    # An echo that dropped the generation at its default reads as wrf_461.
+    assert correct_mode.key_in_scope("mynn_fixes_v61", {"bl_pbl_physics": 5})
+    assert not correct_mode.key_in_scope("mynn_fixes_v61", {"bl_pbl_physics": 1})
+
+
+def test_my1_outside_mynn_does_not_move_the_echo_or_digest():
+    """On by default for every run, the key echoes and digests only where
+    the wrf_461 MYNN reads it, so a non-MYNN run's checkpoint identity is
+    what it was while the key defaulted off."""
+    from woof.io import restart
+    for overrides in ({}, {"bl_pbl_physics": 1, "sf_sfclay_physics": 1},
+                      {**_MYNN, "bl_mynn_version": "gsd_41"}):
+        cfg = RunConfig(**{**_TINY, **overrides})
+        assert "mynn_fixes_v61" not in restart.configuration_echo(cfg), overrides
+    mynn = RunConfig(**_MYNN)
+    if not correct_mode.STRICT:
+        assert restart.configuration_echo(mynn)["mynn_fixes_v61"] is True
+
+
+# ------------------------------------------------------------------ FQ12 --
+def _seam_read(**overrides):
+    values = dataclasses.asdict(RunConfig(**{**_TINY, **overrides}))
+    return correct_mode.key_in_scope("diff_metrics_seam_slope", values)
+
+
+@pytest.mark.parametrize("overrides,read", [
+    ({}, False),                                            # km_opt 1: no mixing package
+    ({"km_opt": 4}, True),                                   # doubly periodic
+    ({"km_opt": 2}, True),
+    ({"km_opt": 4, "open_x": True}, True),                   # y still periodic
+    ({"km_opt": 4, "open_x": True, "open_y": True}, False),  # no periodic axis
+    ({"km_opt": 4, "specified": True}, False),
+    ({"km_opt": 4, "nested": True}, False),
+    ({"km_opt": 4, "diff_opt": 0}, False),
+])
+def test_fq12_is_read_only_where_wrfs_mixing_package_runs_on_a_periodic_axis(overrides, read):
+    """The seam key moves the identity, the echo and the receipt only where
+    compute_diff_metrics' periodic-seam fill is reached: a bounded domain, or
+    one without WRF's mixing package, never reads it."""
+    assert _seam_read(**overrides) is read
+
+
+def test_fq12_an_echo_without_diff_opt_reads_as_diff_opt_2():
+    values = dataclasses.asdict(RunConfig(**{**_TINY, "km_opt": 4}))
+    values.pop("diff_opt")
+    assert correct_mode.key_in_scope("diff_metrics_seam_slope", values)
+
+
+def test_fq12_carrier_is_listed_only_where_the_key_is_read():
+    for overrides, listed in (({}, False), ({"km_opt": 4}, True),
+                              ({"km_opt": 4, "open_x": True, "open_y": True}, False)):
+        cfg = RunConfig(**{**_TINY, **overrides},
+                        **correct_mode.resolve("correct", ["FQ12"]).settings)
+        assert correct_mode.uncorrected(cfg) == [], overrides  # a named skip lists nothing
+        cfg = RunConfig(**{**_TINY, **overrides},
+                        **correct_mode.resolve("correct").settings)
+        assert "FQ12" not in correct_mode.uncorrected(cfg), overrides
+        assert ("FQ12" in correct_mode.run_receipt({1: cfg})["domains"]["1"]["applied_findings"]) is listed, overrides
+
+
+@pytest.mark.parametrize("overrides,flags", [
+    ({"diff_metrics_seam_slope": True}, (0, 0)),
+    ({"diff_metrics_seam_slope": False}, (2, 2)),
+    ({"diff_metrics_seam_slope": False, "open_x": True}, (1, 2)),
+    ({"diff_metrics_seam_slope": True, "open_y": True}, (0, 1)),
+    ({"diff_metrics_seam_slope": False, "specified": True}, (1, 1)),
+])
+def test_smag_boundary_flags_encode_wrfs_cold_seam(overrides, flags):
+    """smag2d.cu wrf_grid's flags: 1 bounded, 0 periodic, 2 periodic with
+    WRF's cold top seam slope (FQ12 off)."""
+    from woof.core.dycore import smag_boundary_flags
+    cfg = RunConfig(**{**_TINY, "km_opt": 4, **overrides})
+    assert tuple(int(f) for f in smag_boundary_flags(cfg)) == flags

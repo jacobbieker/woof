@@ -83,6 +83,8 @@ ITD_MAXCAT = 32
 _REMAPPED = 256
 #: the line zap_snow_temperature logs per out-of-bounds snow layer
 ZAP_WARNING = "WARN  zap_snow_temperature: temperature out of bounds!"
+#: the opt-in correction of zap_small_areas' zap_snow area (column_v842.CORRECTIONS)
+ZAP_SNOW_AREA = "zap_snow_area"
 
 #: the stop labels by the kernel's abort code
 STOP_LABELS = {
@@ -108,6 +110,11 @@ def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
     """Refuse, by name, what the ITD thermodynamics port does not carry."""
     c = configs
     cv.refuse_unported(c, dims, biogeochemistry=True, z_tracers=cv.VT_INIT_PORTED)
+    # refused only when named; under woof_quirk_corrections = 'all' alone it changes nothing
+    if ZAP_SNOW_AREA in cv.named_corrections(c) and not cv.vertical_tracers(c):
+        _refuse("woof_v842_corrections", ZAP_SNOW_AREA,
+                "it corrects zap_small_areas' vertical tracer flux, which runs only with the vertical tracers",
+                "config_use_vertical_tracers = .true. with config_use_column_biogeochemistry, or without it")
     if c["config_thermodynamics_type"] == "zero layer":
         _refuse("config_thermodynamics_type", "zero layer",
                 "cleanup_itd's zerolayer_check (the zero-layer thermodynamics) is not ported",
@@ -211,7 +218,8 @@ def _flags(configs: dict, state: "cv.ColumnState") -> int:
             configs["config_use_cesm_meltponds"], configs["config_use_level_meltponds"],
             configs["config_use_topo_meltponds"], configs["config_update_ocean_fluxes"],
             state.ktherm != 0,            # colpkg_init_thermo's heat_capacity
-            cv.solves_zsal(configs))      # zsal_solve: the column package's solve_zsal
+            cv.solves_zsal(configs),      # zsal_solve: the column package's solve_zsal
+            ZAP_SNOW_AREA in cv.corrections(configs))
     return sum(int(bool(b)) << i for i, b in enumerate(bits))
 
 

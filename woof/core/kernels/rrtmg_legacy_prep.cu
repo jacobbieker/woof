@@ -140,11 +140,21 @@ extern "C" __global__ void rp_prep(
         }
         pl[e+nl] = 0.0f;
         pa[b+nl-1] = RP_MU(0.5f, RP_AD(pl[e+nl-1], pl[e+nl]));
+#ifdef RRTMG_LW_MODEL_TOP
+        // RunConfig.rrtmg_lw_model_top (correct-mode FQ6): keep tlev(kte+1)
+        // and tlay(kte), anchor the standard profile at tlev(kte+1).
+        float anchor = RP_SU(tl[e+nk], rp_varint(pl[e+nk], pp, tp));
+        for (int k=nk+1; k<=nl; ++k)
+            tl[e+k] = RP_AD(rp_varint(pl[e+k], pp, tp), anchor);
+        for (int k=nk; k<nl; ++k)
+            ta[b+k] = RP_MU(0.5f, RP_AD(tl[e+k+1], tl[e+k]));
+#else
         float anchor = RP_SU(tl[e+nk-1], rp_varint(pl[e+nk-1], pp, tp));
         for (int k=nk; k<=nl; ++k)
             tl[e+k] = RP_AD(rp_varint(pl[e+k], pp, tp), anchor);
         for (int k=nk-1; k<nl; ++k)
             ta[b+k] = RP_MU(0.5f, RP_AD(tl[e+k+1], tl[e+k]));
+#endif
     }
     float obase = 0.0f;
     if (o3input == 2)

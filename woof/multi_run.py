@@ -3395,7 +3395,18 @@ def multi_run_main(args: argparse.Namespace) -> int:
                 except MPSUnavailable as error:
                     raise ValueError(f"multi-run --mps: {error}") from error
                 packing.mps = daemon
-                overrides = tuple(sorted(daemon.environment().items()))
+                # The preflight exempts only MPS clients carrying this
+                # multi-run's token (clients it launched and priced), and
+                # the MPS server only when this multi-run started the
+                # daemon; an unrelated client of an adopted/external daemon
+                # stays a co-tenant.
+                from woof.supervisor import (MPS_OWNED_DAEMON_ENV,
+                                             MPS_PACK_TOKEN_ENV)
+                stamps = {MPS_PACK_TOKEN_ENV: uuid.uuid4().hex}
+                if daemon.owned and not daemon.external:
+                    stamps[MPS_OWNED_DAEMON_ENV] = "1"
+                overrides = tuple(sorted(
+                    {**daemon.environment(), **stamps}.items()))
                 runs = tuple(replace(run, environment_overrides=overrides)
                              for run in runs)
 

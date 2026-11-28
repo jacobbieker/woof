@@ -12,7 +12,7 @@ one species' rk_scalar_tend + rk_update_scalar, non-positive-definite
   WRF rk_scalar_tend + rk_update_scalar, module_em.F): ``tend`` is
   flux_div_scalar of the stage's ``q`` with the sumflux fluxes, the
   specified ring cleared, times ``msft``, plus the species' held
-  boundary tendency, and
+  source (boundary tendency or mixing row), and
   ``q = ((c1h*mu0 + c2h)*q0 + dt*tend) / (c1h*mu + c2h)`` with the
   time-t mass ``mu0 = mub + mup0`` and the post-acoustic ``mu = mub + mup``.
 
@@ -23,9 +23,10 @@ float build gives the primal's words.  Same conventions as
 geom, nl=...)`` and ``*_ad(adj_state, traj, adj, geom)``, the adjoint
 adding into ``adj``.
 
-Not covered: the positive-definite final stage (``moist_adv_opt = 1``),
-physics and mixing sources (``moist_tend`` holds only the boundary rows
-here), IEVA, and the RQVFTEN export.
+The positive-definite final stage (``moist_adv_opt = 1``) is
+:mod:`woof.grad.wrfplus.pdadv`.  Not covered: physics and mixing sources
+(``moist_tend`` holds only the boundary rows here), IEVA, and the RQVFTEN
+export.
 """
 
 from __future__ import annotations
@@ -148,9 +149,11 @@ def sumflux_finish_ad(adj_state, traj, adj, geom: SumfluxGeometry) -> None:
 class ScalarGeometry:
     """One species' stage update: the grid, ``rdx``/``rdy``, the update's
     ``dt`` (the primal's ``DTYPE(nsub*dtau)``), the advection's orders
-    and lateral options, the map factor switch and, on a specified
-    domain, the ring width and whether the species has a held boundary
-    tendency (``held``: qv with a boundary table)."""
+    and lateral options, the map factor switch, the ring width on a
+    specified domain, and whether the species has a held source
+    (``held``, on any domain: qv's boundary tendency with a table, or the
+    species' diff_opt 1 mixing row, which moist._wrf_scalar_source
+    holds)."""
     nz: int
     ny: int
     nx: int
@@ -176,8 +179,6 @@ class ScalarGeometry:
         for name in ("open_x", "open_y", "spec", "has_msf", "held"):
             if getattr(self, name) not in (0, 1):
                 raise ValueError(f"{name} must be 0 or 1, got {getattr(self, name)!r}")
-        if self.held and not self.spec:
-            raise ValueError("a held boundary tendency needs a specified domain")
         if self.spec and not 0 < 2 * self.spec_zone <= min(self.ny, self.nx):
             raise ValueError(f"spec_zone {self.spec_zone} does not fit "
                              f"{self.ny}x{self.nx}")

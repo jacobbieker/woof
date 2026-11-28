@@ -766,10 +766,13 @@ class MskfColumnCumulus:
             from woof.core.cumulus_aerosol import update_monthly_aerosol
             update_monthly_aerosol(state,cfg,inputs['p'])
         aerosol=getattr(state,'aerocu',None) if cfg.aercu_opt>0 else None
+        # RunConfig.kf_capped_downdraft_rain_floor (FQ11).
+        from woof.core.kf import capped_downdraft_rain_floor_due
         self.module.raise_on_status(getattr(self.module,self.contract['launcher'])(
             inputs,outputs,dx=cfg.dx,dt=_model_clock_dt(cfg),cudt_minutes=cfg.cudt_minutes,
             phase=phase,aercu_opt=cfg.aercu_opt,aercu_fct=cfg.aercu_fct,
-            kf_edrates=cfg.kf_edrates,aerocu=aerosol))
+            kf_edrates=cfg.kf_edrates,aerocu=aerosol,
+            rain_floor=capped_downdraft_rain_floor_due(cfg)))
         mapping=self.contract['result_mapping']
         values={name:outputs[source] for name,source in mapping.items()}
         for result_name,species in self.contract['optional_tendencies'].items():

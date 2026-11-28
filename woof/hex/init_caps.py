@@ -31,7 +31,7 @@ from typing import Any, Iterable, Mapping
 import numpy as np
 
 #: kg m-2.  ``SNOW_WATER_CAP_KG_M2`` in caps.rs.
-SNOW_WATER_CAP_KG_M2 = 5000.0
+SNOW_WATER_CAP_KG_M2 = 2000.0
 
 #: ``MAXSMC`` of ``SOILPARM.TBL``'s ``STAS`` categories 1..19, as caps.rs
 #: carries it.  Category 14 is water (1.0) and 16 is land ice.

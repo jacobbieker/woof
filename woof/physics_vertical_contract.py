@@ -13,7 +13,7 @@ import math
 
 import numpy as np
 
-KFCUP_VERTICAL_LEVEL_BOUNDS = (8, 128)
+KFCUP_VERTICAL_LEVEL_BOUNDS = (8, 256)
 
 # The two component bounds that are OWNED elsewhere: WSM6's and WDM6's
 # ceilings are the 256-level refusal ceilings their constants modules
@@ -181,7 +181,7 @@ ACM2_VERTICAL_LEVEL_BOUNDS = (4, None)
 #: Every other column array is in a runtime-``nz`` workspace.  The floor is
 #: the kernel's own ``nz >= 8`` refusal.
 KF_VERTICAL_LEVEL_BOUNDS = (8, 256)
-MSKF_VERTICAL_LEVEL_BOUNDS = (8, 160)
+MSKF_VERTICAL_LEVEL_BOUNDS = (8, 256)
 # Grell-Freitas: the inversion-layer search clamps kend to ktf-8 and its
 # second-derivative stencil then reaches ktf-1, so a column shorter than 12
 # levels leaves no search window at all; the certified fixture ran nz=40 and
@@ -416,9 +416,22 @@ def legacy_radiation_layer_counts(
     return int(nz) + max(1, rounded), int(nz) + 1
 
 
-# GFDL Eta owns 81-layer work arrays and 82 interface slots. Larger grids
-# would index past the explicit CUDA layout before a radiation call completes.
-GFDLETA_VERTICAL_LEVEL_BOUNDS = (1, 81)
+# GFDL Eta (ra_lw/sw_physics = 99): stock WRF sizes every model-level array
+# from kte; its NL=81 is the ozone climatology's fixed pressure grid.  The
+# transcription's per-column storage is generated at 81 (the unchanged units,
+# every column of at most 81 layers) or 256.  The ceiling is the deep tier of
+# the CuPy-free ladder.
+from woof.core.gfdleta_levels import VERTICAL_LEVEL_BOUNDS as GFDLETA_VERTICAL_LEVEL_BOUNDS
+
+# GSFC shortwave (ra_sw_physics = 2): its device arena is compiled at
+# GSFC_KMAX 128 (the unchanged source, every column of at most 128 layers)
+# or 256.  The ceiling is the deep tier of the CuPy-free ladder.
+from woof.core.gsfcsw_levels import VERTICAL_LEVEL_BOUNDS as GSFCSW_VERTICAL_LEVEL_BOUNDS
+
+# WRF Fu-Liou-Gu (ra_lw_physics = ra_sw_physics = 7): WRF's nvx scratch bound
+# is compiled at FLG_NVX 100 (stock WRF, every column of at most 100 layers)
+# or 256; the floor is its three cloud groups.  CuPy-free ladder.
+from woof.core.flg_levels import VERTICAL_LEVEL_BOUNDS as FLG_VERTICAL_LEVEL_BOUNDS
 
 #: K-epsilon (bl_pbl_physics=17).  No ceiling: the column arrays live in a
 #: global workspace sized from nz at launch (woof/core/keps.py).  The floor

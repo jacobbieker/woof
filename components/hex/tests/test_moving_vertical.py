@@ -304,6 +304,7 @@ def test_column_roundoff_workers_keep_errors_and_adjustment_receipt(monkeypatch)
         positive_cumulative_roundoff(values)
 
 
+# Brought from fork jacobbieker/woof PR 137 (Apache-2.0).
 def test_layer_bound_covers_the_hex_column_ceiling():
     from woof.hex.moving_vertical import MAX_SOURCE_LAYERS
     from woof.hex.vertical_spec import HEX_MAX_COLUMN_LEVELS

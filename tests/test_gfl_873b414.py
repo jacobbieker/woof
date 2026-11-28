@@ -1,0 +1,302 @@
+"""cu_physics=3 under WRF v4.8.0: Grell-Freitas-Li (GFL 873b414) and the previous-pin selector.
+
+The breakage each test prevents:
+
+1. ``test_default_is_gfl_and_the_previous_pin_is_selectable`` -- a default
+   that silently stays on the deleted GFDRV would leave the 4.8.0 pin
+   claiming a scheme it does not run; a selector that cannot reach GFDRV
+   would take the previous pin away.
+2. ``test_gf_only_capabilities_keep_gfdrv`` -- WRF v4.8.0's GFL call carries
+   no SPP pattern and never writes KTOP_DEEP: under GFL, ``spp_conv`` would
+   be dropped (so it is refused by name, and binding it never switches the
+   scheme) and PR92 lightning would read a cloud top that stays 0 (so that
+   run keeps GFDRV).
+3. ``test_unknown_generation_is_refused_by_name``.
+4. ``test_dispatch_resolves_the_versioned_callable`` -- the physics driver
+   resolves cu_physics=3 through CU_VERSIONED_CALLABLES; a missing row
+   would run GFDRV under the GFL name.
+5. ``test_previous_pin_headers_keep_their_identity`` -- a checkpoint written
+   before the selector ran GFDRV; the echo drops ``wrf_461`` (and the key
+   on any cu_physics other than 3), so those headers keep their bytes.
+6. ``test_generated_module_is_the_pinned_transcription`` -- the generated
+   module must be the WRF_CHEM=0 WRF driver's transcription of the pinned
+   sources (transcription.json), not an MPAS-driver or hand-edited one.
+7. ``test_lane_placement_changes_no_operation`` -- the kernel runs that
+   transcription lane-interleaved; spelled back, the lowered scheme must be
+   the pinned one byte for byte (placement moves, no operation does).
+"""
+import hashlib
+import json
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+BASE = dict(nx=20, ny=20, nz=30, dx=12000.0, dy=12000.0, ztop=20000.0, dt=60.0, run_seconds=600.0)
+
+
+def _cfg(**kw):
+    from woof.config import RunConfig
+    return RunConfig(**{**BASE, **kw})
+
+
+def test_default_is_gfl_and_the_previous_pin_is_selectable():
+    assert _cfg(cu_physics=3).cu_gf_version == "gfl_873b414"
+    assert _cfg(cu_physics=3, cu_gf_version="wrf_461").cu_gf_version == "wrf_461"
+
+
+def test_gf_only_capabilities_keep_gfdrv():
+    assert _cfg(cu_physics=3, lightning_option=11).cu_gf_version == "wrf_461"
+    from woof.config import validate_spp_config
+    validate_spp_config(_cfg(cu_physics=3, cu_gf_version="wrf_461", spp_conv=1))
+    with pytest.raises(Exception, match="cu_gf_version=wrf_461"):
+        validate_spp_config(_cfg(cu_physics=3, spp_conv=1))
+    # Binding SPP never changes the scheme (an ensemble's control and its
+    # perturbed members run one scheme).
+    assert _cfg(cu_physics=3, spp_conv=1).cu_gf_version == "gfl_873b414"
+
+
+def test_unknown_generation_is_refused_by_name():
+    from woof.config import validate_run_config
+    valid = dict(cu_physics=3, moist=True, bl_pbl_physics=1, sf_sfclay_physics=1, cudt_minutes=0.0)
+    for version in ("gfl_873b414", "wrf_461"):
+        validate_run_config(_cfg(**valid, cu_gf_version=version))
+    with pytest.raises(Exception, match="cu_gf_version"):
+        validate_run_config(_cfg(**valid, cu_gf_version="gf_wrf471"))
+
+
+def test_dispatch_resolves_the_versioned_callable():
+    from woof.config import CU_STOCK_CALLABLES, CU_VERSIONED_CALLABLES
+    assert CU_VERSIONED_CALLABLES[(3, "gfl_873b414")] == "woof.core.gfl.GrellFreitasLi"
+    assert (3, "wrf_461") not in CU_VERSIONED_CALLABLES
+    assert CU_STOCK_CALLABLES[3] == "woof.core.gf.GrellFreitas"
+    import importlib
+    module, _, name = CU_VERSIONED_CALLABLES[(3, "gfl_873b414")].rpartition(".")
+    assert callable(getattr(importlib.import_module(module), name))
+
+
+def test_previous_pin_headers_keep_their_identity():
+    from woof.io.restart import ECHO_ABSENT_RUN_VALUES
+    assert ECHO_ABSENT_RUN_VALUES["cu_gf_version"] == "wrf_461"
+    source = (ROOT / "woof/io/restart.py").read_text(encoding="utf-8")
+    assert 'values.get("cu_gf_version", "wrf_461") == "wrf_461"' in source
+
+
+def test_generated_module_is_the_pinned_transcription():
+    from woof.core import gfl_873b414 as gfl
+    pins = json.loads((ROOT / "tools/gfl_873b414/transcription.json").read_text(encoding="utf-8"))
+    assert pins["gfl"] == gfl.GFL_PIN
+    by_source = {m["source"]: m for m in pins["modules"]}
+    for path, sha in gfl.SOURCE_HASHES.items():
+        assert by_source[path]["source_sha256"] == sha
+    # One lowered piece per module, joined in MODULES order by generate_wrf.py.
+    assert hashlib.sha256(gfl._SCHEME_SOURCE.encode()).hexdigest() == pins["scheme_source_sha256"]
+    assert "areacell" not in gfl.ARGUMENTS and "pbl_scheme" not in gfl.ARGUMENTS
+    assert "num_chem" not in gfl.ARGUMENTS and len(gfl.FIELDS) == 46
+    assert "RRFS" not in gfl._SCHEME_SOURCE
+
+
+def _spell_back(lane):
+    """Undo gfl_lanes.lane_scheme's spellings: lane pointers, byte displacements, character and fscav storage."""
+    import re
+    out, pos = [], 0
+    head = re.compile(r'gf_lane_plus<GFReal>\(([A-Za-z_][\w.>-]*), ')
+    while (m := head.search(lane, pos)):
+        depth, j = 1, m.end()
+        while depth:
+            depth += {'(': 1, ')': -1}.get(lane[j], 0)
+            j += 1
+        out.append(lane[pos:m.start()] + '((GFReal *) ((char *) ' + m[1] + ' + ' + lane[m.end():j - 1] + '))')
+        pos = j
+    out.append(lane[pos:])
+    text = ''.join(out)
+    text = text.replace('GFP ', 'GFReal *').replace('GIP ', 'int *').replace('GBP ', 'bool *')
+    from woof.core import gfl_lanes
+    text = text.replace(gfl_lanes._FSCAV_SCRATCH, gfl_lanes._FSCAV_LOCAL)
+    return text.replace(' = (char *) workspace.allocate_bytes (', ' = (char *) workspace.allocate (')
+
+
+def test_lane_placement_changes_no_operation():
+    """The kernel runs the pinned transcription lane-interleaved (woof/core/gfl_lanes.py).
+
+    The breakage it prevents: a lane lowering that edits anything but pointer
+    placement (an operation, its order, an index expression or a constant) would
+    move words while the scheme hash still matched. Spelled back, the lowered
+    scheme must be the pinned _SCHEME_SOURCE byte for byte, and the kernel source
+    must be built from it.
+    """
+    from woof.core import gfl_873b414 as gfl
+    from woof.core import gfl_lanes
+    lane = gfl_lanes.lane_scheme(gfl._SCHEME_SOURCE)
+    assert lane != gfl._SCHEME_SOURCE
+    assert _spell_back(lane) == gfl._SCHEME_SOURCE
+    source = gfl_lanes.lower(gfl._SUPPORT, gfl._SCHEME_SOURCE, gfl._ENTRY)
+    assert lane in source and 'gfl_lane_columns' in source
+    assert gfl.LANES == gfl_lanes.LANES and gfl.CHARACTER_BYTES == gfl_lanes.CHARACTER_BYTES
+
+
+def test_lane_scratch_admission_matches_the_kernel_bounds():
+    """The admission prices GFL scratch at the blocks per SM the kernel is compiled for."""
+    from woof.core import gfl_lanes
+    assert "#define GFL_MIN_BLOCKS %d\n" % gfl_lanes.MIN_BLOCKS_PER_SM in gfl_lanes._DEFINES
+
+
+def test_lane_scratch_is_bounded_by_the_domain_and_the_cap():
+    """A small domain holds only its own slabs; a CONUS 12 km domain stops at the 4 GiB cap.
+
+    Breakage prevented: before 2026-11-09 a 150 x 150 domain held a whole card's
+    resident slabs (4 GiB on a 188-SM card) and the admission priced none of it.
+    """
+    from woof.core.gfl_lanes import LANES, CHARACTER_BYTES, SCRATCH_CAP_BYTES, scratch_bytes, share_bytes
+    per_slab = (share_bytes(50, 49) + CHARACTER_BYTES) * LANES
+    assert scratch_bytes(49, 150 * 150, 188) == 176 * per_slab          # 22,500 columns = 176 slabs
+    big = scratch_bytes(49, 424 * 299, 188)                             # 991 slabs > 3 x 188 resident
+    assert big == min(3 * 188, SCRATCH_CAP_BYTES // per_slab) * per_slab <= SCRATCH_CAP_BYTES
+    assert scratch_bytes(49, 424 * 299, 188, free=8 << 30) == (2 << 30) // per_slab * per_slab
+
+
+def test_preflight_prices_gfl_lane_scratch_and_spill_pool_not_gfdrv_tiles(monkeypatch):
+    """The admission prices what the GFL launch holds: lane scratch plus the spill pool, with
+    the Metal per-lane region when Metal launches the run.
+
+    Breakage prevented: the spill pool (up to 256 MiB, held for the run) went unpriced, and a
+    reference or declared-budget profile priced a Metal run's scratch with CUDA's 256-byte
+    region instead of Metal's 2048.
+    """
+    from types import SimpleNamespace
+    from woof import backend
+    from woof.core.gfl_lanes import (LANES, SPILL_POOL_BYTES, SPILL_SHARES, scratch_bytes, share_bytes,
+                                     spill_pool_bytes)
+    from woof.core.preflight import gf_column_workspace_bytes, MEASURED_LOCAL_MEMORY_PROFILE
+
+    def exp(version, nx=150, ny=150, nz=49):
+        run = SimpleNamespace(cu_physics=3, cu_gf_version=version, nx=nx, ny=ny, nz=nz)
+        return SimpleNamespace(domains=[SimpleNamespace(run=run)])
+    per_spill_slab = SPILL_SHARES * share_bytes(50, 49) * LANES
+    pool = spill_pool_bytes(49, 22500)
+    assert pool == min(176, SPILL_POOL_BYTES // per_spill_slab) * per_spill_slab <= SPILL_POOL_BYTES
+    assert spill_pool_bytes(49, 100) == per_spill_slab                  # one slab for a one-slab domain
+    sms = MEASURED_LOCAL_MEMORY_PROFILE.multiprocessor_count
+    monkeypatch.setattr(backend, "_active", "cuda")
+    assert gf_column_workspace_bytes(exp("gfl_873b414")) == scratch_bytes(49, 22500, sms) + pool
+    assert gf_column_workspace_bytes(exp("wrf_461")) != scratch_bytes(49, 22500, sms) + pool
+    metal = scratch_bytes(49, 22500, sms, metal=True) + pool
+    assert metal > scratch_bytes(49, 22500, sms) + pool
+    live = SimpleNamespace(multiprocessor_count=sms, backend="mlx")
+    assert gf_column_workspace_bytes(exp("gfl_873b414"), profile=live) == metal
+    monkeypatch.setattr(backend, "_active", "mlx")                      # reference profile, Metal process
+    assert gf_column_workspace_bytes(exp("gfl_873b414")) == metal
+
+
+def test_spill_pool_refuses_a_slab_over_its_cap_and_is_priced_once_per_card():
+    """A spill slab larger than SPILL_POOL_BYTES is refused by name, and a nest prices its
+    largest scratch plus its largest pool (one pool per card, held across domains).
+
+    Breakage prevented: ``max(1, ...)`` restored a slab over the cap (512 MiB at nz=2031),
+    and pricing max(scratch + pool) per domain under-priced a 150 x 150 nest at nz=49 then
+    nz=99, whose larger scratch (nz=99) and larger pool (nz=49) are held together.
+    """
+    from types import SimpleNamespace
+    from woof import backend
+    from woof.core.gfl_lanes import LANES, SPILL_POOL_BYTES, scratch_bytes, spill_pool_bytes, spill_pool_slabs
+    from woof.core.preflight import gf_column_workspace_bytes, MEASURED_LOCAL_MEMORY_PROFILE
+
+    with pytest.raises(ValueError, match="SPILL_POOL_BYTES"):
+        spill_pool_bytes(2031, 1)
+    assert spill_pool_slabs(SPILL_POOL_BYTES // LANES, 5) == 1             # exactly the cap fits
+    with pytest.raises(ValueError, match="too deep"):
+        spill_pool_slabs(SPILL_POOL_BYTES // LANES + 1, 1)
+    assert spill_pool_bytes(256, 22500) <= SPILL_POOL_BYTES                  # the deepest shipped tier fits
+
+    def run(nz):
+        return SimpleNamespace(cu_physics=3, cu_gf_version="gfl_873b414", nx=150, ny=150, nz=nz)
+    nest = SimpleNamespace(domains=[SimpleNamespace(run=run(49)), SimpleNamespace(run=run(99))])
+    sms = MEASURED_LOCAL_MEMORY_PROFILE.multiprocessor_count
+    backend_active = backend._active
+    try:
+        backend._active = "cuda"
+        priced = gf_column_workspace_bytes(nest)
+    finally:
+        backend._active = backend_active
+    scratch = {nz: scratch_bytes(nz, 22500, sms) for nz in (49, 99)}
+    pool = {nz: spill_pool_bytes(nz, 22500) for nz in (49, 99)}
+    assert scratch[99] > scratch[49] and pool[49] > pool[99]
+    assert priced == scratch[99] + pool[49]
+    assert priced > max(scratch[nz] + pool[nz] for nz in (49, 99))
+
+
+def _unpromote(text):
+    """Undo gfl_lanes.metal_locals: each slot reference back to its local declaration."""
+    import re
+    text = re.sub(r'  GFFrame gf_locals_frame \(workspace\);\n  char \*gf_locals = \(char \*\) '
+                  r'workspace\.allocate_bytes \(\d+\);\n', '', text)
+    text = re.sub(r'(\w[\w ]*) \(&(\w+)\)\[(\d+)\] = \*\(\1 \(\*\)\[\3\]\) \(gf_locals \+ \d+\);', r'\1 \2[\3];', text)
+    text = re.sub(r'(\w[\w ]*) &(\w+) = \*\(\1 \*\) \(gf_locals \+ \d+\); \2 = ([^;]*);', r'\1 \2 = \3;', text)
+    return re.sub(r'(\w[\w ]*) &(\w+) = \*\(\1 \*\) \(gf_locals \+ \d+\);', r'\1 \2;', text)
+
+
+def test_metal_lowering_moves_only_the_passed_on_locals():
+    """Metal's GFL lowering holds every passed-on local in device memory and changes nothing else.
+
+    The breakage it prevents: a Metal pointer has one address space, so a lane
+    pointer or descriptor that may point at a local (``&itf``) or at scratch did
+    not compile. Undoing the slot references must give the CUDA lane scheme
+    byte for byte, every passed-on scalar or array local must be moved, and
+    the CUDA lowering must not contain any of it.
+    """
+    import re
+    from woof.core import gfl_873b414 as gfl
+    from woof.core import gfl_lanes
+    lane = gfl_lanes.lane_scheme(gfl._SCHEME_SOURCE)
+    metal, need = gfl_lanes.metal_locals(lane)
+    assert metal != lane and 0 < need <= gfl_lanes.METAL_CHARACTER_BYTES - 192 - 16 - 80
+    assert _unpromote(metal) == lane
+    # every local address the scheme passes on is now a slot reference
+    for head in gfl_lanes._SCHEME_FUNCTION.finditer(metal):
+        end = gfl_lanes._FUNCTION_END.search(metal, head.end()).end()
+        body = metal[head.end():end]
+        for name in gfl_lanes._address_taken(body):
+            assert not re.search(r'^\s+(?:GFReal|int|bool|long long|unsigned int) %s(\[\d+\])?( = [^;]*)?;$'
+                                 % name, body, re.M), name
+    cuda = gfl_lanes.lower(gfl._SUPPORT, gfl._SCHEME_SOURCE, gfl._ENTRY)
+    assert 'gf_locals' not in cuda and 'gf_bounds' not in cuda
+    on_metal = gfl_lanes.lower(gfl._SUPPORT, gfl._SCHEME_SOURCE, gfl._ENTRY, metal=True)
+    assert metal in on_metal and 'gf_bounds' in on_metal
+    assert '#define GF_CHARACTER_BYTES %d\n' % gfl_lanes.METAL_CHARACTER_BYTES in on_metal
+
+
+def test_wrf461_gf_on_metal_never_builds_the_gfl_lane():
+    """cu_gf_version='wrf_461' resolves to GFDRV: on Metal it neither refuses nor imports the GFL unit.
+
+    A fresh interpreter, with the GFL modules made unimportable, builds the
+    wrf_461 callable through the config's resolver.
+    """
+    import subprocess
+    import sys
+    pytest.importorskip("mlx", reason="the Metal backend needs the mlx package")
+    code = (
+        "import sys, importlib\n"
+        "sys.modules['woof.core.gfl'] = None\n"
+        "sys.modules['woof.core.gfl_873b414'] = None\n"
+        "sys.modules['woof.core.gfl_lanes'] = None\n"
+        "from woof.config import CU_STOCK_CALLABLES, CU_VERSIONED_CALLABLES\n"
+        "d = CU_VERSIONED_CALLABLES.get((3, 'wrf_461'), CU_STOCK_CALLABLES.get(3))\n"
+        "m, _, n = d.rpartition('.')\n"
+        "getattr(importlib.import_module(m), n)()\n"
+        "print('ok')\n")
+    env = dict(__import__("os").environ, WOOF_BACKEND="mlx")
+    out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True)
+    assert out.returncode == 0 and out.stdout.strip() == "ok", out.stderr[-2000:]
+
+
+@pytest.mark.gpu
+def test_wrf461_gf_unit_translates_and_loads_on_metal():
+    """On Metal the non-GFL GF unit (GFDRV, gf.cu) still translates and compiles: the default nz<=40 build and a GF_KMAX tier."""
+    from woof import backend
+
+    if backend.active() != "mlx":
+        pytest.skip("runs under WOOF_BACKEND=mlx")
+    from woof.core.gf import _gf_module
+
+    assert _gf_module(40).get_function("gf_gfdrv_stage") is not None
+    assert _gf_module(50).get_function("gf_gfdrv_stage") is not None

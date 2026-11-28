@@ -323,6 +323,13 @@ def prepare(spec: dict) -> None:
             if k in files and (v := getattr(arguments, k, None)) is not None}
     scratch = Path(getattr(arguments, 'scratch', None) or Path(arguments.out) / 'scratch').resolve()
     claim_prepared_scratch(scratch)
+    from ..kim_gwd_static import FILE_SUFFIX as _KIM_SUFFIX, ensure as _kim_statistics, mesh_file_of
+    if swap and any(str(s).endswith(_KIM_SUFFIX) for s in call['sources']):
+        # The KIM drag's PR #1408 statistics belong to one mesh: a moved mesh reads its own (kim_gwd_static).
+        moved = mesh_file_of(arguments)
+        if moved is not None:
+            fresh = str(_kim_statistics(moved).resolve())
+            swap.update({str(Path(s).resolve()): fresh for s in call['sources'] if str(s).endswith(_KIM_SUFFIX)})
     predicted = dict(call, sources=[Path(swap.get(str(Path(s).resolve()), str(s))) for s in call['sources']],
                      output=scratch / 'native-pools')
     key = _decode_key(predicted)
@@ -425,17 +432,17 @@ def process_rss_bytes() -> int | None:
 def preparation_host_gate(available: int | None = None, rss: int | None = None) -> dict:
     """Whether the host has room to prepare the next segment beside the running one.
 
-    THE BREAKAGE THIS PREVENTS (Milton 2024, 96 km global background, 98,108 cells, pb RTX A6000 on a shared
-    125 GB host, 2026-11-15): a resident process held the running segment (25-36 GB host) and prepared the next
+    THE BREAKAGE THIS PREVENTS (fork jacobbieker/woof PR 497; Milton 2024, 96 km global background, 98,108 cells,
+    on a shared 125 GB host): a resident process held the running segment (25-36 GB host) and prepared the next
     member's pool decode, inputs, remap map and class drivers beside it, a second copy of the same size, so it
-    peaked at 38-43 GB at moves and was OOM-killed twice (rc -9; the controller recovered by re-running about 11
-    model hours), and the 48 km background (285k cells) never finished.  The preparation is an optimisation: when
-    the host's available memory (MemAvailable, capped by the cgroup) cannot hold another copy plus a reserve, it
-    is not started and the next segment builds those pieces itself after the move (a slower move, the same words).
+    peaked at 38-43 GB at moves and was OOM-killed twice.  The preparation is an optimisation: when the host's
+    available memory (MemAvailable, bounded by the cgroup) cannot hold another copy plus a reserve, it is not
+    started and the next segment builds those pieces itself after the move (a slower move, the same words).
 
-    The copy is priced at the last preparation's measured host growth, or before any at this process's resident
-    set (the running segment's own host copy).  ``WOOF_HEX_MOVING_PREPARE_HOST_GATE=0`` turns the gate off;
-    ``WOOF_HEX_MOVING_PREPARE_HOST_RESERVE_GB`` (default 2) is the room left over.
+    The copy is priced at the last preparation's measured host growth times a margin, or before any at this
+    process's resident set (the running segment's own host copy).  ``WOOF_HEX_MOVING_PREPARE_HOST_GATE=0`` turns
+    the gate off; ``WOOF_HEX_MOVING_PREPARE_HOST_RESERVE_GB`` (default 2) is the room left over;
+    ``WOOF_HEX_MOVING_PREPARE_HOST_MARGIN`` (default 1.25) the margin.
     """
     if os.environ.get('WOOF_HEX_MOVING_PREPARE_HOST_GATE', '1') == '0':
         return dict(admitted=True, reason='WOOF_HEX_MOVING_PREPARE_HOST_GATE=0')
@@ -453,7 +460,7 @@ def preparation_host_gate(available: int | None = None, rss: int | None = None) 
                priced_from='last preparation' if _R.prep_host_bytes is not None else 'resident set')
     if need is not None and _R.prep_host_bytes is not None:
         # Members of one run share the mesh recipe; the margin covers a member with a few more cells than the
-        # one measured (WOOF_HEX_MOVING_PREPARE_HOST_MARGIN, default 1.25).
+        # one measured.
         need = int(need * float(os.environ.get('WOOF_HEX_MOVING_PREPARE_HOST_MARGIN', '1.25')))
         row['need_bytes'] = need
     if available is None or need is None:
@@ -481,8 +488,8 @@ def _prepare_safely(spec):
         after = process_rss_bytes()
         if before is not None and after is not None:
             grown = max(after, peak[0] or after) - before
-            # The running segment allocates and frees beside the preparation: a delta at or below zero says
-            # nothing about the preparation's size, so it keeps the last estimate rather than pricing it at 0.
+            # The running segment allocates and frees beside the preparation: a growth at or below zero says
+            # nothing about the preparation's size, so the last estimate stands rather than a price of 0.
             if grown > 0:
                 _R.prep_host_bytes = grown
     except Exception as error:
@@ -586,9 +593,9 @@ def release_device_memory() -> dict[str, Any] | None:
 def trim_host_heap() -> dict[str, Any] | None:
     """Give the finished segment's freed host memory back to the OS (glibc ``malloc_trim``); None elsewhere.
 
-    The finished segment's host arrays are freed by then, but glibc keeps freed heap and thread-arena pages
-    mapped, and the preparation thread allocates in its own arena: the resident set the next segment and the
-    host-memory gate (:func:`preparation_host_gate`) read would still count them.  Only memory moves; no word does.
+    The finished segment's host arrays are freed by then, but glibc keeps freed heap and thread-arena pages mapped,
+    and the preparation thread allocates in its own arena: the resident set the next segment and the host-memory
+    gate (:func:`preparation_host_gate`) read would still count them.  Only memory moves; no word does.
     """
     if not sys.platform.startswith('linux'):
         return None

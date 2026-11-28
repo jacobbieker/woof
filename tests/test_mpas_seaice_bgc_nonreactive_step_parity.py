@@ -24,7 +24,9 @@ Two v8.4.2 quirks are kept word for word, each with an opt-in correction
 the oracle:
 - ``subcycle_snow_ice_tracers``: the combine runs every subcycle but the
   separate once a step, so with two subcycles the first subcycle's ridging
-  of the tracer is overwritten;
+  of the tracer is overwritten (in the column step and in the coupled step,
+  where the velocity solver runs between the subcycles; the correction keeps
+  the ice inventory through every subcycle);
 - ``bgc_snow_new_category``: without the vertical thermodynamics
   ``iceAreaCategoryInitial`` is never refreshed, and ``update_snow_bgc``'s
   0/0 for a category the last step opened makes ``oceanBioFluxes`` NaN.
@@ -64,7 +66,9 @@ FLUX = "biogeochemistry/oceanBioFluxes"
 DEDD = "step_nonreactive_bl99_dedd"
 SUBCYCLES = "step_nonreactive_bl99_dedd_subcycles_gregorian"
 NO_THERM = "step_nonreactive_mushy_level_ponds_no_vertical_thermodynamics"
+COUPLED_SUBCYCLES = "seaice_nonreactive_bl99_dedd_two_subcycles_gregorian"
 P1 = 8                                  # nBioLayers + 1
+_PREDYNAMICS, _DYNAMICS = cstep.predynamics, cstep.dynamics
 
 
 def _row(name):
@@ -109,6 +113,8 @@ def test_fixture_moves_the_tracer_through_the_step():
             assert not np.any(out[f"biogeochemistry/{flux}"][:n]), (name, flux)
         assert np.any(np.nan_to_num(out[FLUX][:n, 0], nan=1.0)) and not np.any(out[FLUX][:n, 1:]), name
     assert cases[SUBCYCLES]["config"]["config_dynamics_subcycle_number"] == 2
+    assert cases[COUPLED_SUBCYCLES]["config"]["config_dynamics_subcycle_number"] == 2
+    assert cases[COUPLED_SUBCYCLES]["config"]["config_use_velocity_solver"]
     # v8.4.2's 0/0 in update_snow_bgc without the vertical thermodynamics (bgc_snow_new_category)
     assert np.argwhere(np.isnan(fixture[NO_THERM][FLUX])).tolist() == [[1, 0]]
     assert not cases[NO_THERM]["pools"]["icestate"]["iceAreaCategoryInitial"][1].any()
@@ -129,6 +135,24 @@ def test_the_stages_that_do_not_carry_them_still_refuse_them():
     case = _case(DEDD)
     with pytest.raises(ConfigurationRefusal, match=cv.VT_FLAG):
         cv.refuse_unported(case["config"], {**case["dims"], "nSnowLayers": 1}, biogeochemistry=True)
+
+
+def _refused_knob(refuse):
+    try:
+        refuse()
+    except ConfigurationRefusal as refusal:
+        return refusal.knob
+    return None
+
+
+@pytest.mark.parametrize("flag", cv._BGC_FLAGS)
+def test_coupling_prep_and_the_step_s_stages_carry_the_same_flags(flag):
+    # one list (cv.carried_bgc_flags) for both, so a new vertical tracer cannot reach one and not the other
+    case = _case(DEDD)
+    config = {**case["config"], flag: True}
+    stage = _refused_knob(lambda: cv.refuse_unported(config, case["dims"], biogeochemistry=True, z_tracers=True))
+    prep = _refused_knob(lambda: cpl.check_config(config))
+    assert (stage == flag) == (prep == flag), (stage, prep)
 
 
 @pytest.mark.parametrize("name, correction, refuse", [
@@ -219,6 +243,75 @@ def test_subcycle_snow_ice_tracers_keeps_each_subcycle_s_ridging(glibc239):
     one_fixed, _ = co.run_gpu(_case(DEDD, cstep.SUBCYCLE_SNOW_ICE))
     assert {k for k in one if not np.array_equal(one[k], one_fixed[k], equal_nan=True)} <= {SNOW, ICE}
     assert np.array_equal(one_fixed[SNOW][:n], one_fixed[CONC][:n, :, P1:P1 + 2])
+
+
+def _ice_inventory(pools, n):
+    """Per cell and bio-grid point, the nonreactive tracer in the ice: each
+    category's layer value times its ice volume and brine fraction (the
+    ridging's weight for the ice layers, trcr_depend vice * fbri)."""
+    t = pools["tracers"]
+    get = lambda k: np.asarray(t[k].get() if hasattr(t[k], "get") else t[k])
+    weight = (get("iceVolumeCategory")[:n] * get("brineFraction")[:n]).reshape(n, -1)
+    return np.einsum("cnk,cn->ck", get("verticalNonreactiveConc")[:n, :, :P1], weight)
+
+
+def _subcycle_record(monkeypatch, case):
+    """Run ``case`` and record, after the pre-dynamics and after each
+    subcycle's column dynamics, the ice inventory and whether the separated
+    ``*Snow``/``*Ice`` equal the tracer."""
+    record = []
+    n = case["dims"]["nCellsSolve"]
+
+    def snap(pools, tag):
+        t = pools["tracers"]
+        get = lambda k: np.asarray(t[k].get() if hasattr(t[k], "get") else t[k])[:n]
+        conc = get("verticalNonreactiveConc")
+        separated = (np.array_equal(get("verticalNonreactiveSnow"), conc[:, :, P1:P1 + 2])
+                     and np.array_equal(get("verticalNonreactiveIce"), conc[:, :, :P1]))
+        record.append((tag, _ice_inventory(pools, n), separated, get("iceVolumeCategory").copy()))
+
+    pre, dyn = _PREDYNAMICS, _DYNAMICS
+
+    def predynamics(pools, configs, state, now):
+        abort = pre(pools, configs, state, now)
+        snap(pools, "pre")
+        return abort
+
+    def dynamics(pools, configs, state):
+        abort = dyn(pools, configs, state)
+        snap(pools, "subcycle")
+        return abort
+
+    monkeypatch.setattr(cstep, "predynamics", predynamics)
+    monkeypatch.setattr(cstep, "dynamics", dynamics)
+    co.run_gpu(case)
+    return record
+
+
+@requires_gpu
+def test_subcycle_snow_ice_tracers_conserves_the_coupled_step_s_tracer(monkeypatch, glibc239):
+    # the coupled step (the velocity solver between the subcycles, no advection): every
+    # subcycle ridges, so v8.4.2's second combine puts the pre-dynamics tracer back at the
+    # first ridging's volumes and the ice inventory moves; the correction keeps it
+    def relative_changes(record):
+        changes, before = [], None
+        for tag, inventory, separated, volume in record:
+            if tag == "subcycle":
+                changes.append((np.abs(inventory - before).max() / np.abs(before).max(), separated,
+                                np.abs(volume - before_volume).max()))
+            before, before_volume = inventory, volume
+        return changes
+
+    plain = relative_changes(_subcycle_record(monkeypatch, _case(COUPLED_SUBCYCLES)))
+    fixed = relative_changes(_subcycle_record(monkeypatch, _case(COUPLED_SUBCYCLES, cstep.SUBCYCLE_SNOW_ICE)))
+    assert len(plain) == len(fixed) == 4                    # two steps of two subcycles
+    assert all(ridged > 0 for _, _, ridged in fixed)        # every subcycle's ridging moves ice
+    # each subcycle's ridging conserves the tracer and the separated fields follow it
+    assert all(change < 1e-14 and separated for change, separated, _ in fixed)
+    # v8.4.2: the first subcycle conserves, the second does not, and only the separate refreshes them
+    assert all(change < 1e-14 for change, _, _ in plain[0::2])
+    assert all(change > 1e-6 for change, _, _ in plain[1::2])
+    assert not any(separated for _, separated, _ in plain)
 
 
 @requires_gpu

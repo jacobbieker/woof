@@ -15,7 +15,9 @@
    "conservative_surface": {"key": "wsm7_conservative_surface", "define": "WSM7_PLM_SURFACE", "finding": "WB5"},
    "level_tiers": [
     64,
-    80
+    80,
+    128,
+    256
    ],
    "min_levels": 2,
    "kernel_species": [
@@ -141,13 +143,16 @@
    ],
    "local_frame_bytes": {
     "64": 7216,
-    "80": 9008
+    "80": 9008,
+    "128": 14384,
+    "256": 28720
    },
    "local_frame_provenance": {
     "date": "2026-10-09",
     "compute_capability": "120",
     "nvrtc_build": "12.8.93",
-    "basis": "production loader, both arithmetic modes; driver local-size attribute"
+    "basis": "production loader, both arithmetic modes; driver local-size attribute",
+    "deeper_tiers": "128 and 256 are the sm_120 80-tier reading plus the 112 B/level slope read on an RTX A6000 (sm_86, NVRTC 12.9.86, 2026-11-22: 7200/8992/14368/28704 B at 64/80/128/256, exactly linear); the sm_86 readings sit 16 B below the sm_120 base, so the recorded rows are the safe ceiling"
    }
   }
  }

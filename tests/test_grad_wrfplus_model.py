@@ -65,13 +65,17 @@ VARIANTS = [dict(), dict(hybrid_opt=2), dict(w_damping=1),
             dict(time_step_sound=6, smdiv=0.2), dict(_rot=1), dict(_msf=1),
             dict(_msf=1, _rot=1, hybrid_opt=2, w_damping=1)]
 # Moist states (qv, qc and qr, mp_physics 0, moist_adv_opt 0): alone and
-# with every option branch above.
+# with every option branch above; then moist_adv_opt 1 (the positive-
+# definite final stage, ``_pd``), alone, with every branch and v order 2.
 MOIST = [dict(_moist=1),
-         dict(_moist=1, _msf=1, _rot=1, hybrid_opt=2, w_damping=1, time_step_sound=6)]
+         dict(_moist=1, _msf=1, _rot=1, hybrid_opt=2, w_damping=1, time_step_sound=6),
+         dict(_moist=1, _pd=1),
+         dict(_moist=1, _pd=1, _msf=1, _rot=1, hybrid_opt=2, w_damping=1, time_step_sound=6,
+              v_sca_adv_order=2)]
 # Chains of three steps: from a warm state (the previous step's diagnosis
 # reused on rk_step 1) and from a cold one (diagnosed on the first step
 # only), each followed by warm steps.
-CHAINS = [(dict(), 3, 2), (dict(), 3, 0), (dict(_moist=1), 3, 0)]
+CHAINS = [(dict(), 3, 2), (dict(), 3, 0), (dict(_moist=1), 3, 0), (dict(_moist=1, _pd=1), 3, 0)]
 CASES = [(v, 1, 2) for v in VARIANTS + MOIST] + CHAINS
 
 
@@ -101,7 +105,7 @@ def _run(backend, body, tmp_path):
         "    rot = o.pop('_rot', 0)\n"
         "    msf = o.pop('_msf', 0)\n"
         "    if o.pop('_moist', 0):\n"
-        "        o.update(moist=True, moist_adv_opt=0)\n"
+        "        o.update(moist=True, moist_adv_opt=o.pop('_pd', 0))\n"
         "    cfg = H.make_config(nx, ny, nz, **o)\n"
         "    jj, ii = np.meshgrid(np.arange(ny), np.arange(nx), indexing='ij')\n"
         "    ridge = hill * np.exp(-(((ii - nx / 2) / (nx / 5)) ** 2\n"
@@ -263,7 +267,10 @@ for dtn in {dtypes!r}:
 @pytest.mark.parametrize("backend", NO_MLX)
 def test_step_tl_matches_finite_differences(backend, tmp_path):
     """||NL(x + a dx) - NL(x)|| / ||a TL dx|| -> 1 in binary64, for one step
-    per variant and the chains of three."""
+    per variant and the chains of three.  With moist_adv_opt 1 the species
+    are perturbed relative to themselves: the seeded qr is zero on about
+    half the cells, where the limiter's scale sits on max(0, ratio)'s
+    kink, and an absolute perturbation crosses it at every a."""
     cases = CASES
     out = _run(backend, f'''
 for i, (over, nstep, warm) in enumerate({cases!r}):
@@ -272,6 +279,10 @@ for i, (over, nstep, warm) in enumerate({cases!r}):
     inputs(geoms)
     x0 = M.run_state(state, cfg, np.float64)
     p = pert(x0, 30 + i)
+    if over.get("_pd"):
+        rng = np.random.default_rng(90 + i)
+        p = [1e-3 * x0[n] * cp.asarray(rng.standard_normal(x0[n].shape)) if n in M.SPECIES
+             else a for n, a in zip(IN, p)]
     def model(xs):
         t = copy(x0)
         for n, a in zip(IN, xs):
@@ -291,14 +302,17 @@ for i, (over, nstep, warm) in enumerate({cases!r}):
 @pytest.mark.parametrize("backend", NO_MLX[:1])
 def test_step_refuses_what_it_does_not_cover(backend, tmp_path):
     """A flat base (1-D columns), open boundaries, physics, an odd
-    time_step_sound or the positive-definite moist stage raise rather
-    than return a step that is not the strict primal's; rotation, map
-    factors and a moist state are accepted."""
+    time_step_sound or the positive-definite moist stage at
+    v_sca_adv_order 5 (the HRRR fork's vertical arm) raise rather than
+    return a step that is not the strict primal's; rotation, map factors
+    and a moist state, with or without the positive-definite stage, are
+    accepted."""
     out = _run(backend, '''
 cases = {"flat": dict(terrain_opt=0), "open": dict(open_x=True, terrain_opt=1),
          "earth": dict(terrain_opt=1), "pbl": dict(terrain_opt=1, bl_pbl_physics=1),
          "odd": dict(terrain_opt=1, time_step_sound=5), "rot": dict(terrain_opt=1),
          "pd": dict(terrain_opt=1, moist=True, moist_adv_opt=1),
+         "pd5": dict(terrain_opt=1, moist=True, moist_adv_opt=1, v_sca_adv_order=5),
          "moist": dict(terrain_opt=1, moist=True, moist_adv_opt=0)}
 for key, over in cases.items():
     cfg = H.make_config(8, 6, 6, h_sca_adv_order=5, **over)
@@ -321,7 +335,8 @@ for key, over in cases.items():
     assert "physics" in out["pbl"], out
     assert "odd time_step_sound" in out["odd"], out
     assert out["rot"] == "accepted rotational=True cc=True msf=0", out
-    assert "moist_adv_opt" in out["pd"], out
+    assert out["pd"].startswith("accepted"), out
+    assert "moist_adv_opt 1 with v_sca_adv_order 5" in out["pd5"], out
     assert out["moist"].startswith("accepted"), out
 
 

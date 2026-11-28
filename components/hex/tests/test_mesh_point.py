@@ -263,6 +263,34 @@ def fake_mesh_exe(tmp_path: Path) -> Path:
     return launcher
 
 
+def test_a_geometry_2_plan_carries_the_halo_so_the_source_box_covers_the_cull(fake_mesh_exe: Path, monkeypatch) -> None:
+    """THE BREAKAGE (hex 0.6.2, 2026-11-20): with geometry 2 the default, a plain `woof hex regional --point
+    41.8,-93.8 --fine-dx-m 3000 --radius-km 250 --source hrrr` stopped at its init stage ("243 of the 37482 cells ...
+    lie outside the first guess"): the plan's cull named no halo_km, so the intermediate's box (target_from_plan:
+    the cut plus the halo plus 30 km) stopped short of the seven boundary rings (cells to 394 km, box to 367 km)."""
+    from woof.hex import hrrr_intermediate, mesh_spec_gates
+
+    monkeypatch.setattr(mesh_spec_gates, "gates_from_receipt", lambda spec, receipt, measure=None: {})
+    arguments = build_parser().parse_args([
+        "mesh-plan", "--point", "41.8,-93.8", "--fine-dx-m", "3000", "--radius-km", "250",
+        "--mesh-exe", str(fake_mesh_exe),
+    ])
+    request = mesh_point.request_from_arguments(arguments)
+    assert request.ask is not None   # the default (geometry 2) is the ask path
+    plan = mesh_point.plan_point(request)
+    cull = plan["cull"]
+    # At least the rings at the cut's spacing; each is walked at its own (growing) spacing past the cut.
+    assert cull["halo_km"] >= cull["boundary_rings"] * cull["spacing_at_cut_km"]
+    assert cull["cut_radius_km"] + cull["halo_km"] > 394.0   # the run's outermost cell
+    path = Path(fake_mesh_exe).parent / "plan.json"
+    path.write_text(json.dumps(plan), encoding="utf-8")
+    target, basis = hrrr_intermediate.target_from_plan(
+        path, margin_km=hrrr_intermediate.DEFAULT_MARGIN_KM, spacing_deg=hrrr_intermediate.DEFAULT_SPACING_DEG)
+    assert basis["halo_km"] == cull["halo_km"]
+    reach_deg = (cull["cut_radius_km"] + cull["halo_km"]) / hrrr_intermediate.KM_PER_DEG
+    assert target.south <= 41.8 - reach_deg and target.south + (target.ny - 1) * target.dlat >= 41.8 + reach_deg
+
+
 def test_the_plan_prices_the_parent_the_cull_and_the_card(fake_mesh_exe: Path, monkeypatch) -> None:
     from woof.hex import mesh_spec_gates
 
@@ -277,7 +305,7 @@ def test_the_plan_prices_the_parent_the_cull_and_the_card(fake_mesh_exe: Path, m
     parser = build_parser()
     arguments = parser.parse_args([
         "mesh-plan", "--point", "39.1,-94.58", "--fine-dx-m", "937.5", "--radius-km", "100",
-        "--card", "32gb", "--mesh-exe", str(fake_mesh_exe),
+        "--card", "32gb", "--mesh-exe", str(fake_mesh_exe), "--geometry", "1",   # the ladder's prices
     ])
     request = mesh_point.request_from_arguments(arguments)
     plan = mesh_point.plan_point(request)
@@ -327,6 +355,15 @@ def test_a_cull_that_does_not_fit_the_card_is_refused_before_anything_is_built(
         mesh_point.run_point(arguments)
     text = str(refusal.value)
     assert "refused before anything is built" in text and "reduce --radius-km" in text
+    assert not (tmp_path / "out").exists()
+    # The ladder (geometry 1) also quotes the largest core this card holds.
+    arguments = parser.parse_args([
+        "mesh-plan", "--point", "39.1,-94.58", "--card", "32gb", "--vram-gib", "3", "--geometry", "1",
+        "--generate", "--out-dir", str(tmp_path / "out"), "--mesh-exe", str(fake_mesh_exe),
+    ])
+    with pytest.raises(PointPlanRefusal) as refusal:
+        mesh_point.run_point(arguments)
+    assert "This card holds a core of up to" in str(refusal.value)
     assert not (tmp_path / "out").exists()
 
 
@@ -972,3 +1009,32 @@ def test_a_density_raster_finer_than_the_fine_rung_is_refused(tmp_path: Path) ->
         mesh_point.request_from_arguments(arguments)
     with pytest.raises(PointPlanRefusal, match="no such file"):
         mesh_point.density_raster_paths([tmp_path / "absent.nc"], fine_dx_m=3000.0)
+
+
+@pytest.mark.parametrize("knob", [["--ring-factor", "1"], ["--transition-factor", "12"], ["--cull-pad-scale", "2"]])
+def test_a_grading_knob_with_no_geometry_keeps_the_ladder(knob: list[str]) -> None:
+    """The fork's grading knobs shape the geometry-1 ladder.  ``regional_door.plan`` keeps geometry 1 when one is
+    given with no geometry; mesh-plan fell through to the geometry-2 default (upstream 1.1.7), where
+    --ring-factor was dropped without a word."""
+    arguments = build_parser().parse_args([
+        "mesh-plan", "--point", "39.1,-94.58", "--fine-dx-m", "3000", "--radius-km", "250", *knob])
+    request = mesh_point.request_from_arguments(arguments)
+    assert arguments.geometry == 1
+    assert request.ask is None   # the ladder road, not a geometry-2 row
+    assert getattr(request, knob[0][2:].replace("-", "_")) == float(knob[1])
+
+
+def test_no_grading_knob_keeps_the_geometry_2_default() -> None:
+    arguments = build_parser().parse_args([
+        "mesh-plan", "--point", "39.1,-94.58", "--fine-dx-m", "3000", "--radius-km", "250"])
+    assert mesh_point.request_from_arguments(arguments).ask is not None
+    assert getattr(arguments, "geometry", None) is None
+
+
+def test_a_ring_factor_under_named_geometry_2_is_refused_and_the_others_carry() -> None:
+    base = ["mesh-plan", "--point", "39.1,-94.58", "--fine-dx-m", "3000", "--radius-km", "250", "--geometry", "2"]
+    with pytest.raises(PointPlanRefusal, match="geometry 2 lays no rings"):
+        mesh_point.request_from_arguments(build_parser().parse_args([*base, "--ring-factor", "1"]))
+    # The ramp width and the pad mean something to a geometry-2 row: named with it, they ride the row.
+    request = mesh_point.request_from_arguments(build_parser().parse_args([*base, "--cull-pad-scale", "2"]))
+    assert request.ask is not None
