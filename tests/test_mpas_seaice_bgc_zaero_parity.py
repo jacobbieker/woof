@@ -205,7 +205,8 @@ def _mismatches(names):
     # the new ice's mobile fractions: only the first reset
     (_BGC_NAMES, "for (int m = 0; m < NBT; ++m) ztr_frac[(size_t)c * nzbgc + m]",
      "for (int m = 0; m < 1; ++m) ztr_frac[(size_t)c * nzbgc + m]"),
-    # the phases run tracer by tracer: the initialization check after the others
+    # the initialization stop dropped: the abort_order case then stops on the other message (the
+    # phase order itself is held by the GPU parity on that case, not by this mutation)
     (("bgc_zaero_nonreactive_abort_order",), "            if (*t < 0.0) return BG_ZBGC_INIT;\n", ""),
 ])
 def test_a_mutated_z_aerosol_is_caught(monkeypatch, names, original, mutated):
