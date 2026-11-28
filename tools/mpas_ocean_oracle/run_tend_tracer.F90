@@ -16,7 +16,9 @@
 !   ocn_constants_init, ocn_surface_bulk_forcing_init, ocn_surface_land_ice_fluxes_init,
 !   ocn_frazil_forcing_init, ocn_tracer_advection_init,
 !   ocn_tracer_hmix_init, ocn_tracer_hmix_redi_init, ocn_tracer_surface_flux_init,
-!   ocn_tracer_short_wave_absorption_init(domain, err)
+!   ocn_tracer_short_wave_absorption_init(domain, err), ocn_equation_of_state_init,
+!   ocn_tracer_nonlocalflux_init (KPP's input fields and non-local flux under
+!   config_use_cvmix_kpp)
 !   ocn_tend_tracer(tend, state, forcing, diagnostics, mesh, swForcing, scratch, dt,
 !                   activeTracersOnlyIn = config oracle_active_tracers_only, timeLevelIn = 1)
 
@@ -33,6 +35,8 @@ program run_tend_tracer
   use ocn_tracer_hmix_redi
   use ocn_tracer_surface_flux_to_tend
   use ocn_tracer_short_wave_absorption
+  use ocn_equation_of_state
+  use ocn_tracer_nonlocalflux
   use ocn_tendency
   use oracle_stream
   implicit none
@@ -64,6 +68,10 @@ program run_tend_tracer
   call ocn_tracer_surface_flux_init(err)
   if (err /= 0) stop 13
   call ocn_tracer_short_wave_absorption_init(domain, err)
+  if (err /= 0) stop 13
+  call ocn_equation_of_state_init(err)
+  if (err /= 0) stop 13
+  call ocn_tracer_nonlocalflux_init(err)
   if (err /= 0) stop 13
   call mpas_pool_get_config(pools % configs, 'oracle_active_tracers_only', activeOnly)
   call ocn_tend_tracer(pool_named(pools, 'tend'), pool_named(pools, 'state'), pool_named(pools, 'forcing'), &

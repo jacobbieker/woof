@@ -5393,7 +5393,7 @@
    },
    {
     "file": "woof/hex/mpas_ocean/tend_tracer_v842.cu",
-    "sha256": "421b4c9f4c3e80066db12b40ddc2f81167b665e0ca4d20ba59c9cffa610f9f87"
+    "sha256": "6cfed715ddbe4dab498d704a02f528a80310876a06c09b43afce3150d52ac4d9"
    },
    {
     "file": "woof/hex/mpas_ocean/tend_v842.cu",
@@ -6559,11 +6559,11 @@
    },
    {
     "file": "woof/hex/mpas_ocean/split_step_v842.py",
-    "sha256": "48a2cb1d7c936cbad687197fe00dd648ca9905bf8a65c9fdbc122e9284dd67d0"
+    "sha256": "fd7a1b220f7cc6bd88fce77c7bdbcf3d66d25db8304e21df53b62b3855e364f5"
    },
    {
     "file": "woof/hex/mpas_ocean/tend_tracer_v842.py",
-    "sha256": "8cfaafc130214cbbadca2c59a3d6647e511e612b0501f0242700d0cdf1e74659"
+    "sha256": "ce0979a24963f9be864ddd1c14633f239afd64a97a65d3e2e8b6b4bb13824d2f"
    },
    {
     "file": "woof/hex/mpas_ocean/tend_v842.py",
