@@ -115,8 +115,10 @@ if lane == "l1":
     # P3a's window covers them); mp_zero_out 0 so nothing clips qv (the
     # window has no zero-out).  L1_NARROW=1: the 4D.4 gate's narrowed
     # dynamics (damp_opt 0, emdiv 0, moist_adv_opt 0)
-    if narrow:
-        want["dynamics"].update({"damp_opt": "0", "emdiv": "0", "moist_adv_opt": "0"})
+    # (written out, not left to the Registry, so the lane does not depend on
+    # what the shipped namelist sets)
+    want["dynamics"].update({"damp_opt": "0", "emdiv": "0", "moist_adv_opt": "0"} if narrow else
+                            {"damp_opt": "3", "emdiv": "0.01", "moist_adv_opt": "1"})
     want["physics"]["mp_zero_out"] = "0"
 lines = open(src).read().splitlines()
 out, group, seen = [], None, set()

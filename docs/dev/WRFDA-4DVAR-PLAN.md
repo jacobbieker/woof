@@ -6,17 +6,17 @@ Status (2026-11-27): 4D.1 (`transfer4d.py`, #737), 4D.2
 on a moist window (`moisture="advect"`). 4D.4 adds outer loops
 (`outer4d.py`, `Var4D.nl_model`, `WindowModel.relinearise`) and `woof var
 --4dvar` (identity TL, one loop); its L2-style OSSE passes. The 4D.4 L1
-gate passes to tolerance on pb, for one and two outer loops: loop 2's
-`J0` and final `J` agree to 6e-6, loop 1's to 1e-3, and the increments
-correlate to 0.9995 (docs/var.md). It needed WRFDA's boundary-table
-perturbation (`WindowModel(lbc="wrfda")`, var4d_lbc off) and the loop's
-table update. The QC carry is measured at no effect on L1 and is not
-ported. `var_scaling(it)` defaults to 1, which is the identity. L1 is
-then narrowed to `damp_opt 0`, `emdiv 0` and `moist_adv_opt 0`. Since
-P3a covers them (#884-#889), lane L1 runs WRF's default dynamics (2026-11-28;
-docs/var.md). It is not word for word, because WRFPLUS's trajectory cannot
+gate passes to tolerance on pb, for one and two outer loops. It needed
+WRFDA's boundary-table perturbation (`WindowModel(lbc="wrfda")`,
+var4d_lbc off) and the loop's table update. The QC carry is measured at
+no effect on L1 and is not ported. `var_scaling(it)` defaults to 1, which
+is the identity. The 4D.4 gate narrowed L1 to `damp_opt 0`, `emdiv 0` and
+`moist_adv_opt 0`. Since #884-#889, L1 runs WRF's default dynamics
+(2026-11-28): `J0` and the final `J` agree to 8e-4 in both loops, and the
+increments correlate to 0.9998 (docs/var.md). `L1_NARROW=1` restores the
+narrowed lane. It is not word for word, because WRFPLUS's trajectory cannot
 be read out of this build. Not done: the checkpoint policy and its G3
-receipt, and 4D.5 (L0, after P3a item 6).
+receipt, and 4D.5 (L0). L0 is blocked on the TL/AD of the simplified physics; see "4D.5 (L0): what is missing".
 It is the
 second half of V5 in
 [WRFDA-3DVAR-PLAN.md](WRFDA-3DVAR-PLAN.md) section 7 (V5.2 and the
@@ -255,7 +255,8 @@ It does not depend on how closely woof's forecast reproduces WRF.
    P3a items 1-4 land.
 5. **4D.4**: outer loops (NL rerun from the updated analysis), `woof var
    --4dvar`, docs/var.md, README. Gate: L1 with `max_ext_its = 2`.
-6. **4D.5**: L0, once P3a items 5-6 land. Blocked on item 6 (below).
+6. **4D.5**: L0, once P3a items 5-6 land. Blocked on P3a item 6 (section 3; see "4D.5 (L0): what is
+   missing" below).
 
 **Refused throughout:**
 
@@ -282,9 +283,10 @@ WRFPLUS's simplified physics:
 - `ifsnow = 1`, `icloud = 0`.
 
 The dynamics (`diff_opt 1`/`km_opt 4`, `damp_opt 3`, `emdiv 0.01`,
-`moist_adv_opt 1`) are covered. L0 does not need the importer requests
-(`diff_opt 0`, a qv-only state), since it runs `diff_opt 1` and
-`mp_physics 3`.
+`moist_adv_opt 1`) are covered. L0 does not need the two importer
+requests L1's harness works around (the importer accepting `diff_opt 0`,
+and P3a's moist binding accepting a qv-only state at `mp_physics 0`),
+since it runs `diff_opt 1` and `mp_physics 3`.
 
 What the window does not have, and what lane L0 needs, by WRFPLUS 4.7.1 file
 (`wrftladj/`):
@@ -327,7 +329,9 @@ What the window does not have, and what lane L0 needs, by WRFPLUS 4.7.1 file
    window's physics configuration. `model.py` `_refuse` refuses
    `microphysics` and `physics` today.
 
-Items 1-5 are P3a item 6 (section 3), a P3b-sized port. The three
+Items 1-5 are P3a item 6 (section 3), a P3b-sized port. Item 6 is
+P3a item 1's external-trajectory mode fed by a woof physics forecast. It
+also needs the window to accept that configuration. The three
 schemes' TL and AD files alone are 2.9 k lines (`module_mp_mkessler`,
 `module_bl_surface_drag` and `module_cu_du`, `_tl` and `_ad`). The
 drivers, the tendency coupling and woof's kernels come on top. It was not
