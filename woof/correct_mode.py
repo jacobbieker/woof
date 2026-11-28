@@ -96,7 +96,7 @@ MY1  WRF 4.6.1's MYNN (and every MYNN-EDMF before NCAR/MYNN-EDMF f3c9d9e,
      MY1 as uncorrected; GSD MYNN 4.1 (gsd_41) adds the flux with its sign
      and does not carry it.
 
-FQ1-FQ12 are the fork's quirk ledger on the WRF route (woof.quirk_corrections,
+FQ1-FQ13 are the fork's quirk ledger on the WRF route (woof.quirk_corrections,
 ``woof_quirk_corrections``): corrections of WRF 4.7.1 arithmetic that
 contradicts itself, each with its own key.  Like the findings above they are
 on in correct mode and off in exact mode (and in a strict WRF process).
@@ -159,6 +159,13 @@ FQ12 WRF's compute_diff_metrics (diff_opt = 1, 2) fills a periodic axis's
      top w level at the seam keeps its cold zero and the top mass level's
      deformation reads it; the key takes the true slope there
      (``diff_metrics_seam_slope``).  Inert on a bounded axis.
+FQ13 WRF's advect_scalar_pd (moist_adv_opt = 1) forms the Courant number of
+     a bounded x axis's second-order west face (i == ids+1) as
+     (ru/mu)*dt/dx, where every other face, the east one included, forms
+     ru*dt/dx/mu; WRFPLUS repeats it.  The key takes every face's order
+     there (``pd_adv_west_courant``).  Inert on a periodic x axis; the
+     default build's face never carried WRF's order, so the words it moves
+     are a strict build's and the WRFPLUS PD TL/AD's.
 
 WHICH SCHEMES CARRY EACH FINDING is data too (:attr:`Correction.carriers`),
 separate from which schemes a key corrects (:data:`KEY_SCOPE`).  A domain
@@ -416,6 +423,15 @@ CORRECTIONS: tuple[Correction, ...] = (
             "axis's seam on the top w level, where WRF keeps a cold zero"),
         carriers=(("diff_opt", (1, 2)),),
     ),
+    Correction(
+        finding="FQ13",
+        keys=("pd_adv_west_courant",),
+        summary=(
+            "the positive-definite transport's west face of a bounded x axis "
+            "forms its Courant number in every other face's order, "
+            "ru*dt/dx/mu, not WRF's (ru/mu)*dt/dx"),
+        carriers=(("moist_adv_opt", (1,)),),
+    ),
 )
 
 #: Finding -> ``(selector, absent value, values)``: a carrier that is a
@@ -474,7 +490,7 @@ KEY_SCOPE: Mapping[str, tuple[str, tuple[int, ...]]] = {
     "mynn_boulac_down_sign": ("bl_pbl_physics", (5,)),
     # ML1's second key: the BouLac (8) and k-epsilon (17) length kernels.
     "pbl_boulac_down_sign": ("bl_pbl_physics", (8, 17)),
-    # FQ1-FQ12, the fork's quirk ledger (woof.quirk_corrections).
+    # FQ1-FQ13, the fork's quirk ledger (woof.quirk_corrections).
     "gf_deep_rain_evaporation_booking": ("cu_physics", (3,)),
     "ysu_surface_heat_exner": ("bl_pbl_physics", (1,)),
     "mynn_sfclay_psih_zolzt": ("sf_sfclay_physics", (5,)),
@@ -496,6 +512,8 @@ KEY_SCOPE: Mapping[str, tuple[str, tuple[int, ...]]] = {
     "kf_capped_downdraft_rain_floor": ("cu_physics", (1, 10, 11)),
     # FQ12: compute_diff_metrics runs under either diffusion option.
     "diff_metrics_seam_slope": ("diff_opt", (1, 2)),
+    # FQ13: advect_scalar_pd, the positive-definite moisture transport.
+    "pd_adv_west_courant": ("moist_adv_opt", (1,)),
 }
 
 #: A launch setting, not a RunConfig field, that :data:`KEY_UNREAD` reads
@@ -540,8 +558,9 @@ def _generation_matches(rule, values: Mapping) -> bool:
 
 
 #: Selectors whose absent value is not 0: an echo omits diff_opt at its
-#: default 2 (woof.io.restart reads an absent diff_opt as 2).
-_ABSENT_SELECTOR = {"diff_opt": 2}
+#: default 2 (woof.io.restart reads an absent diff_opt as 2), and an absent
+#: moist_adv_opt is its RunConfig default 1.
+_ABSENT_SELECTOR = {"diff_opt": 2, "moist_adv_opt": 1}
 
 #: The fields :func:`_diff_metrics_seam_read` reads, beside diff_opt.
 _SEAM_FIELDS = ("km_opt", "khdif", "kvdif", "bl_pbl_physics", "isfflx",
@@ -573,9 +592,19 @@ def _diff_metrics_seam_read(values: Mapping) -> bool:
     return periodic and wrf_mixing_package_active(view)
 
 
+def _pd_west_courant_read(values: Mapping) -> bool:
+    """FQ13 is read where the PD transport meets a west boundary: a
+    specified or nested domain.  A periodic x axis has no west face, and
+    woof runs no PD transport on an open (radiative) axis
+    (woof.core.moist: open domains take the unlimited stage plus clamp)."""
+    view = _FieldView(values)
+    return bool(view.specified or view.nested) and not (view.open_x or view.open_y)
+
+
 #: Key -> predicate over the selection: a key read only where the predicate
 #: holds, inside its :data:`KEY_SCOPE` scheme.
-KEY_READ_WHEN = {"diff_metrics_seam_slope": _diff_metrics_seam_read}
+KEY_READ_WHEN = {"diff_metrics_seam_slope": _diff_metrics_seam_read,
+                 "pd_adv_west_courant": _pd_west_courant_read}
 
 
 def _selector_int(selector: str, values: Mapping) -> int:
@@ -614,7 +643,7 @@ SCOPE_SELECTORS: tuple[str, ...] = tuple(dict.fromkeys(
     + [selector for selector, _ in KEY_UNREAD.values()]
     # the aggregate radiation selection stands for ra_lw_physics = -1
     + ["ra_physics"]
-    # FQ12's read predicate (KEY_READ_WHEN)
+    # FQ12's and FQ13's read predicates (KEY_READ_WHEN)
     + list(_SEAM_FIELDS)))
 
 
@@ -846,7 +875,8 @@ def uncorrected(cfg) -> list[str]:
         if generation is not None and not _generation_matches(generation, values):
             continue
         # A carrier whose defect is reached only under a read predicate
-        # (FQ12: a periodic axis) carries nothing outside it.
+        # (FQ12: a periodic axis; FQ13: a bounded x axis) carries nothing
+        # outside it.
         if any(key in KEY_READ_WHEN and not KEY_READ_WHEN[key](values)
                for key in c.keys):
             continue

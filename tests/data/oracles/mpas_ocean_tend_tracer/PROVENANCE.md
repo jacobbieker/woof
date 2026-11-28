@@ -2,7 +2,8 @@
 
 Written by `tools/mpas_ocean_oracle/build.sh` and
 `make_fixture.py --piece tend_tracer` on pb (Linux 6.12 x86_64, glibc 2.44),
-2026-11-13.
+2026-11-13; regenerated 2026-11-22 with the KPP cases (the six earlier cases'
+outputs are word-identical to the 2026-11-13 fixture's).
 
 - MPAS source: github.com/MPAS-Dev/MPAS-Model tag v8.4.2, commit
   `f34984b2c89353cf31c235b08d3b4acd96b37bb3`, byte-unmodified. build.sh checks
@@ -26,7 +27,11 @@ Written by `tools/mpas_ocean_oracle/build.sh` and
   object. Jerlov's `exp` is the host glibc's `expf`/`exp`.
 - Driver: `run_tend_tracer.F90` (stream: `oracle_stream.F90`). It calls the
   `_init` routines `ocn_forward_mode_init` calls for these modules, then
-  `ocn_tend_tracer(..., dt, activeTracersOnlyIn=.true., timeLevelIn=1)`. The
+  `ocn_tend_tracer(..., dt, activeTracersOnlyIn=.true., timeLevelIn=1)`;
+  among them `ocn_equation_of_state_init` and `ocn_tracer_nonlocalflux_init`
+  (KPP's input fields run the equation of state at the surface-displaced
+  type; `ocn_tracer_nonlocalflux_tend` is on only under
+  `config_use_cvmix_kpp` without `config_disable_tr_nonlocalflux`). The
   stubs iterate the tracers pool in the order its members were put; it holds
   `activeTracers` alone.
 
@@ -40,6 +45,10 @@ Written by `tools/mpas_ocean_oracle/build.sh` and
 | `sflux_disabled_runoff` | 32 | 8 | `config_disable_tr_sflux`, 2nd-order vertical advection |
 | `active_tracers_off` | 24 | 6 | `config_use_activeTracers` off |
 | `all_tend_disabled` | 24 | 6 | `config_disable_tr_all_tend` |
+| `kpp_nonlocal_bulk_budgets` | 40 | 16 | KPP's input fields (linear equation of state, the attenuation clamped at `exp(-100)`) and non-local flux, bulk forcing, Jerlov, the budgets; `nCellsArray` 31/34/37/40 |
+| `kpp_nonlocal_jm_attenuated` | 36 | 12 | KPP with the JM equation of state, attenuation coefficients 10 and 4 m; `nCellsArray` 27/30/33/36 |
+| `kpp_nonlocal_with_implicit_mix` | 28 | 10 | `config_cvmix_kpp_nonlocal_with_implicit_mix`: the input fields only, the budgets |
+| `kpp_nonlocal_disabled_budgets` | 28 | 10 | `config_disable_tr_nonlocalflux`: a zero non-local budget, JM |
 
 ## Grading
 

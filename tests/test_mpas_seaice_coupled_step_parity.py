@@ -40,7 +40,6 @@ from __future__ import annotations
 
 import os
 import platform
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -49,6 +48,7 @@ import numpy as np
 import pytest
 
 from conftest import requires_gpu
+import _oracle_toolchains
 from woof.hex.errors import ConfigurationRefusal
 from woof.hex.mpas_seaice import column_radiation_v842 as crad
 from woof.hex.mpas_seaice import column_ridge_v842 as crdg
@@ -256,11 +256,7 @@ def test_a_mutated_step_is_caught(monkeypatch, glibc239, mutate, field, name):
 
 
 def _oracle_toolchain() -> tuple[str, Path] | None:
-    source = os.environ.get("WOOF_MPAS_V842_SOURCE")
-    gfortran = os.environ.get("GFORTRAN") or shutil.which("gfortran")
-    if not source or not gfortran or not Path(source, "src", "core_seaice").is_dir():
-        return None
-    return gfortran, Path(source)
+    return _oracle_toolchains.mpas_v842("core_seaice")
 
 
 @pytest.mark.skipif(_oracle_toolchain() is None or platform.machine() != "x86_64"

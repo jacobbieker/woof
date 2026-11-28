@@ -154,7 +154,7 @@ def test_dispatch_batches_the_mass_point_rows_around_the_w_row(monkeypatch):
                         lambda state, cfg, f, xk, buf, *, stagger, time_t, full_theta=False:
                         calls.append(("row", stagger, full_theta)))
     zeroed = []
-    monkeypatch.setattr(dy, "_zero_open_strips", lambda buf, cfg, width, **kw: zeroed.append(buf))
+    monkeypatch.setattr(dy, "_zero_open_strips_rows", lambda bufs, cfg, width: zeroed.extend(bufs))
     monkeypatch.setattr(dy, "chem_mix2_exempt_slots", lambda state, cfg: set())
     bufs = {}
     state = SimpleNamespace(thp=np.zeros((2, 3, 4), np.float32),

@@ -18,7 +18,10 @@ THE BREAKAGES THESE PREVENT
    bulk thickness flux, the sea-ice salt flux limited, the surface flux's
    remainder sent to the bottom level, Jerlov absorption with the
    buoyancy-depth search ending inside and below the column, the budgets,
-   the surface flux, the active tracers or the whole tendency switched off.
+   the surface flux, the active tracers or the whole tendency switched off;
+   KPP's input fields (both equations of state, the attenuation clamped and
+   not, nCellsArray's extents apart) and its non-local flux (on, left to the
+   implicit mixing, disabled, with its budget).
 4. A gate that cannot fail: a mutated evaluation order or branch must produce
    mismatches.
 5. An option this port does not carry silently skipped: refused by name.
@@ -26,7 +29,6 @@ THE BREAKAGES THESE PREVENT
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -35,6 +37,7 @@ import numpy as np
 import pytest
 
 from conftest import requires_gpu
+import _oracle_toolchains
 from woof.hex.errors import ConfigurationRefusal
 from woof.verify import mpas_ocean_tend_tracer_oracle as oo
 
@@ -83,15 +86,48 @@ def test_fixture_covers_the_branches(precision):
     assert limited > 0 and remainder > 0 and deep_search > 0 and shallow_search > 0
 
 
+@pytest.mark.parametrize("precision", BOTH)
+def test_fixture_covers_kpp(precision):
+    fixture = oo.load_fixture(precision)
+    cases = {case["name"]: case for case in oo.cases(precision)}
+    kinds = set()
+    for name, case in cases.items():
+        c = case["config"]
+        if not c["config_use_cvmix_kpp"]:
+            continue
+        out = fixture[name]
+        n3 = int(case["pools"]["mesh"]["nCellsArray"][2])
+        for field in ("diagnostics/surfaceFrictionVelocity", "forcing/surfaceStressMagnitude",
+                      "diagnostics/surfaceBuoyancyForcing", "tracersSurfaceFlux/nonLocalSurfaceTracerFlux"):
+            before = case["pools"][field.split("/")[0]][field.split("/")[1]]
+            assert oo.word_mismatches(out[field][:n3], before[:n3]) > 0, (name, field)
+            # past nCellsArray(3) the input fields are left alone
+            assert oo.word_mismatches(out[field][n3:-1], before[n3:-1]) == 0, (name, field)
+        assert (out["diagnostics/surfaceFrictionVelocity"][:n3] > 0).all(), name
+        kinds.add(c["config_eos_type"])
+        nonlocal_on = not (c["config_cvmix_kpp_nonlocal_with_implicit_mix"] or c["config_disable_tr_nonlocalflux"])
+        if c["config_compute_active_tracer_budgets"] and not c["config_cvmix_kpp_nonlocal_with_implicit_mix"]:
+            budget = out["diagnostics/activeTracerNonLocalTendency"][:case["dims"]["nCells"]]
+            assert (np.abs(budget).max() > 0) == nonlocal_on, name
+        kinds.add("on" if nonlocal_on else "implicit" if c["config_cvmix_kpp_nonlocal_with_implicit_mix"]
+                  else "disabled")
+        if c["config_flux_attenuation_coefficient"] > 1.0:
+            kinds.add("attenuated")
+        if len(set(case["pools"]["mesh"]["nCellsArray"].tolist())) == 4:
+            kinds.add("halos")
+    assert kinds == {"linear", "jm", "on", "implicit", "disabled", "attenuated", "halos"}
+
+
 def test_options_not_ported_are_refused_by_name():
     from woof.hex.mpas_ocean import tend_tracer_v842 as tt
-    base = dict(oo.BASE_CONFIG)
+    base = dict(oo.BASE_CONFIG, **oo.KPP_CONFIG)
     tt.check_config(base)
     tt.check_config(dict(base, config_use_frazil_ice_formation=True))  # ported (frazil_v842)
     tt.check_config(dict(base, config_use_standardGM=True))  # Redi, ported (tracer_hmix_v842)
     for mode in ("standalone", "coupled"):  # ported (land_ice_v842)
         tt.check_config(dict(base, config_land_ice_flux_mode=mode))
-    for knob, value in (("config_use_cvmix_kpp", True), ("config_use_activeTracers_surface_restoring", True),
+    tt.check_config(dict(base, config_use_cvmix_kpp=True))  # KPP's input fields and non-local flux, ported
+    for knob, value in (("config_use_activeTracers_surface_restoring", True),
                         ("config_use_activeTracers_interior_restoring", True),
                         ("config_use_activeTracers_exponential_decay", True),
                         ("config_use_activeTracers_idealAge_forcing", True),
@@ -145,6 +181,20 @@ def test_gpu_matches_the_v842_oracle_word_for_word(precision):
     # the buoyancy-depth level taken where the search ends, without v8.4.2's special cases
     ("const int depLev = (kf == top || kf == 1) ? 2 : kf;", "const int depLev = kf > top ? top : kf;",
      "bulk_jerlov_del2_budgets", "diagnostics/penetrativeTemperatureFluxOBL"),
+    # KPP's edge weight divided by the area rather than times its inverse
+    ("M(M(M(C(0.5), dcEdge[iEdge]), dvEdge[iEdge]), invAreaCell)",
+     "D(M(M(C(0.5), dcEdge[iEdge]), dvEdge[iEdge]), areaCell[iCell])", "kpp_nonlocal_bulk_budgets",
+     "forcing/surfaceStressMagnitude"),
+    # the friction velocity's square root split
+    ("SQRT(D(magnitude, rhoSw))", "D(SQRT(magnitude), SQRT(rhoSw))", "kpp_nonlocal_jm_attenuated",
+     "diagnostics/surfaceFrictionVelocity"),
+    # the absorbed thickness flux's product associated the other way
+    ("M(M(fracAbsorbed, surfaceThicknessFlux[iCell]), t1[iT - 1])",
+     "M(fracAbsorbed, M(surfaceThicknessFlux[iCell], t1[iT - 1]))", "kpp_nonlocal_jm_attenuated",
+     "tracersSurfaceFlux/nonLocalSurfaceTracerFlux"),
+    # the non-local flux's divergence added one face at a time
+    ("A(t[(k - 1) * nTracers + i], S(top, bottom))", "S(A(t[(k - 1) * nTracers + i], top), bottom)",
+     "kpp_nonlocal_bulk_budgets", TEND),
 ])
 def test_a_mutated_port_is_caught(monkeypatch, precision, original, mutated, case_name, field):
     from woof.hex.mpas_ocean import tend_tracer_v842
@@ -161,11 +211,7 @@ def test_a_mutated_port_is_caught(monkeypatch, precision, original, mutated, cas
 
 
 def _oracle_toolchain() -> tuple[str, Path] | None:
-    source = os.environ.get("WOOF_MPAS_V842_SOURCE")
-    gfortran = os.environ.get("GFORTRAN") or shutil.which("gfortran")
-    if not source or not gfortran or not Path(source, "src", "core_ocean").is_dir():
-        return None
-    return gfortran, Path(source)
+    return _oracle_toolchains.mpas_v842("core_ocean")
 
 
 @pytest.mark.skipif(_oracle_toolchain() is None,

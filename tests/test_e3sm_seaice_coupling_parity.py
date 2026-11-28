@@ -62,7 +62,6 @@ from __future__ import annotations
 import dataclasses
 import os
 import platform
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -72,6 +71,7 @@ import pytest
 
 from _numerics_child import MODES, run as run_child
 from conftest import requires_gpu
+import _oracle_toolchains
 from woof.hex.coupled import ice_coupling_e3sm as icc
 from woof.verify import e3sm_seaice_coupling_oracle as si
 
@@ -597,14 +597,7 @@ def test_bad_shapes_kinds_and_sizes_are_refused():
 
 
 def _oracle_toolchain():
-    e3sm, mct = os.environ.get("WOOF_E3SM_V320_SOURCE"), os.environ.get("WOOF_MCT_SOURCE")
-    icepack = os.environ.get("WOOF_ICEPACK_SOURCE")
-    gfortran = os.environ.get("GFORTRAN") or shutil.which("gfortran")
-    if (not e3sm or not mct or not icepack or not gfortran
-            or not Path(e3sm, "components", "mpas-seaice", "driver").is_dir()
-            or not Path(icepack, "columnphysics").is_dir()):
-        return None
-    return gfortran, Path(e3sm), Path(mct), Path(icepack)
+    return _oracle_toolchains.e3sm_v320("components", "mpas-seaice", "driver", directory=True, icepack=True)
 
 
 @pytest.mark.skipif(_oracle_toolchain() is None,

@@ -14,8 +14,8 @@
 !   ocn_time_integration_split_init (verbatim: the barotropic subcycle count
 !   from config_dt and config_btr_dt, the cold start's barotropic velocity);
 !   the state part of ocn_init_routines_block (mpas_ocn_init_routines.F,
-!   transcribed below: boundaryLayerDepth (GM cases only: their streams alone
-!   carry it, and only GM's surface tapering and KPP read it),
+!   transcribed below: boundaryLayerDepth (GM and CVMix cases only: their
+!   streams alone carry it, and only GM's surface tapering and KPP read it),
 !   ocn_diagnostic_solve, the missing cell's and the land levels' sentinels,
 !   normalTransportVelocity, with config_use_standardGM GM's bolus velocity
 !   added and ocn_reconstruct_gm_vectors, the time levels initialised); the
@@ -55,6 +55,7 @@ program run_forward
   use ocn_tracer_hmix_redi
   use ocn_tracer_surface_flux_to_tend
   use ocn_tracer_short_wave_absorption
+  use ocn_tracer_nonlocalflux
   use ocn_equation_of_state
   use ocn_diagnostics
   use ocn_vmix
@@ -79,7 +80,7 @@ program run_forward
   real(kind=RKIND), dimension(:), pointer :: areaCell, boundaryLayerDepth
   real(kind=RKIND), dimension(:,:), pointer :: layerThickness, normalVelocity, normalTransportVelocity, &
        normalGMBolusVelocity
-  logical, pointer :: config_use_standardGM
+  logical, pointer :: config_use_standardGM, config_use_cvmix
   real(kind=RKIND), dimension(:,:,:), pointer :: activeTracers
   character(len=StrKIND), pointer :: config_start_time, config_dt, config_calendar_type
   character(len=StrKIND) :: timeStamp
@@ -144,6 +145,8 @@ program run_forward
   if (err /= 0) stop 13
   call ocn_tracer_short_wave_absorption_init(domain, err)
   if (err /= 0) stop 13
+  call ocn_tracer_nonlocalflux_init(err)
+  if (err /= 0) stop 13
   call ocn_equation_of_state_init(err)
   if (err /= 0) stop 13
   call ocn_diagnostics_init(err)
@@ -160,7 +163,8 @@ program run_forward
 
   ! ocn_init_routines_block's state part (mpas_ocn_init_routines.F:615-619,621-664,685-687,690-696)
   call mpas_pool_get_config(pools % configs, 'config_use_standardGM', config_use_standardGM)
-  if (config_use_standardGM) then
+  call mpas_pool_get_config(pools % configs, 'config_use_cvmix', config_use_cvmix)
+  if (config_use_standardGM .or. config_use_cvmix) then
      call mpas_pool_get_dimension(pool_named(pools, 'mesh'), 'nCells', nCells)
      call mpas_pool_get_array(pool_named(pools, 'diagnostics'), 'boundaryLayerDepth', boundaryLayerDepth)
      call mpas_pool_get_array(pool_named(pools, 'state'), 'layerThickness', layerThickness, 1)
