@@ -6611,7 +6611,7 @@
    },
    {
     "file": "woof/hex/mpas_seaice/coupling_prep_v842.py",
-    "sha256": "29d5abc021967fa2b0a8514a08428729fd666ca788c936b99bef20f11953c4f3"
+    "sha256": "b827bb3a0c6035db833f95fe142640bdb540d2591a4cf0a4cb90a50c870371f8"
    },
    {
     "file": "woof/hex/mpas_seaice/evp_v842.py",
