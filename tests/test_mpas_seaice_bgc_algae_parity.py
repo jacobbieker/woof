@@ -56,8 +56,10 @@ from woof.hex.errors import ConfigurationRefusal
 from woof.hex.mpas_seaice import column_bgc_v842 as cbgc
 from woof.hex.mpas_seaice import column_itd_v842 as citd
 from woof.hex.mpas_seaice import column_radiation_v842 as crad
+from woof.hex.mpas_seaice import column_step_v842 as cstep
 from woof.hex.mpas_seaice import column_therm_v842 as ctherm
 from woof.hex.mpas_seaice import column_v842 as cv
+from woof.hex.mpas_seaice import coupling_prep_v842 as cpl
 from woof.verify import mpas_seaice_column_oracle as co
 
 FIXTURE = co.BGC_ALGAE_FIXTURE_DIR
@@ -144,6 +146,10 @@ def test_the_init_and_the_biogeochemistry_carry_the_algae():
     lambda c, d: citd.refuse_unported(c, d),
     lambda c, d: ctherm.refuse_unported(c, d), lambda c, d: crad.refuse_unported(c, d),
     lambda c, d: cv.refuse_unported(c, d, biogeochemistry=True, z_tracers=True),
+    # the column step and coupling_prep (with a vertical tracer they carry, so that the
+    # vertical tracers' own checks pass and the shared flag list is what refuses)
+    lambda c, d: cstep.check_config({**c, "config_use_nonreactive": True, "config_use_ocean_mixed_layer": False}),
+    lambda c, d: cpl.check_config({**c, "config_use_nonreactive": True, "config_use_ocean_mixed_layer": False}),
 ])
 def test_the_other_stages_refuse_the_vertical_biochemistry_by_name(refuse):
     case = _case("bgc_algae_nutrients_c2n")
