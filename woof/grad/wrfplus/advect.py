@@ -13,8 +13,9 @@ the three mass fluxes.  ``rdz`` is ``rdnw`` for scalar, u and v and
 There is no ``has_msf=False``: pass ``msf`` of ones, which gives the
 same words (1.0 * rdx is exact).
 
-Not covered: h_*_adv_order 2 (the legacy idealized path), WENO and
-monotonic/positive-definite limiters.
+Not covered: h_*_adv_order 2 (the legacy idealized path), WENO and the
+monotonic limiter; the positive-definite one is
+:mod:`woof.grad.wrfplus.pdadv`.
 """
 
 from __future__ import annotations
@@ -95,9 +96,13 @@ def adv_shapes(geom: AdvGeometry) -> dict:
 @lru_cache(maxsize=None)
 def _device_module(real: str, horder: int, device: int, build: tuple = ()):
     import cupy as cp
+    from woof.certify.kernel_manifest import record_module
     source = (KERNELS / "advect.cu").read_text(encoding="utf-8")
-    return cp.RawModule(code=source, options=(
-        "--fmad=false", f"-DWRFPLUS_REAL={real}", f"-DADV_H={horder}") + build)
+    options = ("--fmad=false", f"-DWRFPLUS_REAL={real}", f"-DADV_H={horder}") + build
+    module = cp.RawModule(code=source, options=options)
+    record_module("woof.grad.wrfplus.advect", source=source, options=options,
+                  module=module)
+    return module
 
 
 def _kernel(name: str, dtype, horder: int):

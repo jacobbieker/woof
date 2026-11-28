@@ -2,8 +2,9 @@
 
 Direct-NVRTC requests contain the assembled engine headers and no CuPy include
 root. The image therefore binds its actual source, options and compiler without
-traversing unrelated toolkit headers such as nvToolsExt.h. Both aerosol tiers
-and both arithmetic modes use exactly the runtime recipe.
+traversing unrelated toolkit headers such as nvToolsExt.h. Both aerosol tiers,
+each with and without the FQ11 rain floor, and both arithmetic modes use
+exactly the runtime recipe.
 """
 from __future__ import annotations
 
@@ -23,7 +24,11 @@ def catalog(output):
     from woof.kernel_aot import compiler_identity, effective_options, DIRECT_ROUTE
     from woof.kernel_pack import write
     rows = []
-    for defines in ((), (("GPUWM_MSKF_NO_AEROSOL", 1),)):
+    # The aerosol tiers, each also with RunConfig.kf_capped_downdraft_rain_floor
+    # (FQ11, on in correct mode), in woof.core.mskf.launch_mskf's order.
+    from woof.core.kf import CAPPED_DOWNDRAFT_RAIN_FLOOR_DEFINES as floor
+    aerosol = ((), (("GPUWM_MSKF_NO_AEROSOL", 1),))
+    for defines in aerosol + tuple(tier + floor for tier in aerosol):
         source, options = module_recipe_no_ftz("mskf", defines)
         rows.append(dict(route=DIRECT_ROUTE, source=source,
                          options=list(effective_options(options)), filename="mskf.cu"))

@@ -372,6 +372,28 @@ def production_units(root) -> list[Unit]:
     assert booked.source == K.module_source_int_defines(
         "gf", (("GF_KMAX", 40), ("GF_DEEP_EVAP_BOOKING", 1)), kernel_dir=kdir)
     units.append(booked)
+    # The opt-in MYNN surface-layer 2 m / 10 m profile from zt/L
+    # (woof.core.mynn_sfclay.mynn_surface_defines).
+    zolzt = _segmented("kernels:mynn_surface[MYNN_SL_PSIH_ZOLZT=1]",
+                       pre + headers("mynn_surface")
+                       + [("<MYNN_SL_PSIH_ZOLZT>", "#define MYNN_SL_PSIH_ZOLZT 1\n"),
+                          kfile("mynn_surface.cu")], K.module_options("mynn_surface"))
+    assert zolzt.source == K.module_source_int_defines(
+        "mynn_surface", (("MYNN_SL_PSIH_ZOLZT", 1),), kernel_dir=kdir)
+    units.append(zolzt)
+    # The MYNN surface-layer Q2 land cap (FQ10), alone and with the zt/L
+    # profile: the two units a correct-mode run launches.
+    for defs in ((("MYNN_SL_Q2_LAND_CAP", 1),),
+                 (("MYNN_SL_PSIH_ZOLZT", 1), ("MYNN_SL_Q2_LAND_CAP", 1))):
+        label = ",".join(f"{k}={v}" for k, v in defs)
+        capped = _segmented(f"kernels:mynn_surface[{label}]",
+                            pre + headers("mynn_surface")
+                            + [("<" + ",".join(k for k, _ in defs) + ">",
+                                "".join(f"#define {k} {v}\n" for k, v in defs)),
+                               kfile("mynn_surface.cu")], K.module_options("mynn_surface"))
+        assert capped.source == K.module_source_int_defines(
+            "mynn_surface", defs, kernel_dir=kdir)
+        units.append(capped)
     from woof.core.spp_kernel_sources import specialized_source
     for name, capacity in (("gf", 40), ("gf", 60), ("mynn_pbl", 40), ("mynn_surface", 40)):
         units.append(Unit(f"spp:{name}[capacity={capacity}]",
@@ -381,6 +403,65 @@ def production_units(root) -> list[Unit]:
                       specialized_source("gf", capacity=40, kernel_dir=kdir,
                                          defines=(("GF_DEEP_EVAP_BOOKING", 1),)),
                       ("-std=c++17",), []))
+    units.append(Unit("spp:mynn_surface[capacity=40,MYNN_SL_PSIH_ZOLZT=1]",
+                      specialized_source("mynn_surface", capacity=40, kernel_dir=kdir,
+                                         defines=(("MYNN_SL_PSIH_ZOLZT", 1),)),
+                      ("-std=c++17",), []))
+    for defs in ((("MYNN_SL_Q2_LAND_CAP", 1),),
+                 (("MYNN_SL_PSIH_ZOLZT", 1), ("MYNN_SL_Q2_LAND_CAP", 1))):
+        label = ",".join(f"{k}={v}" for k, v in defs)
+        units.append(Unit(f"spp:mynn_surface[capacity=40,{label}]",
+                          specialized_source("mynn_surface", capacity=40, kernel_dir=kdir,
+                                             defines=defs),
+                          ("-std=c++17",), []))
+    # The opt-in Noah soil-moisture floor booking (woof.core.noah.launch_noah):
+    # the plain unit's integer tier, and the UA units with the define first.
+    from woof.core.noah import NOAH_SMC_FLOOR_BOOKING_DEFINES, SMC_FLOOR_BOOKING_PREFIX
+    units.append(Unit("kernels:noah[NOAH_SMC_FLOOR_BOOKING=1]",
+                      K.module_source_int_defines("noah", NOAH_SMC_FLOOR_BOOKING_DEFINES, kernel_dir=kdir),
+                      K.module_options("noah"), []))
+    for name in ("noah_ua", "noah_mosaic_ua"):
+        units.append(Unit(f"kernels:{name}[NOAH_SMC_FLOOR_BOOKING=1]",
+                          SMC_FLOOR_BOOKING_PREFIX + K.module_source(name, kernel_dir=kdir),
+                          K.module_options(name), []))
+    # Noah's land-ice rain runoff (FQ8, noah_land_ice_rain_runoff) beside the
+    # booking: each tier launch_noah compiles besides FQ4's own, the integer
+    # tier of the plain unit and the UA units with the defines first.
+    from woof.core.noah import noah_define_prefix, noah_define_tier
+    for floor in (False, True):
+        tier = noah_define_tier(floor, True)
+        label = ",".join(f"{key}={value}" for key, value in tier)
+        units.append(Unit(f"kernels:noah[{label}]",
+                          K.module_source_int_defines("noah", tier, kernel_dir=kdir),
+                          K.module_options("noah"), []))
+        for name in ("noah_ua", "noah_mosaic_ua"):
+            units.append(Unit(f"kernels:{name}[{label}]",
+                              noah_define_prefix(floor, True) + K.module_source(name, kernel_dir=kdir),
+                              K.module_options(name), []))
+    # Noah's snow series conductivity (FQ9, noah_snow_series_conductivity):
+    # alone and in the full correct-mode tier (all three Noah corrections).
+    for floor_rain in (False, True):
+        tier = noah_define_tier(floor_rain, floor_rain, True)
+        label = ",".join(f"{key}={value}" for key, value in tier)
+        units.append(Unit(f"kernels:noah[{label}]",
+                          K.module_source_int_defines("noah", tier, kernel_dir=kdir),
+                          K.module_options("noah"), []))
+        for name in ("noah_ua", "noah_mosaic_ua"):
+            units.append(Unit(f"kernels:{name}[{label}]",
+                              noah_define_prefix(floor_rain, floor_rain, True)
+                              + K.module_source(name, kernel_dir=kdir),
+                              K.module_options(name), []))
+    # Correct-mode ML1 (RunConfig.pbl_boulac_down_sign and
+    # mynn_boulac_down_sign, both on by default): the BouLac downward length
+    # sign define on the shipped tier (woof.core.boulac, keps, mynn_pbl_gpu).
+    from woof.core.boulac import BOULAC_DOWN_SIGN_DEFINE
+    from woof.core.mynn_pbl_gpu import MYNN_BOULAC_DOWN_SIGN_DEFINE
+    for name, defines in (("boulac", BOULAC_DOWN_SIGN_DEFINE), ("keps", BOULAC_DOWN_SIGN_DEFINE),
+                          ("mynn_pbl", MYNN_BOULAC_DOWN_SIGN_DEFINE)):
+        label = ",".join(f"{key}={value}" for key, value in defines)
+        units.append(Unit(f"kernels:{name}[{label}]",
+                          K.module_source_int_defines(name, defines, kernel_dir=kdir),
+                          K.module_options(name), []))
     for name, parts in N.NOAHMP_TRANSLATION_UNITS.items():
         ru = N.runtime_unit(name, kernel_dir=kdir)
         pieces = ([] if ru.preamble_sha256 != N._sha(K._preamble(kdir))

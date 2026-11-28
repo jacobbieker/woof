@@ -7,7 +7,7 @@ Runge-Kutta outer integration wrapping split-explicit acoustic steps
 (forward-backward horizontal, implicit vertical, recoupled to the large step), on a
 hybrid terrain-following dry-mass vertical coordinate, FP32 on CUDA
 [docs/gpuwm-project-history.md:65; README.md, current release scope]. The RK stage table is a
-config-visible knob (`rk_ord`, default 3) [docs/public/CONFIGURATION.md:1178].
+config-visible knob (`rk_ord`, default 3) [docs/public/CONFIGURATION.md:1380].
 
 Advection is WRF's stencils: horizontal momentum and scalars are the WRF flux5
 (5th-order) stencil, and the vertical faces take WRF's `vert_order` ladder,
@@ -17,9 +17,9 @@ selected by `v_sca_adv_order` for scalars, theta, TKE and w and by
 operational HRRR runs 5). Transported-scalar horizontal stencils are fixed at
 5th order, so the importer accepts only the Registry default
 `h_sca_adv_order = 5`; the configurable `h_sca_adv_order` (legacy default 2) feeds
-the geopotential equation only [docs/public/CONFIGURATION.md:702]. Moist transport
+the geopotential equation only [docs/public/CONFIGURATION.md:883]. Moist transport
 runs WRF option 1 (positive-definite limiter) with `scalar_adv_opt` required to
-match [docs/public/CONFIGURATION.md:706, 1183]. At vertical order 5 its
+match [docs/public/CONFIGURATION.md:887, 1385]. At vertical order 5 its
 low-order eta flux takes the operational fork's semi-Lagrangian sum of the
 upstream cells above face Courant 1 (`woof/core/kernels/pd_vertical_sl.cu`)
 and the upwind flux elsewhere, so the limiter stays positive definite.
@@ -31,7 +31,7 @@ the upwind low-order flux at every face.
 
 Lateral boundaries use specified/relaxation zones with Davies-style weighting;
 `spec_bdy_width` defaults to 5 and must be at least `spec_zone + relax_zone`
-[docs/public/CONFIGURATION.md:146, 709]. The damping stack is described in section 1.2.
+[docs/public/CONFIGURATION.md:146, 764]. The damping stack is described in section 1.2.
 
 No symbolic statement of the governing equation set exists in the documentation
 tree; the prose description above and the WRF-ARW technical-note lineage are the
@@ -146,7 +146,7 @@ ratios 3 and 4 [PROVENANCE.md:576; tests/test_nest_interp.py].
 
 ### 2.5.1 The mechanism
 
-A moving nest in WOOF is a sequence of static nests joined by a re-grid at cycle
+A moving nest in WOOF-ArWen is a sequence of static nests joined by a re-grid at cycle
 boundaries. WRF's continuous per-step motion is not adopted and its namelist keys
 stay refused [docs/nest-relocation-identity-decision.md:29-31]. The design is exact
 rather than approximate: a placement is a whole number of parent cells, so a move of
@@ -287,7 +287,7 @@ and nested domains, not radiative open ones, and is WRF-only (refused on MPAS).
 
 `km_opt=2` additionally requires `bl_pbl_physics=0`: WRF will evolve TKE with the
 PBL on, but that combination has no vertical TKE mixing (WRF's
-`vertical_diffusion_2` is PBL-off-gated), so WOOF refuses it rather than run a
+`vertical_diffusion_2` is PBL-off-gated), so WOOF-ArWen refuses it rather than run a
 half-wired scheme [docs/public/LES.md:24-32].
 
 The property most often misread: with the PBL off, `km_opt` 2 or 3 give vertical
@@ -330,18 +330,18 @@ one line naming the ratio and the limit, and reported by the preflight checker
 `woof check` (section 8.5) as what the run will do. A config that writes
 `mix_isotropic = 0` keeps it, in the danger zone
 too, and gets the advisory carrying the override state
-[docs/public/LES.md:430-442; docs/public/CONFIGURATION.md:683]. Because
+[docs/public/LES.md:430-442; docs/public/CONFIGURATION.md:738]. Because
 `mix_isotropic` is inside the restart fingerprint, a checkpoint written under the
 old anisotropic default does not bit-continue under the auto-selected isotropic
 form. A guard test fails if any shipped config arrives on the exposed path, and the
 check resolves the level ladder from `nz`/`ztop` when a config leaves interfaces
 implicit [tests/test_shipped_configs_mixing_stability.py; docs/public/LES.md:421-428].
 
-Related divergence D8, which is a different operator from the one above: WOOF
+Related divergence D8, which is a different operator from the one above: WOOF-ArWen
 hands the *vertical* diffusion of vertical velocity (`vertical_diffusion_w_2`)
 `xkmv` where WRF hands it `xkmh`. WRF's horizontal `w` operator
 (`horizontal_diffusion_w_2`), the one the criterion above is about, takes `xkmv` in
-WRF and WOOF follows it unchanged. It can only matter where the two
+WRF and WOOF-ArWen follows it unchanged. It can only matter where the two
 coefficients differ (`km_opt` 2 or 3 with `mix_isotropic = 0`); taking WRF's choice
 is unstable at dx 250 m against dz 17 m, and on the idealized convective
 boundary-layer case the WRF oracle lane measured `XKMH == XKMV` at all 589,824
@@ -374,7 +374,7 @@ surface heat flux 0.24 K m/s [docs/public/LES.md:59-204]:
   fraction, 0.27% on prognostic subgrid TKE. No pass band is cut; differences are
   reported, not judged.
 - Realisation spread measured, not assumed (n=18 at 100 m, n=9 at 50 m): on the
-  flux-fraction arm WOOF's spread is 8.7x WRF's (0.01414 vs 0.00163 stdev at
+  flux-fraction arm WOOF-ArWen's spread is 8.7x WRF's (0.01414 vs 0.00163 stdev at
   100 m), an open question recorded rather than diagnosed; on the TKE-based
   resolved fraction the two are at parity (0.00231 vs 0.00247).
 - TKE budget closure over a 120-step window: relative residual 2.49e-9.

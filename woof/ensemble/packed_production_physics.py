@@ -19,17 +19,34 @@ from woof.ensemble.batch_rrtmgp import _config_identity, _scalar
 
 
 _MYNN_SELECTOR_DEFAULTS = {"bl_mynn_version": "wrf_461",
-    "bl_mynn_gsd41_unsquared_qtke": False, "bl_mynn_cloud_tendency_form": "wrf_461"}
+    "bl_mynn_gsd41_unsquared_qtke": False, "bl_mynn_cloud_tendency_form": "wrf_461",
+    "mynn_fixes_v61": False, "mynn_boulac_down_sign": False}
 
 
 def _mynn_pbl_selectors(cfg):
     """Validate actual generation metadata before any packed member write."""
     from woof.ensemble.batch_mynn import _pbl_options
-    values = {name: getattr(cfg, name) for name in _MYNN_SELECTOR_DEFAULTS}
+    from woof.core.mynn_pbl_v61 import pbl_fixes_active
+    values = {name: getattr(cfg, name) for name in _MYNN_SELECTOR_DEFAULTS
+              if name not in ("mynn_fixes_v61", "mynn_boulac_down_sign")}
+    # The ordinary wrapper passes the v6.1 fixes only where they run
+    # (a configuration without the key ran without them).
+    values["mynn_fixes_v61"] = pbl_fixes_active(cfg)
+    # A RunConfig always carries the key; a configuration view made before it
+    # existed reads as off (the arithmetic it was made with).
+    # Correct-mode ML1 is handed to the wrapper only on the generations whose
+    # length kernels read it (woof/core/physics.py), so it is a selector of
+    # those forms only.
+    values["mynn_boulac_down_sign"] = bool(
+        getattr(cfg, "mynn_boulac_down_sign", False)
+        and values["bl_mynn_version"] in ("wrf_461", "gsd_41"))
     _pbl_options(values)
     if values["bl_mynn_version"] == "wrf_461":
-        # The ordinary wrapper omits all generation kwargs in this form.
-        values = dict(_MYNN_SELECTOR_DEFAULTS)
+        # The ordinary wrapper omits all generation kwargs in this form;
+        # MY1 and ML1 are passed when on.
+        values = {**_MYNN_SELECTOR_DEFAULTS,
+                  "mynn_fixes_v61": values["mynn_fixes_v61"],
+                  "mynn_boulac_down_sign": values["mynn_boulac_down_sign"]}
     return values
 
 
@@ -445,13 +462,15 @@ class PackedProductionPhysics:
         outputs = self._gather_maps(namespace + ":outputs", [vars(args[3]) for args, _, _ in requests], names=MYNN_SURFACE_OUTPUTS)
         mol = self._gather(namespace, "mol", [args[1] for args, _, _ in requests])
         ustm = self._gather(namespace, "ustm", [args[2] for args, _, _ in requests])
-        knobs = self._common_kwargs(requests, ("dx", "itimestep", "isfflx", "variant"))
+        knobs = self._common_kwargs(requests, ("dx", "itimestep", "isfflx", "variant", "psih_zolzt", "q2_land_cap"))
         if ordinal not in self._components:
             cfg = self.configs[0]
             self._components[ordinal] = prepare_mynn_surface_column_batch(inputs, mol=mol, ustm=ustm,
                 outputs=outputs, members=self.members, ny=cfg.ny, nx=cfg.nx,
                 available_bytes=self.available_bytes - self._priced, dx=knobs["dx"],
-                isfflx=knobs["isfflx"], variant=knobs["variant"], array_module=self.xp)
+                isfflx=knobs["isfflx"], variant=knobs["variant"],
+                psih_zolzt=bool(knobs["psih_zolzt"]),
+                q2_land_cap=bool(knobs["q2_land_cap"]), array_module=self.xp)
         self._components[ordinal](itimestep=knobs["itimestep"])
         self._scatter(outputs, [vars(args[3]) for args, _, _ in requests])
         return (None,) * self.members

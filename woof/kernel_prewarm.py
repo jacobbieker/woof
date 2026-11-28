@@ -221,6 +221,8 @@ def static_modules(experiment) -> tuple[str, ...]:
             modules.update({"noah_fractional", "noah_seaice_options"})
             if getattr(run, "sf_sfclay_physics", 0) == 1:
                 modules.add("sfclay_dx2d")
+        if getattr(run, "kim_tofd", False) and getattr(run, "sf_sfclay_physics", 0) == 1:
+            modules.add("sfclay_tofd")
     return tuple(sorted(modules))
 
 
@@ -264,28 +266,67 @@ def static_jobs(experiment, *, columns: bool = False, hydro: bool = False) -> li
             from woof.physics_compat import radiation_scheme_ids
             for nv1 in sorted({int(dc.run.nz)+1 for dc in experiment.domains
                                if radiation_scheme_ids(dc.run)[0] == 7}):
-                defines = (("FLG_NV1", nv1),)
+                # FLGColumn adds the FLG_NVX tier define past 100 layers;
+                # warm the same module key it loads.
+                from woof.core.flg_levels import nvx_defines
+                defines = (("FLG_NV1", nv1),) + nvx_defines(nv1 - 1)
                 jobs.append((f"flg_column[FLG_NV1={nv1}]",
                              kernels.load_module_unflushed.__wrapped__, (name, defines)))
             continue
         if name in _COMPOSED_LOADERS:
             jobs.append((name, _warm_composed, (name,)))
         elif name in _DEVICE_LOADERS:
-            jobs.append((name, _warm_device_loader, (name,)))
+            if name == "thompson_fork_unit":
+                # FQ5 / FQ7: the fork column's (closure, lamc) variants the
+                # runs launch (thompson_fork._module(device, closure, lamc));
+                # the stock one (both off) is always warmed.
+                variants = {(False, False)} | {
+                    (bool(_reads(dc.run, "thompson_rain_snow_closure")),
+                     bool(_reads(dc.run, "thompson_lamc_updated_rc")))
+                    for dc in getattr(experiment, "domains", ())
+                    if hasattr(dc, "run")
+                    and int(getattr(dc.run, "mp_physics", 0) or 0) == 28
+                    and getattr(dc.run, "thompson_version", "") == "wrf_39_noaa"}
+                for flags in sorted(variants):
+                    jobs.append((name if flags == (False, False) else
+                                 f"{name}[closure={int(flags[0])},lamc={int(flags[1])}]",
+                                 _warm_device_loader, (name,) + flags))
+            else:
+                jobs.append((name, _warm_device_loader, (name,)))
         elif name in _KF_TRIGGERS:
-            jobs.append((name, _warm_kf, (_KF_TRIGGERS[name],)))
+            # FQ11 (on in correct mode): the unit with the capped-downdraft
+            # rain floor define where a KF-eta domain reads it
+            # (woof.core.kf._kf_module).  Every KF-eta domain advances W0AVG
+            # in the trigger-1 unit; a trigger-2/3 unit only where a domain
+            # selects that trigger.
+            trigger = _KF_TRIGGERS[name]
+            floors = {_reads(dc.run, _KF_RAIN_FLOOR_KEY)
+                      for dc in getattr(experiment, "domains", ())
+                      if int(getattr(dc.run, "cu_physics", 0)) == 1
+                      and (trigger == 1
+                           or int(getattr(dc.run, "kfeta_trigger", 1)) == trigger)} or {False}
+            for floor in sorted(floors):
+                jobs.append((name + (_KF_RAIN_FLOOR_LABEL if floor else ""),
+                             _warm_kf, (trigger, floor)))
         elif name == "mskf":
             from woof.core.kernels.no_ftz import load_module_no_ftz
 
             # The aerosol-off runtime uses its own source and arithmetic
             # options. Warming the unspecialized aerosol column compiles an
             # unused, much larger unit and leaves the real column cold.
-            tiers = {(("GPUWM_MSKF_NO_AEROSOL", 1),)
-                     if int(getattr(dc.run, "aercu_opt", 0)) == 0 else ()
+            # FQ11 (on in correct mode) adds the capped-downdraft rain floor
+            # define after the aerosol tier, as woof.core.mskf.launch_mskf
+            # orders them.
+            from woof.core.kf import CAPPED_DOWNDRAFT_RAIN_FLOOR_DEFINES
+            tiers = {((("GPUWM_MSKF_NO_AEROSOL", 1),)
+                      if int(getattr(dc.run, "aercu_opt", 0)) == 0 else ())
+                     + (CAPPED_DOWNDRAFT_RAIN_FLOOR_DEFINES
+                        if _reads(dc.run, _KF_RAIN_FLOOR_KEY) else ())
                      for dc in experiment.domains
                      if int(getattr(dc.run, "cu_physics", 0)) == 11}
             for defines in sorted(tiers):
-                label = name + ("[GPUWM_MSKF_NO_AEROSOL=1]" if defines else "")
+                label = (name + "[" + ",".join(f"{key}={value}" for key, value in defines) + "]"
+                         if defines else name)
                 jobs.append((label, load_module_no_ftz.__wrapped__, (name, defines)))
         elif name in kernels._DIFFUSION_MODULES:
             jobs.append((name, kernels._load_diffusion_module.__wrapped__, (name,)))
@@ -326,6 +367,45 @@ def static_jobs(experiment, *, columns: bool = False, hydro: bool = False) -> li
         job[0].split("[")[0] != "sfclay", -_source_bytes(job[0].split("[")[0]), job[0]))
 
 
+def _reads(run, key: str) -> bool:
+    """RunConfig correction ``key`` where it is read (woof.quirk_corrections.run_reads)."""
+    from woof.quirk_corrections import run_reads
+    return run_reads(run, key)
+
+
+def _psih_zolzt(run) -> bool:
+    """RunConfig.mynn_sfclay_psih_zolzt where it is read."""
+    return _reads(run, "mynn_sfclay_psih_zolzt")
+
+
+def _q2_land_cap(run) -> bool:
+    """RunConfig.mynn_sfclay_q2_land_cap where it is read."""
+    return _reads(run, "mynn_sfclay_q2_land_cap")
+
+
+#: RunConfig.kf_capped_downdraft_rain_floor (FQ11): kf.cu, kfcup.cu and
+#: mskf.cu compile its define where the key reaches the domain.
+_KF_RAIN_FLOOR_KEY = "kf_capped_downdraft_rain_floor"
+_KF_RAIN_FLOOR_LABEL = "[KF_CAPPED_DOWNDRAFT_RAIN_FLOOR=1]"
+
+
+#: Units launched with RunConfig.thompson_rain_snow_closure's define through
+#: load_module_int_defines (woof.core.thompson._closure_kernel,
+#: thompson_classic, thompson_aerosol_launch.CLOSURE_MODULES).
+_THOMPSON_CLOSURE_UNITS = ("thompson", "thompson_classic",
+                           "thompson_aerosol_cold", "thompson_aerosol_warm")
+
+
+def _hail_aware(run) -> bool:
+    """Whether ``run``'s mp_physics is the hail-aware Thompson (mp = 38)."""
+    from woof.config import THOMPSON_AEROSOL_FAMILY
+    try:
+        member = THOMPSON_AEROSOL_FAMILY.get(int(getattr(run, "mp_physics", 0) or 0))
+    except (TypeError, ValueError):
+        return False
+    return bool(member is not None and member.hail_aware)
+
+
 def _variant_jobs(experiment, modules):
     """Compile selector and dimension variants before their first launch.
 
@@ -335,9 +415,10 @@ def _variant_jobs(experiment, modules):
     """
     from woof.core import kernels
     from woof.core.kernel_shape import FUNCTIONS, shape_defines
-    from woof.core.thompson_aerosol_launch import AEROSOL_KERNEL_MODULES, WRF39_DEFINES
+    from woof.core.thompson_aerosol_launch import (
+        AEROSOL_KERNEL_MODULES, LAMC_MODULES, WRF39_DEFINES)
     from woof.ingest.lateral_bc import relaxation_shapes
-    from woof.core.mynn_sfclay import MYNN_SFCLAY_DEFINES
+    from woof.core.mynn_sfclay import MYNN_SFCLAY_DEFINES, mynn_surface_defines
 
     jobs, seen = [], set()
     runs = [dc.run for dc in getattr(experiment, "domains", ()) if hasattr(dc, "run")]
@@ -352,7 +433,13 @@ def _variant_jobs(experiment, modules):
             elif name == "mynn_pbl" and getattr(run, "bl_mynn_version", "") == "gsd_41":
                 defines = (("MYNN_GSD41", 1),)
             elif name == "mynn_surface":
-                defines = MYNN_SFCLAY_DEFINES[getattr(run, "mynn_sfclay_variant", "wrf_461")]
+                # mynnsfc_b66187f (WRF v4.8.0 MYNN-SFC) is its own unit,
+                # compiled at its first call; mynn_surface keeps its default.
+                variant = getattr(run, "mynn_sfclay_variant", "wrf_461")
+                defines = (mynn_surface_defines(variant,
+                                                _psih_zolzt(run),
+                                                _q2_land_cap(run))
+                           if variant in MYNN_SFCLAY_DEFINES else ())
             tiers = [defines] if defines else []
             if name == "advection":
                 if getattr(run, "momentum_adv_opt", 1) == 3:
@@ -381,6 +468,76 @@ def _variant_jobs(experiment, modules):
                           [(nz, ny, nx)])
                 tiers.extend(defines + shape_defines(name, FUNCTIONS[name][0], shape)
                              for shape in shapes)
+                if (name == "mynn_pbl"
+                        and int(getattr(run, "bl_pbl_physics", 0) or 0) == 5
+                        and getattr(run, "mynn_boulac_down_sign", False) is True
+                        and getattr(run, "bl_mynn_version", "wrf_461") in ("wrf_461", "gsd_41")):
+                    # Correct-mode ML1 compiles the two mixing-length kernels
+                    # with its define (woof/core/mynn_pbl_gpu.py); the other
+                    # MYNN kernels keep the tiers above.
+                    # Neither of them is a shaped function (kernel_shape.FUNCTIONS).
+                    from woof.core.mynn_pbl_gpu import MYNN_BOULAC_DOWN_SIGN_DEFINE
+                    tiers.append(defines + MYNN_BOULAC_DOWN_SIGN_DEFINE)
+            if (name == "gf" and hasattr(run, "nz") and not getattr(run, "spp_conv", 0)
+                    and _reads(run, "gf_deep_rain_evaporation_booking")):
+                # FQ1 (on in correct mode) compiles gf.cu's booking tier
+                # (woof.core.gf._gf_module), the module the run launches.
+                from woof.core.gf import gf_kernel_capacity
+                tiers.append((("GF_KMAX", gf_kernel_capacity(int(run.nz))), ("GF_DEEP_EVAP_BOOKING", 1)))
+            closure = _reads(run, "thompson_rain_snow_closure")
+            lamc = _reads(run, "thompson_lamc_updated_rc")
+            if name in AEROSOL_KERNEL_MODULES and _hail_aware(run):
+                # mp = 38 launches the hail image (thompson_aerosol_launch.
+                # _hail_module), never the plain unit: warm that one, with the
+                # FQ5 / FQ7 defines the run's launch composes on its units.
+                from woof.core.thompson_aerosol_launch import (
+                    CLOSURE_MODULES, _hail_module, hail_variant_tag)
+                flags = (bool(closure and name in CLOSURE_MODULES),
+                         bool(lamc and name in LAMC_MODULES))
+                if (name, "hail", flags) not in seen:
+                    seen.add((name, "hail", flags))
+                    jobs.append((name + hail_variant_tag(*flags),
+                                 _hail_module.__wrapped__, (name,) + flags))
+            elif name in _THOMPSON_CLOSURE_UNITS and (closure or lamc):
+                # FQ5 (on in correct mode): the unit with the rain-snow
+                # closure define, after the generation defines as
+                # thompson_aerosol_launch.aerosol_kernel orders them.  FQ7: the
+                # warm unit composes the lamc define after it, and a run that
+                # reads both launches only that composed unit.
+                from woof.core.thompson import (
+                    LAMC_UPDATED_RC_DEFINES, RAIN_SNOW_CLOSURE_DEFINES)
+                tier = ((defines if name in AEROSOL_KERNEL_MODULES else ())
+                        + (RAIN_SNOW_CLOSURE_DEFINES if closure else ())
+                        + (LAMC_UPDATED_RC_DEFINES
+                           if lamc and name in LAMC_MODULES else ()))
+                if tier != defines:
+                    tiers.append(tier)
+            if name == "kfcup" and _reads(run, _KF_RAIN_FLOOR_KEY):
+                # FQ11 (on in correct mode): KF-CuP's column with the
+                # capped-downdraft rain floor define
+                # (woof.core.kf.launch_kfcup_columns).
+                from woof.core.kf import CAPPED_DOWNDRAFT_RAIN_FLOOR_DEFINES
+                tiers.append(CAPPED_DOWNDRAFT_RAIN_FLOOR_DEFINES)
+            if name == "noah":
+                # FQ4, FQ8 and FQ9: the integer-define tier launch_noah compiles.
+                from woof.core.noah import noah_define_tier
+                tier = noah_define_tier(_reads(run, "noah_smc_floor_booking"),
+                                        _reads(run, "noah_land_ice_rain_runoff"),
+                                        _reads(run, "noah_snow_series_conductivity"))
+                if tier:
+                    tiers.append(tier)
+            if name in ("noah_ua", "noah_mosaic_ua"):
+                # FQ4, FQ8 and FQ9 (on in correct mode): the unit with the Noah
+                # correction defines first, composed as the run launches it
+                # (woof.core.noah.noah_define_module).
+                from woof.core.noah import noah_define_module, noah_define_tier
+                booked = noah_define_tier(_reads(run, "noah_smc_floor_booking"),
+                                          _reads(run, "noah_land_ice_rain_runoff"),
+                                          _reads(run, "noah_snow_series_conductivity"))
+                if booked and (name, "booking", booked) not in seen:
+                    seen.add((name, "booking", booked))
+                    jobs.append((name + "[" + ",".join(f"{k}={v}" for k, v in booked) + "]",
+                                 noah_define_module.__wrapped__, (name, booked)))
             for tier in tiers:
                 if (name, tier) in seen:
                     continue
@@ -441,6 +598,7 @@ _DEVICE_LOADERS = {
     "acm2pbl_composed": ("acm2pbl", "_module"),
     "gbmpbl_composed": ("gbmpbl", "_module"),
     "terrain_drag_composed": ("terrain_drag", "_module"),
+    "terrain_drag_gwdo480_composed": ("terrain_drag", "_gwdo480_module"),
     "fogdes_composed": ("fog_settling", "_module"),
     "thompson_fork_unit": ("thompson_fork", "_module"),
     # wind_farm_scheme = "fitch_wrf" (WRF's windfarm_opt = 1): its own direct
@@ -473,15 +631,16 @@ def _warm_composed(name):
     return factory()
 
 
-def _warm_device_loader(name):
-    """A chained unit whose loader is keyed by device, on the current one."""
+def _warm_device_loader(name, *flags):
+    """A chained unit whose loader is keyed by device, on the current one;
+    ``flags`` are the loader's variant booleans after the device."""
     import importlib
 
     import cupy as cp
 
     module_name, factory_name = _DEVICE_LOADERS[name]
     module = importlib.import_module("woof.core." + module_name)
-    return getattr(module, factory_name)(cp.cuda.runtime.getDevice())
+    return getattr(module, factory_name)(cp.cuda.runtime.getDevice(), *flags)
 
 
 # These chained units share a production factory, with a selector argument.
@@ -490,12 +649,12 @@ def _warm_device_loader(name):
 _KF_TRIGGERS = {"kf": 1, "kf_trigger2": 2, "kf_trigger3": 3}
 
 
-def _warm_kf(trigger=1):
+def _warm_kf(trigger=1, rain_floor=False):
     """KF runs on its own unflushed direct-NVRTC route, not load_module."""
     import cupy as cp
     from woof.core.kf import _kf_module
 
-    return _kf_module(cp.cuda.runtime.getDevice(), trigger)
+    return _kf_module(cp.cuda.runtime.getDevice(), trigger, bool(rain_floor))
 
 
 def _inline_jobs(modules):

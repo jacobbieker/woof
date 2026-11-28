@@ -61,10 +61,12 @@ STRICT = dict(GPUWM_WRF_EXACT="1", WOOF_WRF_EXACT_DIAGNOSTICS="1",
 # ring, a cold chain whose last step ends on its (last) interval's end,
 # which the primal serves from that interval, and moist states (qv, qc and
 # qr with qv's tables: qv's held capture and spec_bdy_final, flow_dep_bdy
-# for qc and qr), warm and as a cold mapped chain.
+# for qc and qr), warm and as a cold mapped chain; moist 2 is the same
+# with moist_adv_opt 1 (the positive-definite final stage).
 HOUR = (0.0, 3600.0)
 CASES = [(2, 1, 0, 0.0, HOUR, 0), (0, 3, 0, 0.0, HOUR, 0), (2, 2, 1, 3.0, HOUR, 0),
-         (0, 2, 0, 0.0, (0.0, 6.0), 0), (2, 1, 0, 0.0, HOUR, 1), (0, 2, 1, 3.0, HOUR, 1)]
+         (0, 2, 0, 0.0, (0.0, 6.0), 0), (2, 1, 0, 0.0, HOUR, 1), (0, 2, 1, 3.0, HOUR, 1),
+         (2, 1, 0, 0.0, HOUR, 2), (0, 2, 1, 3.0, HOUR, 2)]
 
 
 def _run(backend, body, tmp_path):
@@ -81,9 +83,9 @@ def _run(backend, body, tmp_path):
         "import woof.ingest.lateral_bc as LBC\n"
         "out = {}\n"
         "def build(warm=2, msf=0, shift=0.0, nx=20, ny=18, nz=8, relax=4, hill=400.0,\n"
-        "          times=(0.0, 3600.0), attach=True, moist=0, **over):\n"
+        "          times=(0.0, 3600.0), attach=True, moist=0, drop=(), **over):\n"
         "    if moist:\n"
-        "        over.update(moist=True, moist_adv_opt=0)\n"
+        "        over.update(moist=True, moist_adv_opt=int(moist == 2))\n"
         "    cfg = H.make_config(nx, ny, nz, h_sca_adv_order=5, terrain_opt=1, specified=True,\n"
         "                        spec_zone=1, relax_zone=relax, spec_bdy_width=relax + 1, **over)\n"
         "    jj, ii = np.meshgrid(np.arange(ny), np.arange(nx), indexing='ij')\n"
@@ -130,7 +132,8 @@ def _run(backend, body, tmp_path):
         "            f.php += cp.float32(5.0 * a) * wave(f.php.shape, 3)\n"
         "            if moist:\n"
         "                f.qv *= cp.float32(1.0 + 0.05 * a) + cp.float32(0.02 * a) * wave(f.qv.shape, 2)\n"
-        "            snaps.append(dict(LBC.domain_boundary_snapshot(f)))\n"
+        "            snaps.append({k: a for k, a in LBC.domain_boundary_snapshot(f).items()\n"
+        "                          if k not in drop})  # drop: fields without a table\n"
         "        LBC.attach_lateral_boundaries(state, LBC.build_lateral_boundaries(\n"
         "            snaps, list(times), spec_bdy_width=cfg.spec_bdy_width,\n"
         "            spec_zone=cfg.spec_zone, relax_zone=cfg.relax_zone))\n"
@@ -236,7 +239,7 @@ for part in ("fold", "final", "sph", "rows", "halo", "qv_final", "qv_capture", "
     assert len(drops) == 8 and all(drops.values()), drops
     # the step inputs (the 11 periodic ones and the halo) and 4 scratch,
     # and on a moist state the species and two sumflux accumulators
-    assert len(out) == len(CASES) * (11 + 1 + 4) + sum(c[5] for c in CASES) * (3 + 2)
+    assert len(out) == len(CASES) * (11 + 1 + 4) + sum(bool(c[5]) for c in CASES) * (3 + 2)
     bad = {k: v for k, v in out.items() if v}
     assert not bad, bad
 
@@ -324,7 +327,12 @@ for dtn in {dtypes!r}:
 @pytest.mark.parametrize("backend", NO_MLX)
 def test_specified_step_tl_matches_finite_differences(backend, tmp_path):
     """||NL(x + a dx) - NL(x)|| / ||a TL dx|| -> 1 in binary64, dx over
-    the inputs and the boundary tables."""
+    the inputs and the boundary tables.  With moist_adv_opt 1 the species
+    are perturbed relative to themselves: the seeded qr is zero on about
+    half the cells, where the limiter's scale sits on max(0, ratio)'s
+    kink, and an absolute perturbation crosses it at every a (the TL
+    takes the base's branch, and qr's TL then misses its finite difference
+    by about 20% at every a)."""
     out = _run(backend, f'''
 for i, (warm, nstep, msf, shift, times, moist) in enumerate({CASES!r}):
     cfg, state = build(warm, msf, shift, times=times, moist=moist)
@@ -333,6 +341,10 @@ for i, (warm, nstep, msf, shift, times, moist) in enumerate({CASES!r}):
     ALL = IN + M.step_parameters(geoms[0])
     x0 = M.run_state(state, cfg, np.float64)
     p = pert(x0, ALL, 30 + i)
+    if moist == 2:
+        rng = np.random.default_rng(90 + i)
+        p = [1e-3 * x0[n] * cp.asarray(rng.standard_normal(x0[n].shape)) if n in M.SPECIES
+             else a for n, a in zip(ALL, p)]
     def model(xs):
         t = copy(x0)
         for n, a in zip(ALL, xs):

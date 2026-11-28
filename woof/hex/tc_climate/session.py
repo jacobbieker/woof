@@ -9,6 +9,30 @@ import time
 from . import DeviceTracker, Recipe, genesis_potential_index, qualify_tracks
 
 
+#: Sounding levels of the shipped PI build (the source's ``PI_MAX_LEV``
+#: default) and of the deep build.
+PI_SHIPPED_LEVELS = 128
+PI_DEEP_LEVELS = 256
+
+
+def pi_level_tier(nz):
+    """``PI_MAX_LEV`` an ``nz``-level atmosphere compiles the PI kernel at."""
+    nz = int(nz)
+    if nz <= PI_SHIPPED_LEVELS:
+        return PI_SHIPPED_LEVELS
+    if nz <= PI_DEEP_LEVELS:
+        return PI_DEEP_LEVELS
+    raise ValueError(f'PI local sounding workspace supports at most {PI_DEEP_LEVELS} levels')
+
+
+def pi_source(tier):
+    """The exact PI kernel source of a tier: unchanged text at the shipped tier."""
+    source = Path(__file__).with_name('potential_intensity.cu').read_text()
+    if tier == PI_SHIPPED_LEVELS:
+        return source
+    return f'#define PI_MAX_LEV {int(tier)}\n' + source
+
+
 def device_leaves(value):
     out = {}
     def visit(item):
@@ -50,13 +74,21 @@ class ForecastSession:
                                     cp.asarray(initial_surface['v10'], dtype=cp.float32))
         if self.ocean.shape != (self.tracker.n,):
             raise ValueError('ocean mask shape differs from the mesh')
-        self.pi_module = cp.RawModule(code=Path(__file__).with_name('potential_intensity.cu').read_text(),
-                                     options=('--std=c++17',))
+        self.pi_modules = {}
+        self.pi_module(PI_SHIPPED_LEVELS)
         self.frames = []
         self.max_frames = frame_count
         self.start_time = str(start_time)
         self.enqueue_seconds = 0.
         self.events = []
+
+    def pi_module(self, nz):
+        """The PI module for an ``nz``-level atmosphere: the unchanged source up to
+        128 levels, the same source with ``PI_MAX_LEV`` 256 above that."""
+        tier = pi_level_tier(nz)
+        if tier not in self.pi_modules:
+            self.pi_modules[tier] = self.cp.RawModule(code=pi_source(tier), options=('--std=c++17',))
+        return self.pi_modules[tier]
 
     def sample(self, prepared, diagnostic, atmosphere, time_hours):
         cp, r, tracker = self.cp, self.recipe, self.tracker
@@ -75,8 +107,7 @@ class ForecastSession:
         if prepared.pres_p.shape[1] != n:
             raise ValueError('TC sampler needs an unpadded global atmosphere')
         nz = prepared.pres_p.shape[0]
-        if nz > 128:
-            raise ValueError('PI local sounding workspace supports at most 128 levels')
+        pi_module = self.pi_module(nz)
         p = cp.ascontiguousarray(prepared.pres_p.T)
         temperature = cp.ascontiguousarray(prepared.t_p.T)
         vapor = cp.ascontiguousarray(prepared.species_p['qv'].T)
@@ -107,13 +138,13 @@ class ForecastSession:
             # preserved. The standalone GPI API instead rejects invalid RH.
             rh = cp.clip(rh,0,100)
             pi, status = cp.empty(n,cp.float32),cp.empty(n,cp.int32)
-            self.pi_module.get_function('potential_intensity')(((n+127)//128,), (128,),
+            pi_module.get_function('potential_intensity')(((n+127)//128,), (128,),
                 (n,nz,prepared.pres_p,prepared.t_p,prepared.species_p['qv'],
                  cp.ascontiguousarray(sst.reshape(n), cp.float32),slp,self.ocean,
                  cp.float32(r.pi_ckcd),cp.float32(r.pi_wind_reduction),
                  cp.float32(r.pi_top_hpa),pi,status))
             eta = cp.empty(n,cp.float32)
-            self.pi_module.get_function('vorticity850')(((n+127)//128,), (128,),
+            pi_module.get_function('vorticity850')(((n+127)//128,), (128,),
                 (n,tracker.graph.shape[1],tracker.graph,tracker.counts,tracker.lat,tracker.lon,
                  cp.ascontiguousarray(u850),cp.ascontiguousarray(v850),eta))
             gpi = genesis_potential_index(cp,eta,rh,pi,shear)

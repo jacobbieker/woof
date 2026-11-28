@@ -276,7 +276,7 @@ still measures that native routine, and the receipt retains the difference.
 
 Monotonic transport is a distinct native routine. The production engine
 documents options 0 and 1, and its namelist importer accepts option 1 only
-(`docs/public/CONFIGURATION.md:429`, `woof/namelist_import.py:4235-4242`).
+(`docs/public/CONFIGURATION.md:432`, `woof/namelist_import.py:4235-4242`).
 The fixture calls native `advect_scalar_mono`; its comparison to the actual
 positive-definite result demonstrates that these choices cannot be aliased.
 There is no CUDA monotonic parity claim.

@@ -2799,9 +2799,12 @@ def prepare_gfs_wrf(
         # frozen lake started as open water far below freezing.  The daily
         # observed analysis freezes the lake cells it sees frozen; the
         # provider rides the child catalog so every nest is frozen from the
-        # same analysis.  gfs_lake_ice = "wps" keeps the forcing's ice (the
-        # WPS / real.exe identity arm); an unreadable analysis falls back to
-        # it loudly, for this run only.
+        # same analysis.  It is acquired by the first domain with lake cells
+        # (LakeIceProvider.freeze), so a lake-free tree downloads nothing
+        # (door item 7).  [ingest] gfs_lake_ice = "wps" (woof go
+        # --lake-ice wps) keeps the forcing's ice (the WPS / real.exe
+        # identity arm); an unreadable analysis falls back to it loudly, for
+        # this run only.
         from woof.ingest.lake_ice import resolve_lake_ice_provider
         lake_ice_provider = resolve_lake_ice_provider(
             case_policy["gfs_lake_ice"], times[0],

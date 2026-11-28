@@ -173,7 +173,22 @@ def test_the_chem_block_is_appended_after_every_older_field():
     tail = ["rrtmg_spectral_output", "radtran_wavelengths",
             "radtran_interval_s", "radtran_umu", "radtran_phi",
             "radtran_mol_abs_param", "radtran_solver", "radtran_streams",
-            "radtran_pseudospherical", "radtran_aerosol", *NEW_TAIL]
+            "radtran_pseudospherical", "radtran_aerosol", *NEW_TAIL,
+            # fork keys appended after the EPS block, in landing order
+            "gf_deep_rain_evaporation_booking", "solar_tsi_opt",
+            "solar_tsi_source", "solar_tsi_mode", "obstacle_opt",
+            "obstacle_file", "obstacle_solid_fraction",
+            "obstacle_relax_factor", "obstacle_drag_coefficient",
+            "obstacle_wall_z0", "spacewx_ionosphere_opt",
+            "spacewx_f107_source", "spacewx_f107_mode",
+            "spacewx_ionosphere_maps", "spacewx_aurora_opt",
+            "spacewx_kp_source", "solar_ssi_opt", "solar_ssi_source",
+            "spacewx_epp_opt", "spacewx_epp_source", "urban_param_file",
+            "ysu_surface_heat_exner", "woof_quirk_corrections",
+            "mynn_sfclay_psih_zolzt", "noah_smc_floor_booking",
+            "thompson_rain_snow_closure", "rrtmg_lw_model_top",
+            "thompson_lamc_updated_rc", "diff_metrics_seam_slope",
+            "noah_land_ice_rain_runoff", "mynn_sfclay_q2_land_cap"]
     assert names[-len(tail):] == tail
     names = names[:-len(tail)]
     # Appended last after the campaign, keyword-only: sea ice's real.exe

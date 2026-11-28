@@ -176,9 +176,12 @@ def kf_phase_mode_for_microphysics(mp_physics: int) -> KFPhaseMode:
                 else KFPhaseMode.SEPARATE_SNOW if "qs" in row.species
                 else KFPhaseMode.NO_SEPARATE_SNOW)
     # WRF 4.7.1 Registry.EM_COMMON:3040: UDM declares both qi and qs.
+    # Registry.EM_COMMON:3031: cammgmpscheme (mp_physics=11) declares
+    # moist:qv,qc,qi,qr,qs, so F_QI and F_QS are both true.  :3049: ntu
+    # (mp_physics=56) declares moist:qv,qc,qr,qi,qs,qg,qh, the same pair.
     # mp_physics=900 (TEMPO) declares qv,qc,qr,qi,qs,qg like Thompson, and
     # _KF_OLD_SPECIES below already carries it on that contract.
-    if int(mp_physics) in (2, 6, 7, 8, 9, 10, 13, 14, 16, 18, 24, 26, 27, 28, 29, 30, 38, 40, 106, 900) + SIX_MASS_TABLE_SCHEMES:
+    if int(mp_physics) in (2, 6, 7, 8, 9, 10, 11, 13, 14, 16, 18, 24, 26, 27, 28, 29, 30, 38, 40, 56, 106, 900) + SIX_MASS_TABLE_SCHEMES:
         return KFPhaseMode.SEPARATE_ICE_SNOW
     if int(mp_physics) == 1:
         return KFPhaseMode.WARM_RAIN
@@ -228,6 +231,25 @@ def kf_phase_mode_for_microphysics(mp_physics: int) -> KFPhaseMode:
         # mp=50 + cu_physics=1 domain through initialize_physics and steps
         # microphysics on it.
         return KFPhaseMode.NO_SEPARATE_SNOW
+    from woof.microphysics_schemes import scheme as _named_scheme
+    named = _named_scheme(mp_physics)
+    if named is not None:
+        # A named scheme (TEMPO, id 900) answers from its capability row, by
+        # the same single test as every numbered scheme above: KF_eta_CPS
+        # picks its feedback branch from F_QI/F_QS, which are true exactly
+        # when the scheme's moist package carries qi and qs.  TEMPO's
+        # package is Thompson's (qv,qc,qr,qi,qs,qg; its row's
+        # ice_mass_species), so it takes the separate-DQIDT branch as
+        # mp_physics=8 and 28 do.  THE BREAKAGE THIS PREVENTS (2026-11-09,
+        # TEMPO picked over the ArWen suite with Grell-Freitas on a hex zoom
+        # globe): initialize_physics could not construct a TEMPO domain with
+        # any cumulus scheme that reaches this rule (cu_physics 1, 3 and the
+        # other KF-family numbers) and raised the sentence below.  A derived
+        # admission, as the P3 rows are.
+        ice = named.ice_mass_species
+        return (KFPhaseMode.SEPARATE_ICE_SNOW if "qi" in ice and "qs" in ice
+                else KFPhaseMode.SEPARATE_SNOW if "qs" in ice
+                else KFPhaseMode.NO_SEPARATE_SNOW)
     raise ValueError(
         f"KF has no verified phase-output contract for mp_physics="
         f"{mp_physics}")
@@ -348,10 +370,26 @@ def _device_table():
 KF_MODULE_OPTIONS = ("-std=c++17", "--fmad=false", "--ftz=false")
 KF_MODULE_KEY = "woof.core.kernels:kf"
 
+#: RunConfig.kf_capped_downdraft_rain_floor (finding FQ11): kf.cu, kfcup.cu
+#: and mskf.cu each carry one #ifdef block that floors the capped
+#: downdraft's precipitation flux PPTFLX = TRPPT - TDER at zero.  Without
+#: the define each unit is WRF's bare subtraction.
+CAPPED_DOWNDRAFT_RAIN_FLOOR_DEFINES = (("KF_CAPPED_DOWNDRAFT_RAIN_FLOOR", 1),)
+
+
+def capped_downdraft_rain_floor_due(cfg) -> bool:
+    """Whether RunConfig.kf_capped_downdraft_rain_floor (finding FQ11)
+    reaches ``cfg``'s cumulus: on (correct mode's default) and read by the
+    selected scheme (cu_physics = 1, 10 or 11)."""
+    from woof.quirk_corrections import run_reads
+    return run_reads(cfg, "kf_capped_downdraft_rain_floor")
+
 
 @lru_cache(maxsize=None)
-def _kf_module(device, trigger=1):
-    """kernels/kf.cu for one device, compiled unflushed and uncontracted."""
+def _kf_module(device, trigger=1, rain_floor=False):
+    """kernels/kf.cu for one device, compiled unflushed and uncontracted.
+    ``rain_floor``: RunConfig.kf_capped_downdraft_rain_floor (FQ11), the
+    unit compiled with its define."""
     import cupy as cp
     from woof import nvrtc_ptx_cache as compiler
     from woof.certify.kernel_manifest import record_module
@@ -362,6 +400,11 @@ def _kf_module(device, trigger=1):
     if trigger != 1:
         source = f"#define KF_TRIGGER {int(trigger)}\n" + source
     key = KF_MODULE_KEY if trigger == 1 else f"{KF_MODULE_KEY}:trigger{trigger}"
+    if rain_floor:
+        source = "".join(f"#define {name} {value}\n" for name, value
+                         in CAPPED_DOWNDRAFT_RAIN_FLOOR_DEFINES) + source
+        key += "[" + ",".join(f"{name}={value}" for name, value
+                              in CAPPED_DOWNDRAFT_RAIN_FLOOR_DEFINES) + "]"
     with cp.cuda.Device(device), observe_module_compile(key):
         binary, _ = compiler.compile_using_nvrtc(
             source, KF_MODULE_OPTIONS, None, "kf.cu")
@@ -374,18 +417,20 @@ def _kf_module(device, trigger=1):
     return module
 
 
-def _kf_function(name: str, trigger=1):
+def _kf_function(name: str, trigger=1, rain_floor=False):
     """One entry of kernels/kf.cu on the current device."""
     import cupy as cp
 
-    return _kf_module(cp.cuda.runtime.getDevice(), trigger).get_function(name)
+    return _kf_module(cp.cuda.runtime.getDevice(), trigger,
+                      bool(rain_floor)).get_function(name)
 
 
 def launch_kf(u, v, temperature, qv, pressure, rho, exner, dz, w0avg, *,
               dx: float, dt: float, cudt_minutes: float,
               phase_mode: KFPhaseMode = KFPhaseMode.SEPARATE_ICE_SNOW,
               f_qr: bool = True, cloud_diagnostics: bool = False,
-              trigger: int = 1, rqvften=None, tpart=None):
+              trigger: int = 1, rqvften=None, tpart=None,
+              rain_floor: bool = False):
     """Run WRF KF (``KF_eta_PARA``) for a batch of FP32 device columns.
 
     The inputs are KF_eta_CPS's own: ``temperature`` (T), ``qv``,
@@ -407,7 +452,8 @@ def launch_kf(u, v, temperature, qv, pressure, rho, exner, dz, w0avg, *,
     0-based, -1 when the column did not convect).  With
     ``cloud_diagnostics`` it also returns WRF's CLDFRA_DP_KF,
     CLDFRA_SH_KF, QC_KF and QI_KF as ``cldfra_dp``/``cldfra_sh``/
-    ``qc_kf``/``qi_kf``.
+    ``qc_kf``/``qi_kf``.  ``rain_floor`` is RunConfig.
+    kf_capped_downdraft_rain_floor (FQ11); the default is WRF's arithmetic.
     """
     import cupy as cp
 
@@ -458,8 +504,9 @@ def launch_kf(u, v, temperature, qv, pressure, rho, exner, dz, w0avg, *,
     if type(trigger) is not int or trigger not in (1, 2, 3):
         raise ValueError("KF trigger must be integer 1, 2 or 3")
     if trigger == 2 and tpart is None:
-        tpart = trigger2_perturbations(temperature, rqvften, dz)
-    kernel = _kf_function("kf_column", trigger)
+        tpart = trigger2_perturbations(temperature, rqvften, dz,
+                                       rain_floor=rain_floor)
+    kernel = _kf_function("kf_column", trigger, rain_floor)
     ncol = ny * nx
     # The column arrays live in a global workspace sized to the threads in
     # flight; columns go in tiles of `tile`, each launched with the same
@@ -498,8 +545,11 @@ def launch_kf(u, v, temperature, qv, pressure, rho, exner, dz, w0avg, *,
     return out
 
 
-def trigger2_perturbations(temperature, rqvften, dz, *, separate=False):
-    """Native KF_eta_CPS moisture-advection stencil on a whole domain."""
+def trigger2_perturbations(temperature, rqvften, dz, *, separate=False,
+                           rain_floor=False):
+    """Native KF_eta_CPS moisture-advection stencil on a whole domain.
+    ``rain_floor`` picks the kf.cu build (FQ11) the run's kf_column uses, so
+    the unit is compiled once; the stencil does not read the floor."""
     import cupy as cp
     if rqvften is None:
         raise ValueError("kfeta_trigger=2 needs the dycore RQVFTEN export")
@@ -510,7 +560,7 @@ def trigger2_perturbations(temperature, rqvften, dz, *, separate=False):
     nz, ny, nx = shape
     h = cp.empty(shape, dtype=DTYPE)
     v = cp.empty(shape, dtype=DTYPE) if separate else np.uintp(0)
-    _kf_function("kf_trigger2_tpart", 2)(
+    _kf_function("kf_trigger2_tpart", 2, rain_floor)(
         (((ny * nx) + 255) // 256,), (256,),
         (temperature, rqvften, dz, h, v, np.int32(nz), np.int32(ny), np.int32(nx)))
     return (h, v) if separate else h
@@ -535,12 +585,14 @@ def w0avg_factors(*, cudt_minutes: float, dt: float, stepcu: int,
     return f32(tst - f32(1.0)), f32(1.0), tst
 
 
-def advance_w0avg(w0avg, w, *, factors) -> None:
+def advance_w0avg(w0avg, w, *, factors, rain_floor=False) -> None:
     """Advance ``w0avg`` in place from full-level ``w`` (nz+1, ny, nx).
 
     ``W0 = 0.5*(w(k)+w(k+1))`` and
     ``W0AVG = (W0AVG*W0AVGfctr + W0*W0fctr)/W0den``, in the no-FMA KF unit
-    so the update rounds as the Fortran does.
+    so the update rounds as the Fortran does.  ``rain_floor`` picks the
+    kf.cu build (FQ11) the run's kf_column uses, so the unit is compiled
+    once; the update does not read the floor.
     """
     nz = int(w0avg.shape[0])
     ncol = int(np.prod(w0avg.shape[1:]))
@@ -552,7 +604,7 @@ def advance_w0avg(w0avg, w, *, factors) -> None:
     fctr, w0fctr, den = factors
     total = nz * ncol
     threads = 256
-    _kf_function("kf_w0avg_update")(
+    _kf_function("kf_w0avg_update", 1, rain_floor)(
         ((total + threads - 1) // threads,), (threads,),
         (w, w0avg, DTYPE(fctr), DTYPE(w0fctr), DTYPE(den),
          np.int32(nz), np.int32(ncol)))
@@ -989,7 +1041,8 @@ class KainFritsch:
             cudt_minutes=float(cfg.cudt_minutes), dt=clock_dt,
             stepcu=stepcu,
             adaptive=bool(getattr(cfg, "use_adaptive_time_step", False)))
-        advance_w0avg(self.w0avg, state.w, factors=factors)
+        advance_w0avg(self.w0avg, state.w, factors=factors,
+                      rain_floor=capped_downdraft_rain_floor_due(cfg))
         self._history_time = float(state.elapsed_seconds)
 
     def __call__(self, *, atmosphere, fields, state, cfg):
@@ -1023,7 +1076,8 @@ class KainFritsch:
             phase_mode=phase_mode,
             trigger=cfg.kfeta_trigger, rqvften=getattr(state, "rqvften", None),
             f_qr=kf_has_rain_for_microphysics(cfg.mp_physics),
-            cloud_diagnostics=cfg.cu_rad_feedback)
+            cloud_diagnostics=cfg.cu_rad_feedback,
+            rain_floor=capped_downdraft_rain_floor_due(cfg))
         from woof.core.physics import _NativeKFCumulusResult
 
         # PRATEC = PPTFLX*(1-FBFRC)/DXSQ in mm s-1 and NCA come straight
@@ -1139,8 +1193,11 @@ def kfcup_workspace_floats(nz: int, columns: int, numbins: int) -> int:
 
 
 def launch_kfcup_columns(buffers, *, dt, dx, ntst, numbins, thbinsize, rbinsize,
-                         mindeepfreq, minshallowfreq, flags, workspace=None, status=None):
-    """Run the complete CuP column on device, retaining all output words."""
+                         mindeepfreq, minshallowfreq, flags, workspace=None, status=None,
+                         rain_floor=False):
+    """Run the complete CuP column on device, retaining all output words.
+    ``rain_floor`` is RunConfig.kf_capped_downdraft_rain_floor (FQ11); the
+    default is WRF's arithmetic."""
     import cupy as cp
     from woof.core.kernels import get_kernel
     lev=buffers['lev_in']
@@ -1148,7 +1205,7 @@ def launch_kfcup_columns(buffers, *, dt, dx, ntst, numbins, thbinsize, rbinsize,
         raise ValueError('KF-CuP packed level inputs require (12,nz,ncol)')
     _,nz,ncol=lev.shape
     if not KFCUP_VERTICAL_LEVEL_BOUNDS[0]<=nz<=KFCUP_VERTICAL_LEVEL_BOUNDS[1]:
-        raise ValueError(f'KF-CuP supports 8 through 128 levels, got {nz}')
+        raise ValueError(f'KF-CuP supports {KFCUP_VERTICAL_LEVEL_BOUNDS[0]} through {KFCUP_VERTICAL_LEVEL_BOUNDS[1]} levels, got {nz}')
     shapes={'lev_in':lev.shape,'sca_in':(len(KFCUP_SURFACE_INPUTS),ncol),
             'kpbl':(ncol,),'held':(len(KFCUP_HELD_SCALARS),ncol),
             'iheld':(len(KFCUP_HELD_INTS),ncol),
@@ -1168,7 +1225,12 @@ def launch_kfcup_columns(buffers, *, dt, dx, ntst, numbins, thbinsize, rbinsize,
     if ntst<1 or flags<0 or flags>15:
         raise ValueError('KF-CuP needs positive STEPCU and a four-bit phase mask')
     table=load_kf_table()
-    kernel=get_kernel('kfcup','kfcup_column')
+    if rain_floor:
+        from woof.core.kernels import get_kernel_int_defines
+        kernel=get_kernel_int_defines('kfcup','kfcup_column',
+                                      CAPPED_DOWNDRAFT_RAIN_FLOOR_DEFINES)
+    else:
+        kernel=get_kernel('kfcup','kfcup_column')
     # At most one 32-thread block per SM is in this allocation. A larger
     # domain reuses the same workspace over disjoint column tiles.
     tile=min(ncol,32*int(cp.cuda.Device().attributes['MultiProcessorCount']))
@@ -1297,7 +1359,8 @@ class KFCumulusPotential(KainFritsch):
         flags|=8 if getattr(state,'qs',None) is not None else 0
         launch_kfcup_columns(b,dt=dt,dx=cfg.dx,
             ntst=max(int(np.floor(cfg.cudt_minutes*60/dt+0.5)),1),
-            flags=flags,workspace=self._ws,status=self._cup_status,**{k:getattr(cfg,k,v) for k,v in KFCUP_PARAMETER_DEFAULTS.items() if k!='shallowcu_forced_ra'})
+            flags=flags,workspace=self._ws,status=self._cup_status,
+            rain_floor=capped_downdraft_rain_floor_due(cfg),**{k:getattr(cfg,k,v) for k,v in KFCUP_PARAMETER_DEFAULTS.items() if k!='shallowcu_forced_ra'})
         from woof.core.physics import _NativeKFCumulusResult
         outputs={key:self.cup_levels[i].reshape(nz,ny,nx) for i,key in enumerate(KFCUP_LEVEL_OUTPUTS)}
         # Publish only to held driver fields. Radiation never receives a

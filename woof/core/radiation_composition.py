@@ -392,7 +392,7 @@ def make_radiation(cfg, start_time, latitude_deg, longitude_deg, *,
         if selector == 2:
             from woof.core.gsfcsw import GSFCSWShortwaveRadiation
             return GSFCSWShortwaveRadiation(*args, icloud=cfg.icloud,
-                                           center_lat=center_lat)
+                                           center_lat=center_lat, nz=cfg.nz)
         if selector == 90:
             from woof.core.analytic_radiation import AnalyticClearSkyRadiation
             return AnalyticClearSkyRadiation(*args)
@@ -572,7 +572,7 @@ class ColumnTableRadiation:
             nssl_2moment_on=getattr(cfg,'nssl_2moment_on',1))
         radii=[zeros if value is None else grid(value) if direct_gsfc else
                grid(value)*np.float32(1.e-6)*np.float32(1.e6) for value in values]
-        julian,xtime,gmt=calendar_scalars(self.start_time,state.elapsed_seconds)
+        julian,xtime,gmt=calendar_scalars(self.start_time,state.elapsed_seconds,generation=getattr(cfg,'solar_generation','wrf_480'))
         declin,solcon=radconst(julian)
         minutes=np.float32(cfg.radt if cfg.radt>0 else cfg.radt_minutes)
         cosine=cp.asarray(calc_coszen(julian,xtime+minutes*np.float32(.5),gmt,

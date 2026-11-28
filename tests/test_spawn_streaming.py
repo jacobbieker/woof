@@ -601,7 +601,9 @@ def test_the_streaming_inventory_carries_what_restart_deliberately_does_not():
     # through the stream and rewritten before its first use after a restart
     # (woof.core.physics_tendency_output; preflight lifetime 'carrying').
     assert added == ({f"scratch/{s}" for s in uh_diag.TRACKER_WINDOW_SLOTS}
-                     | {"scratch/tendency_qv_before"})
+                     | {"scratch/tendency_qv_before"}
+                     # WRF-Solar diagnostics output slot, stream-only
+                     | {"scratch/solar_out"})
     for slot in acoustic_slots:
         assert restart.classify_scratch_slot(slot) == "carry"
         assert slot not in restart.SERIALIZED_SCRATCH_SLOTS

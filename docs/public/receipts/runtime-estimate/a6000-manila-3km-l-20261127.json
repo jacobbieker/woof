@@ -1,0 +1,65 @@
+{
+  "schema": "woof.runtime-estimate.receipt.v1",
+  "id": "a6000-manila-3km-l",
+  "recorded_utc": "2026-11-27T10:21:00Z",
+  "what": "one woof go forecast timed end to end, to anchor the runtime estimator's A6000 rate above the 100,000-column launch bound",
+  "host": {
+    "card": "NVIDIA RTX A6000",
+    "card_memory_mib": 49140,
+    "driver": "610.57.04",
+    "host_cpus": 32,
+    "os": "Linux"
+  },
+  "code": "woof 1.1.7 fork, feat/runtime-estimate at 2351c3437 (clean tree)",
+  "command": "woof go rt-mnl-3km.toml --outdir out-mnl-3km --products none",
+  "configuration": {
+    "emitted_by": "woof domain --point 14.6,121.0 --root-dx 3 --point-extent-km 1350 --clock fixed --source gfs --cycle 2026-11-07T00 --hours 6",
+    "grid": "450 x 360 x 49, dx 3 km, one domain",
+    "columns": 162000,
+    "dt_s": 7.5,
+    "clock": "fixed",
+    "run_seconds": 21600,
+    "steps": 2880,
+    "physics": "Morrison (mp 10), RTE+RRTMGP longwave and shortwave every 12 min, YSU, MM5 surface layer (91), Noah, no cumulus",
+    "history_interval_s": 3600,
+    "restart_interval_s": 3600,
+    "source": "GFS 0.25 deg, cycle 2026-11-07T00"
+  },
+  "contention": {
+    "method": "nvidia-smi --query-gpu=utilization.gpu,memory.used and --query-compute-apps every 15 s, /proc/loadavg beside it (45 samples)",
+    "card": "this forecast was the only compute process on the card in every sample during the forecast",
+    "host": "load average 5 to 20 from other users' CPU work"
+  },
+  "measured": {
+    "fetch_s": 13,
+    "prepare_s": 46,
+    "forecast_stage_s": 639,
+    "launch_to_done_s": 675,
+    "forecast_loop_wall_s": 623.708,
+    "step_walls_sum_s": 603.441,
+    "seconds_per_step_steps_only": 0.20953,
+    "ordinary_step_median_s": 0.2017,
+    "radiation_step_mean_s": 1.0028,
+    "radiation_steps_counted": 29,
+    "radiation_step_ratio": 4.97,
+    "first_step_s": 3.493,
+    "history_writes": {"count": 7, "total_s": 8.46},
+    "restart_writes": {"count": 6, "total_s": 14.72},
+    "startup_phases_s": {"preflight_verify": 1.81, "restore_prepared_cache": 1.79, "initialize_physics": 1.26}
+  },
+  "prediction_before_this_anchor": {
+    "command": "woof estimate rt-mnl-3km.toml (runner detected: the A6000)",
+    "basis": "the A6000's 18,000-column anchors (Manila 12 km, Maui 3 km in docs/ADAPTIVE-TIMESTEP.md), carried across the 100,000-column line",
+    "root_seconds_per_step": [0.2797, 0.5451],
+    "phases_s": {
+      "prepare": [54.5, 85.5],
+      "kernel compile": [0.0, 0.0],
+      "model steps": [736.5, 1531.6],
+      "radiation steps": [38.3, 69.0],
+      "output": [0.0, 73.7],
+      "restart writes": [1.1, 175.9]
+    },
+    "total_s": [861.1, 1905.0],
+    "verdict": "the total missed low: 675 s measured against 861-1905 s predicted. The per-column rate of an 18,000-column domain overstates a 162,000-column one by 1.3-2.6x (the card is not loaded below the launch bound). Prepare, output and restart writes fell inside their brackets."
+  }
+}

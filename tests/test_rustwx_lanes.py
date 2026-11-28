@@ -472,7 +472,7 @@ def test_every_flag_the_ensemble_lane_emits_has_an_engine_arm(
         store_root=tmp_path, out_dir=tmp_path, field="refl",
         products="mean,spread", threshold=35.0, neighborhood_km=40.0,
         frames=3, nan_policy="mask", pmm_tie_rule="flat-index",
-        accept_status="DONE", source_label="WOOF", domain="d02",
+        accept_status="DONE", source_label="WOOF-ArWen", domain="d02",
         width=1200, height=900, members={0: tmp_path / "m0"})
     arms = _engine_option_arms()
     emitted = {token for token in seen["command"] if token.startswith("--")}
@@ -797,7 +797,7 @@ def test_overlays_change_the_pixels_and_their_absence_does_not(tmp_path):
             str(renderer), "--store-root", str(tmp_path / f"store_{tag}"),
             "--out-dir", str(out), "--products", "composite_reflectivity",
             "--frames", "0", "--width", "500", "--height", "400",
-            "--source-label", "WOOF", *extra, str(wrfout)]
+            "--source-label", "WOOF-ArWen", *extra, str(wrfout)]
         result = subprocess.run(command, capture_output=True, text=True,
                                 errors="replace", timeout=300)
         assert result.returncode == 0, result.stdout + result.stderr
