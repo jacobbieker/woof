@@ -1137,9 +1137,12 @@ Each step is one small PR, taken to merged before the next widens.
        (w, whose primal recomputes the deformation) and 1.4x (scalar).
        AD before the perf pass (2026-11-26) 35x, 25x, 21x and 31x;
        after it (2026-11-27) 1.56 ms (5.1x), 1.47 ms (4.7x), 2.29 ms
-       (2.1x) and 2.17 ms (6.2x). The scalar row is still a little over
-       G3's ~5x: its flux and row gathers (h2_hsp_ad, h2_rowp_ad) and
-       the two first passes are about equal shares.
+       (2.1x) and 2.17 ms (6.2x). After the second pass (2026-11-28)
+       1.16 ms (3.7x), 1.11 ms (3.5x), 1.73 ms (1.6x) and 1.58 ms
+       (4.3x), all within G3's ~5x: the piece gathers walk their windows
+       through visitors instead of local pair tables (the gathers had
+       spilled them to local memory), and the row's first pass evaluates
+       its pieces in one straight-line pass (h2_row_pieces).
    - 10b. `vertical_diffusion_2` (2b-2): rows vu, vv, vw, vt and vs of
      `h2_tl/h2_ad` (row codes 4-7, stage VROW), on woof's strict
      `dycore.launch_wrf_smag2d_vertical` (`wrf_smag_vd_u/_v/_w/_s` and
@@ -1181,10 +1184,14 @@ Each step is one small PR, taken to merged before the next widens.
        (37x; vu and vv 12 and 10 ms in the tau13/tau23 gather); after it
        (2026-11-27) 5.26 ms (7.5x): vu 1.74 ms and vv 1.69 ms (3.6x
        their TL, half of it the tau13/tau23 piece gather), vw 0.57 ms,
-       vt 0.68 ms and vs 0.57 ms (2.3-2.7x their TL). Each AD call
-       repeats the base forward and the metrics, which the primal's one
-       launch for all rows shares, so the sum over five separate calls
-       stays over 5x the fused primal.
+       vt 0.68 ms and vs 0.57 ms (2.3-2.7x their TL). After the second
+       pass (2026-11-28) 3.51 ms (5.0x): vu 1.14 ms and vv 1.10 ms
+       (2.4x and 2.3x their TL; each row's AD skips the w stress it
+       never reads, tau23 for vu and tau13 for vv), vw, vt and vs
+       0.42-0.43 ms (1.7x their TL; h2_vrow_wsad decodes its column
+       without local index arrays). G3 is measured row by row (user
+       decision 2026-11-27): each AD call repeats the base forward and
+       the metrics, which the primal's one launch for all rows shares.
    - 10c. The coefficients (2b-3): `k2_tl/k2_ad` (WRF `smag2d_km` at
      diff_opt 2, km_opt 4: the 10 * mlen cap, the def_limit switch and
      the terrain-slope limiter alpha from zx, zy and rdzw), `n2_tl/n2_ad`
@@ -1217,7 +1224,8 @@ Each step is one small PR, taken to merged before the next widens.
        1-D base theta; geometry refusals.
      - Cost (A6000, 40 x 120 x 120, binary32, periodic, steep, median of
        20, 2026-11-27; primal = the strict kernel; AD before and after
-       the diff_opt 2 AD perf pass):
+       the diff_opt 2 AD perf pass; k3 after the second pass,
+       2026-11-28: 1.27 ms, 1.4x):
 
        | op | primal | TL | AD before | AD after |
        |---|---|---|---|---|
@@ -1229,7 +1237,10 @@ Each step is one small PR, taken to merged before the next widens.
        defor13/23 recomputation) for every output word in each input's
        window (36 outputs for a w word). It now takes each point's
        adjoint onto smag_km's pieces (the mass-point factors and
-       defor13/23's per-slot pieces) and gathers those by index.
+       defor13/23's per-slot pieces) and gathers those by index. The
+       second pass stores the slot deformations once (h2_km3_dfor) for
+       km3_lin to average, shares the pow values across the 8 seeds,
+       and replaces h2_km3_ad's local output-pointer array by a switch.
    - 10d. The step binding (2b-3, `woof/grad/wrfplus/model.py`):
      diff_opt 2 with km_opt 3 or 4, dry, bl_pbl_physics 0, in
      `dycore._compute_wrf_smag_tendencies`' order: the deformation, the
