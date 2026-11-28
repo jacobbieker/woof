@@ -37,6 +37,7 @@ from woof.core.chem_context import MONO_IMPLICIT_SLOT, MONO_SCRATCH_SLOTS
 from woof.core.moist import (
     _exclude_specified_ring_advection, _ieva_scalar, _pd_fold_sources,
     _update_scalar_in_place, launch_pd_fluxes, launch_pd_renorm_apply,
+    pd_west_symmetric,
 )
 
 __all__ = ["MONO_IMPLICIT_SLOT", "MONO_SCRATCH_SLOTS", "advance_chem_stage",
@@ -149,6 +150,7 @@ def advance_chem_stage(state, cfg, ru, rv, ww, dt_eff: float, final: bool,
                              cfg.dx, cfg.dy, dt_eff, *bufs,
                              msft=state.msft, has_msf=state.has_msf,
                              open_x=boundary_x, open_y=boundary_y,
+                             west_symmetric=pd_west_symmetric(cfg),
                              vorder=vorder)
             launch_pd_renorm_apply(q0_eff, mu0, *bufs, tend=tend,
                                    coord=state, dx=cfg.dx, dy=cfg.dy,

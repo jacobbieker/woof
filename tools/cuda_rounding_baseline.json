@@ -3009,7 +3009,7 @@
    },
    {
     "file": "woof/core/kernels/bandwidth_glue.cu",
-    "sha256": "8ca05bd9653f73aa06b90ab25bfaf10468517b410f01d09725cc5de376458f12"
+    "sha256": "9b6e2e2bae60cf28a20cb7982cfe7e2eb1552c11c0a039749ea792bcca51dd7e"
    },
    {
     "file": "woof/core/kernels/bmj.cu",
@@ -4237,7 +4237,7 @@
    },
    {
     "file": "woof/core/kernels/pd_advection.cu",
-    "sha256": "952e0f085ab73a69d8c3c6c9136fa5b6878b2689c4ac3dfba24ef72bc013ed76"
+    "sha256": "c83b45cc0f34de9c7c015136912677d9d025a477ac443f90e945ef5d70437027"
    },
    {
     "file": "woof/core/kernels/pd_vertical_sl.cu",
@@ -5197,7 +5197,7 @@
    },
    {
     "file": "woof/grad/wrfplus/kernels/diffusion.cu",
-    "sha256": "6db950fdf312e625df14448293717f7de187ccb2f573c7e7c4ffbee8c9863db7"
+    "sha256": "37ea8b13cb0823d34d17b329aa06c0ab5652c15b9e46464e418a7703684152c0"
    },
    {
     "file": "woof/grad/wrfplus/kernels/lbc.cu",
@@ -5205,7 +5205,7 @@
    },
    {
     "file": "woof/grad/wrfplus/kernels/pdadv.cu",
-    "sha256": "0aaf4277c86e5b35a8ad22d609dc545899f52113166d0fbf8dcbc62ffd1016d6"
+    "sha256": "092df757a3d710d0b82f4d5c5a0041014f136dff2a254fc8f1572d374f015091"
    },
    {
     "file": "woof/grad/wrfplus/kernels/rk_stage.cu",
@@ -5393,7 +5393,7 @@
    },
    {
     "file": "woof/hex/mpas_ocean/tend_tracer_v842.cu",
-    "sha256": "421b4c9f4c3e80066db12b40ddc2f81167b665e0ca4d20ba59c9cffa610f9f87"
+    "sha256": "6cfed715ddbe4dab498d704a02f528a80310876a06c09b43afce3150d52ac4d9"
    },
    {
     "file": "woof/hex/mpas_ocean/tend_v842.cu",
@@ -5667,7 +5667,7 @@
    },
    {
     "file": "woof/core/bandwidth_glue.py",
-    "sha256": "7c451749f1d9d3ffc08c2fcb04f80d2e7ff943c26bf934e45a12a53103ae84aa"
+    "sha256": "63ce7f140ce2cd1bf6207dccfa4eca870279722b994523708f9e19e0c658769a"
    },
    {
     "file": "woof/core/cam3_fast.py",
@@ -5707,7 +5707,7 @@
    },
    {
     "file": "woof/core/dycore.py",
-    "sha256": "fd0ba35d57b5b40a6cf631a7abbb981c007dcc0d52782c3ab18f928333a58195"
+    "sha256": "061918d5f2031018ba8b7f5e2e14ac6e74ebc01afcb6a92510f32cc7d23ac54e"
    },
    {
     "file": "woof/core/etanew.py",
@@ -5779,7 +5779,7 @@
    },
    {
     "file": "woof/core/moist.py",
-    "sha256": "aa56c03c4a76a6ad8e0cca34f0664e036fd16815e46728c78dec77d9cf7327d4"
+    "sha256": "45d9df696871a3e656a86bc52421b088a339ccbc6161c4d067f9d45b3174dfff"
    },
    {
     "file": "woof/core/morrison.py",
@@ -5891,7 +5891,7 @@
    },
    {
     "file": "woof/core/physics.py",
-    "sha256": "3fd18b359feb2a2cf56ad42ec3641b905ee9c6e2677dbd4bcabc0efa40800abd"
+    "sha256": "898945175123ef6d2d029e501d27b1172809123f692ea08d990c7acf9022d54d"
    },
    {
     "file": "woof/core/preflight.py",
@@ -5903,7 +5903,7 @@
    },
    {
     "file": "woof/core/ring_frame.py",
-    "sha256": "fa7eee299a4ec94653895a29c13f239de3d8599cfd25281b9aec9f49ac6cd133"
+    "sha256": "fac1b92663fc4a0a9c9b988c07c00d398d4c921742825a788213b56bdcfa0724"
    },
    {
     "file": "woof/core/rrtm_lw.py",
@@ -6091,7 +6091,7 @@
    },
    {
     "file": "woof/ensemble/batch_moist.py",
-    "sha256": "e2d8fb00d20be96bd10c4fc3534074d88d44936892b82ac929e59c054110d4bf"
+    "sha256": "8b63984e5a271c3a405237d7e29f5dfdc0a2743f8399aeaf73129864eb1a9e52"
    },
    {
     "file": "woof/ensemble/batch_nesting.py",
@@ -6171,7 +6171,7 @@
    },
    {
     "file": "woof/grad/wrfplus/pdadv.py",
-    "sha256": "323697ad06f58d9f0303091260d2db5f878cf1f5e2d1a39d067acf58a76dfc6d"
+    "sha256": "44c9ae88c64e1d7eb712f603b04261698fab830bfebd2b69c44cce6eb856ad10"
    },
    {
     "file": "woof/grad/wrfplus/stage.py",
@@ -6559,11 +6559,11 @@
    },
    {
     "file": "woof/hex/mpas_ocean/split_step_v842.py",
-    "sha256": "48a2cb1d7c936cbad687197fe00dd648ca9905bf8a65c9fdbc122e9284dd67d0"
+    "sha256": "fd7a1b220f7cc6bd88fce77c7bdbcf3d66d25db8304e21df53b62b3855e364f5"
    },
    {
     "file": "woof/hex/mpas_ocean/tend_tracer_v842.py",
-    "sha256": "8cfaafc130214cbbadca2c59a3d6647e511e612b0501f0242700d0cdf1e74659"
+    "sha256": "ce0979a24963f9be864ddd1c14633f239afd64a97a65d3e2e8b6b4bb13824d2f"
    },
    {
     "file": "woof/hex/mpas_ocean/tend_v842.py",
@@ -12544,7 +12544,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "85d3fa5d2d00f36c7201a71a7c18b9abff9cf53cae65cc82ca97492be50053f8"
+   "source_sha256": "72b068dca61b89018c0fdb076c66c61b7f4b0c4961e47c2c3d78d97ba76b9897"
   },
   "kernels:bmj": {
    "assessment": "static_diagnostic_only",
@@ -22343,13 +22343,13 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "94f56b9f27d642e4e1b78d6c3c92dfbc55c9a18fe89a3678801e17323ae8c91f",
+    "sha256": "90ab4ef10450280a7f1d3ce48fa82b0cfbe04a032ff69b587345ad16874b62f0",
     "sites": {
      "100": 91
     }
    },
    "native_differences": {
-    "sha256": "eabcfd2c185d05890796625e832cb0377f2d4f5443e9fd081c6b33774e5818a9",
+    "sha256": "02e9423d41da12a24a3cbcd313b000044d04b48afe6f3435e739e21b05d92da3",
     "sites": {
      "100": 10
     }
@@ -22371,7 +22371,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "6db2d481e14fcdde22252a414dca1f7524df057fd9214815767d0f6691ea9246"
+   "source_sha256": "099938066f79eec28a34ad75c7997fae8c47ce032cdb7838a07f23123d8c718c"
   },
   "kernels:pd_vertical_sl": {
    "assessment": "static_diagnostic_only",
@@ -22390,13 +22390,13 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "c4ce7794a3aa0ab95a72cad503820875c3dbd077ddb53d63ba632925932ea537",
+    "sha256": "db20ce32e1c0aad4f30fad4a5d8fa5264fb41f8f5d08160f19ef1f630cb6effb",
     "sites": {
      "100": 98
     }
    },
    "native_differences": {
-    "sha256": "a62a8cc8abdbe9f5290d4b32036862f37495b28a8246869d8ce81ddbcc99f799",
+    "sha256": "0e8f70b5411b9b7900b775ef985521e0aee41c907b75f5376c53c6e24bf6f6d2",
     "sites": {
      "100": 12
     }
@@ -22418,7 +22418,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "c66b49f1baa3411bcb736473b11cdb5e447dcff43f8a2b639e7f80a1ec515e07"
+   "source_sha256": "e70f21223bf6ae9b7bfc6128899554f0757966feda54ceed819471ac41c3da90"
   },
   "kernels:physics_exner": {
    "assessment": "static_diagnostic_only",

@@ -25,7 +25,7 @@ The rules, the same on every route:
   coupling, the MPAS-Seaice ``ice_velocity_at_cell`` without the
   velocity solver's pools) it stays off; the WRF route's run receipt
   lists such a finding as uncorrected (woof.correct_mode.uncorrected).
-* On the WRF route the RunConfig keys are correct-mode findings FQ1-FQ12
+* On the WRF route the RunConfig keys are correct-mode findings FQ1-FQ13
   of woof.correct_mode: their defaults are ``CORRECT_KEYS_DEFAULT``,
   exact mode authors them off with every other correct-mode key, and the
   checkpoint echo binds one only where it is on and read.
@@ -145,6 +145,11 @@ CORRECTIONS: tuple[QuirkCorrection, ...] = (
         "the diffusion metrics take the true terrain slope at a periodic axis's seam on the top w level, "
         "where WRF keeps a cold zero",
         active=lambda get: int(get("diff_opt")) in (1, 2)),
+    QuirkCorrection(
+        "pd_adv_west_courant", "wrf", False, True, "moist_adv_opt = 1, specified or nested",
+        "the positive-definite transport's west face of a bounded x axis forms its Courant number "
+        "in every other face's order, ru*dt/dx/mu, not WRF's (ru/mu)*dt/dx",
+        active=lambda get: int(get("moist_adv_opt")) == 1),
     # hex (MPAS) regional route
     QuirkCorrection(
         "undriven_species_boundary", "hex", "free", "wrf-flow-dependent", "regional mesh (--lbc-dir)",

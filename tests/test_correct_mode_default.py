@@ -28,8 +28,9 @@ from woof import correct_mode
 from woof.config import RunConfig, validate_run_config
 
 ROOT = Path(__file__).resolve().parents[1]
-#: the fork's quirk ledger on the WRF route (woof.quirk_corrections), FQ1-FQ12
-_FQ = ("FQ1", "FQ2", "FQ3", "FQ4", "FQ5", "FQ6", "FQ7", "FQ8", "FQ9", "FQ10", "FQ11", "FQ12")
+#: the fork's quirk ledger on the WRF route (woof.quirk_corrections), FQ1-FQ13
+_FQ = ("FQ1", "FQ2", "FQ3", "FQ4", "FQ5", "FQ6", "FQ7", "FQ8", "FQ9", "FQ10", "FQ11", "FQ12",
+       "FQ13")
 _FQ_KEYS = ("gf_deep_rain_evaporation_booking", "ysu_surface_heat_exner",
             "mynn_sfclay_psih_zolzt", "noah_smc_floor_booking",
             "thompson_rain_snow_closure", "rrtmg_lw_model_top",
@@ -37,7 +38,8 @@ _FQ_KEYS = ("gf_deep_rain_evaporation_booking", "ysu_surface_heat_exner",
             "noah_snow_series_conductivity",
             "mynn_sfclay_q2_land_cap",
             "kf_capped_downdraft_rain_floor",
-            "diff_metrics_seam_slope")
+            "diff_metrics_seam_slope",
+            "pd_adv_west_courant")
 
 # -------------------------------------------------------------- the switch --
 def test_exact_mode_authors_every_key_off():
@@ -451,7 +453,9 @@ def test_every_carrier_scheme_is_a_shipped_scheme():
                # radiation selects on a (LW, SW) pair: the LW values
                "ra_lw_physics": _shipped_lw(),
                # FQ12: the diffusion options with compute_diff_metrics
-               "diff_opt": {1, 2}}
+               "diff_opt": {1, 2},
+               # FQ13: advect_scalar_pd's moisture transport
+               "moist_adv_opt": {1}}
     for c in correct_mode.CORRECTIONS:
         assert c.carriers, c.finding
         for selector, schemes in c.carriers:
@@ -673,3 +677,56 @@ def test_smag_boundary_flags_encode_wrfs_cold_seam(overrides, flags):
     from woof.core.dycore import smag_boundary_flags
     cfg = RunConfig(**{**_TINY, "km_opt": 4, **overrides})
     assert tuple(int(f) for f in smag_boundary_flags(cfg)) == flags
+
+
+# ------------------------------------------------------------------ FQ13 --
+def _west_read(**overrides):
+    values = dataclasses.asdict(RunConfig(**{**_TINY, **overrides}))
+    return correct_mode.key_in_scope("pd_adv_west_courant", values)
+
+
+@pytest.mark.parametrize("overrides,read", [
+    ({}, False),                                       # periodic x: no west face
+    ({"open_y": True}, False),
+    ({"open_x": True}, False),                          # open: no PD transport runs
+    ({"specified": True}, True),
+    ({"nested": True}, True),
+    ({"specified": True, "moist_adv_opt": 0}, False),  # no PD moisture transport
+])
+def test_fq13_is_read_only_on_a_bounded_x_axis_with_pd_moisture(overrides, read):
+    """The west-face key moves the identity, the echo and the receipt only
+    where advect_scalar_pd's west face is reached: moist_adv_opt = 1 on a
+    specified or nested domain (woof runs no PD transport on an open
+    axis)."""
+    assert _west_read(**overrides) is read
+
+
+def test_fq13_an_echo_without_moist_adv_opt_reads_as_moist_adv_opt_1():
+    values = dataclasses.asdict(RunConfig(**{**_TINY, "specified": True}))
+    values.pop("moist_adv_opt")
+    assert correct_mode.key_in_scope("pd_adv_west_courant", values)
+
+
+def test_fq13_carrier_is_listed_only_where_the_key_is_read():
+    for overrides, listed in (({}, False), ({"specified": True}, True),
+                              ({"open_x": True}, False)):
+        cfg = RunConfig(**{**_TINY, **overrides},
+                        **correct_mode.resolve("correct").settings)
+        assert "FQ13" not in correct_mode.uncorrected(cfg), overrides
+        assert ("FQ13" in correct_mode.run_receipt({1: cfg})["domains"]["1"]["applied_findings"]) is listed, overrides
+    cfg = RunConfig(**{**_TINY, "specified": True},
+                    **correct_mode.resolve("exact").settings)
+    assert cfg.pd_adv_west_courant is False
+
+
+@pytest.mark.parametrize("overrides,symmetric", [
+    ({"pd_adv_west_courant": True}, True),
+    ({"pd_adv_west_courant": False}, False),
+    ({"pd_adv_west_courant": True, "moist_adv_opt": 0}, False),
+])
+def test_fq13_launch_flag(overrides, symmetric):
+    """pd_fluxes' open_x bit 2 (woof.core.moist.pd_west_symmetric) follows
+    the key where it is read."""
+    from woof.core.moist import pd_west_symmetric
+    cfg = RunConfig(**{**_TINY, "specified": True, **overrides})
+    assert pd_west_symmetric(cfg) is symmetric

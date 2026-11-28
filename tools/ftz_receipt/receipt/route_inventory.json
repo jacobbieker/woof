@@ -2984,7 +2984,7 @@
     },
     {
       "file": "tests/test_mp8_frozen.py",
-      "line": 3402,
+      "line": 3410,
       "column": 8,
       "surface": "tests",
       "constructor": "cp.RawModule",
@@ -7230,7 +7230,7 @@
     },
     {
       "file": "woof/core/bandwidth_glue.py",
-      "line": 42,
+      "line": 50,
       "column": 11,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -7978,7 +7978,7 @@
     },
     {
       "file": "woof/core/moist.py",
-      "line": 636,
+      "line": 652,
       "column": 11,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -7994,7 +7994,7 @@
     },
     {
       "file": "woof/core/moist.py",
-      "line": 738,
+      "line": 754,
       "column": 11,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -8530,7 +8530,7 @@
     },
     {
       "file": "woof/core/physics.py",
-      "line": 1950,
+      "line": 1951,
       "column": 17,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -8546,7 +8546,7 @@
     },
     {
       "file": "woof/core/physics.py",
-      "line": 1965,
+      "line": 1966,
       "column": 17,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -8562,7 +8562,7 @@
     },
     {
       "file": "woof/core/physics.py",
-      "line": 1988,
+      "line": 1989,
       "column": 21,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -8594,7 +8594,7 @@
     },
     {
       "file": "woof/core/ring_frame.py",
-      "line": 43,
+      "line": 45,
       "column": 11,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -9942,7 +9942,7 @@
     },
     {
       "file": "woof/grad/wrfplus/pdadv.py",
-      "line": 155,
+      "line": 160,
       "column": 13,
       "surface": "package",
       "constructor": "cp.RawModule",
@@ -11070,7 +11070,7 @@
     },
     {
       "file": "woof/hex/mpas_ocean/split_step_v842.py",
-      "line": 96,
+      "line": 105,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",
@@ -11086,7 +11086,7 @@
     },
     {
       "file": "woof/hex/mpas_ocean/tend_tracer_v842.py",
-      "line": 87,
+      "line": 97,
       "column": 15,
       "surface": "package",
       "constructor": "compile_using_nvrtc",

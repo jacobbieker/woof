@@ -14,6 +14,8 @@ from functools import lru_cache
 import cupy as cp
 import numpy as np
 
+_TPB = 128
+
 
 @lru_cache(maxsize=None)
 def _frame_kernel(copy: bool):
@@ -46,15 +48,10 @@ def _frame_kernel(copy: bool):
         "raw T buf", body, "gpuwm_copy_frame" if copy else "gpuwm_zero_frame")
 
 
-def _launch(buf, src, x_lo, x_hi, y_lo, y_hi) -> bool:
-    if buf.ndim < 2 or buf.size == 0 or not buf.flags.c_contiguous:
-        return False
-    if src is not None and (src.shape != buf.shape or src.dtype != buf.dtype
-                            or not src.flags.c_contiguous):
-        return False
-    ny, nx = buf.shape[-2:]
-    if buf.size >= 2 ** 31:
-        return False                  # the kernel's indices are 32-bit
+def _geometry(ny, nx, x_lo, x_hi, y_lo, y_hi):
+    """The frame kernels' ``(nx, ny, x_lo, x_hi, y_lo, y_hi, side,
+    per_plane)``: the widths clamped to the plane, every row a frame row
+    once the top and bottom strips meet."""
 
     def clamp(v, n):
         return max(0, min(int(v), n))
@@ -65,11 +62,23 @@ def _launch(buf, src, x_lo, x_hi, y_lo, y_hi) -> bool:
         y_lo, y_hi = ny, 0
     side = nx if x_lo + x_hi >= nx else x_lo + x_hi
     per_plane = (y_lo + y_hi) * nx + (ny - y_lo - y_hi) * side
-    count = (buf.size // (ny * nx)) * per_plane
+    return nx, ny, x_lo, x_hi, y_lo, y_hi, side, per_plane
+
+
+def _launch(buf, src, x_lo, x_hi, y_lo, y_hi) -> bool:
+    if buf.ndim < 2 or buf.size == 0 or not buf.flags.c_contiguous:
+        return False
+    if src is not None and (src.shape != buf.shape or src.dtype != buf.dtype
+                            or not src.flags.c_contiguous):
+        return False
+    ny, nx = buf.shape[-2:]
+    if buf.size >= 2 ** 31:
+        return False                  # the kernel's indices are 32-bit
+    geometry = _geometry(ny, nx, x_lo, x_hi, y_lo, y_hi)
+    count = (buf.size // (ny * nx)) * geometry[-1]
     if count == 0:
         return True                   # an empty frame: nothing to store
-    args = [np.int32(nx), np.int32(ny), np.int32(x_lo), np.int32(x_hi), np.int32(y_lo),
-            np.int32(y_hi), np.int32(side), np.int32(per_plane)]
+    args = [np.int32(v) for v in geometry]
     if src is not None:
         args.append(src)
     _frame_kernel(src is not None)(*args, buf, size=count)
@@ -95,3 +104,36 @@ def copy_frame(buf, src, x_lo: int, x_hi: int, y_lo: int, y_hi: int) -> bool:
     (``src``: the same shape and dtype, C-contiguous, not overlapping
     ``buf``).  False: nothing written, as for :func:`zero_frame`."""
     return _launch(buf, src, x_lo, x_hi, y_lo, y_hi)
+
+
+def zero_frames(bufs, x_lo: int, x_hi: int, y_lo: int, y_hi: int) -> bool:
+    """:func:`zero_frame` of every buffer in ``bufs`` in one launch
+    (bandwidth_glue.cu glue_zero_frames), the same elements and words.
+    False, with nothing written, unless there are at most 64 C-contiguous
+    FP32 buffers of at least two dimensions, one ``(ny, nx)`` and under
+    2**31 elements each; the caller then zeroes each itself.  Buffers may
+    overlap: every store is +0."""
+    if (not bufs or len(bufs) > 64 or not isinstance(bufs[0], cp.ndarray)
+            or bufs[0].ndim < 2):
+        return False
+    ny, nx = bufs[0].shape[-2:]
+    for buf in bufs:
+        if (not isinstance(buf, cp.ndarray) or buf.dtype != np.float32
+                or buf.ndim < 2 or buf.shape[-2:] != (ny, nx)
+                or not buf.flags.c_contiguous or buf.size >= 2 ** 31):
+            return False
+    if ny * nx == 0:
+        return True
+    geometry = _geometry(ny, nx, x_lo, x_hi, y_lo, y_hi)
+    rows = np.zeros((64, 3), dtype=np.uint64)
+    rows[:len(bufs)] = [(0, buf.data.ptr if buf.size else 0,
+                         (buf.size // (ny * nx)) * geometry[-1]) for buf in bufs]
+    count = int(rows[:, 2].max())
+    if count == 0:
+        return True                   # empty frames: nothing to store
+    from woof.core.kernels import get_kernel
+    table = rows.reshape(-1).view(np.dtype(('V', rows.nbytes)))
+    get_kernel('bandwidth_glue', 'glue_zero_frames')(
+        ((count + _TPB - 1) // _TPB, len(bufs)), (_TPB,),
+        (table, *[np.int32(v) for v in geometry]))
+    return True

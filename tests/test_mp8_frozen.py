@@ -1731,8 +1731,16 @@ FROZEN_MODULE_DIGESTS = {
         # both backends, fast/strict/exact; the RTX A6000 recapture reproduced
         # every production word of both advection fixtures).
         # Previously db86f46e/43d703b4.
-        '952e0f085ab73a69d8c3c6c9136fa5b6878b2689c4ac3dfba24ef72bc013ed76',
-        '6db2d481e14fcdde22252a414dca1f7524df057fd9214815767d0f6691ea9246'),
+        # RE-PINNED by RunConfig.pd_adv_west_courant (correct-mode FQ13): the
+        # strict build's WRF west-face Courant order (i == 1, (ru/mu)*dt/dx)
+        # is skipped when open_x carries bit 2.  The edit sits inside
+        # `#if GPUWM_WRF_EXACT_C_ADVECTION`, so the default build's program
+        # does not move; strict with the bit clear keeps WRF's words
+        # (tests/test_grad_wrfplus_pdadv.py, the strict primal against the
+        # TL/AD base and WRFPLUS; with it set only the x face i == 1 moves).
+        # Previously 952e0f08/6db2d481.
+        'c83b45cc0f34de9c7c015136912677d9d025a477ac443f90e945ef5d70437027',
+        '099938066f79eec28a34ad75c7997fae8c47ce032cdb7838a07f23123d8c718c'),
     'refl': (
         # Re-pinned for A146 (a98f2482e): every float division by a compile-time
         # constant is spelled __fdiv_rn, because NVRTC compiles x / C as a
