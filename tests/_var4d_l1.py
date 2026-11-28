@@ -127,6 +127,10 @@ def dot_check(model, rng) -> dict:
     return {"lhs": lhs, "rhs": rhs, "rel": abs(lhs - rhs) / abs(lhs), "lbc_moves_slot7": moved}
 
 
+def _policy(v: str):
+    return int(v) if v.isdigit() else v
+
+
 def main(lane: Path, work: Path, max_ext_its: int) -> dict:
     case = prepare_case(lane, work / "case")
     c = build_window(case, NSLOTS * SPS - SPS, checkpoint_every=1)
@@ -136,7 +140,7 @@ def main(lane: Path, work: Path, max_ext_its: int) -> dict:
     # WOOF_L1_CHECKPOINT: the window's checkpoint policy (all, the default, or slot; the
     # gradient is the same to the word under either, window4d's module docstring)
     model = w4.WindowModel(win, SPS, lbc=os.environ.get("WOOF_L1_LBC", "wrfda"),
-                           checkpoint=os.environ.get("WOOF_L1_CHECKPOINT", "all"))
+                           checkpoint=_policy(os.environ.get("WOOF_L1_CHECKPOINT", "all")))
     assert model.moisture == "advect"
     fg = read_first_guess(lane / "fg")
     states = {k: win._checkpoints[k] for k in range(0, win.nsteps, win.every)}
@@ -155,6 +159,7 @@ def main(lane: Path, work: Path, max_ext_its: int) -> dict:
         end = win.forward(x0)   # the slot states are checkpoints under either policy
         run = {**{k: win._checkpoints[k] for k in range(0, win.nsteps, win.every)}, win.nsteps: end}
         # the rerun is the window's own model: relinearise reruns it from x0 under the policy
+        # (one more forward window per loop, the same deterministic run)
         return Trajectory(slots=slot_states(state, run), start=x0)
 
     lines = []

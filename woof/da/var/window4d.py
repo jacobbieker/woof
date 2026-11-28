@@ -76,8 +76,8 @@ tape rebuilt inside the adjoint step): the AD reruns each step once, taped
 (``Window(checkpoint_every=1)``: ``nsteps`` states, no other recompute).
 ``"slot"`` keeps one per slot (``checkpoint_every = steps_per_slot``): the
 AD first reruns each slot's segment untaped to recover its step-start
-states, so it holds ``nslots + steps_per_slot`` states and pays one more
-base step per step.  An int ``c`` (dividing ``steps_per_slot``) is a
+states, so it holds at most ``(nslots - 1) + (steps_per_slot - 1)`` states
+and pays one more base step per step.  An int ``c`` (dividing ``steps_per_slot``) is a
 checkpoint every ``c`` steps.  ``None`` keeps the window's own
 ``checkpoint_every``.  The TL needs only state 0 (it advances the base with
 the perturbation).  A window on an external trajectory
@@ -389,6 +389,8 @@ class WindowModel:
         self._dev = to_device or (lambda a: _default_to_device(a, self.dtype))
         self._host = to_host or _default_to_host
         every = checkpoint_interval(checkpoint, self.sps)
+        #: the policy asked for at construction; the window holds the one in force
+        #: (``window.every``, which a later model on the same window may change)
         self.checkpoint = checkpoint
         if every is not None and int(getattr(window, "every", 1)) != every:
             window.every = every
@@ -507,8 +509,7 @@ class WindowModel:
         w = self.window
         ext = bool(getattr(w, "_external", False))
         every = 1 if ext else int(getattr(w, "every", 1))
-        state_bytes = int(sum(int(np.prod(w._start[n].shape)) * np.dtype(str(w._start[n].dtype)).itemsize
-                              for n in self._inputs()))
+        state_bytes = int(sum(int(w._start[n].nbytes) for n in self._inputs()))
         stored = len(w._checkpoints or {})
         return {"policy": self.checkpoint, "every": every, "external": ext, "state_bytes": state_bytes,
                 "stored_states": stored, "stored_bytes": stored * state_bytes,
@@ -532,7 +533,10 @@ class WindowModel:
             return
         w._start[h][...] = w._start["mup"]
         if getattr(w, "_checkpoints", None) is not None:
-            w.forward()
+            # from the state 0 it ran (a relinearised start, not only the first), halo reset
+            x0 = dict(w._checkpoints[0])
+            x0[h] = x0["mup"]
+            w.forward(x0)
         self._lbc_base = None
 
     # ------------------------------------------------------- boundary tables

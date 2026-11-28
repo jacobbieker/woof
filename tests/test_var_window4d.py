@@ -565,6 +565,38 @@ def test_relinearise_from_start():
         hmodel.relinearise(Trajectory(slots=[], start=bad))
 
 
+def test_halo_start_keeps_a_forwarded_start():
+    """A window already forwarded from a state other than its first (a
+    relinearised start) keeps that state under ``halo_start="wrfplus"``:
+    the base reruns from it, halo reset to mup, not from the window's first."""
+    nx, ny, nz = 5, 4, 3
+    win = FakeWindow(nx, ny, nz, 4, halo=True)
+    x0 = {n: v + 5.0 for n, v in win._start.items()}
+    x0[HALO] = x0[HALO] + 3.0
+    win.forward(x0)
+    w4.WindowModel(win, 2, to_device=np.asarray, to_host=np.asarray, checkpoint="slot")
+    ck = win._checkpoints[0]
+    assert ck["u"][0, 0, 0] == 6.0 and np.array_equal(ck[HALO], ck["mup"])
+
+
+def test_relinearise_from_start_moves_the_table_base():
+    """After ``relinearise(start=)`` the boundary tables' TL map couples about
+    the new state 0, and the rerun reads tables ``add_boundary_increment`` changed."""
+    from woof.da.var.outer4d import Trajectory
+
+    nx, ny, nz = 7, 6, 4
+    win = FakeWindow(nx, ny, nz, 4, lbc=True, halo=True, moist=True)
+    model = w4.WindowModel(win, 2, to_device=np.asarray, to_host=np.asarray, checkpoint="slot")
+    before = model._lbc_args()[0]["u"].copy()
+    model.add_boundary_increment({"lbc_u_west": np.ones_like(win._start["lbc_u_west"])})
+    tables = win._start["lbc_u_west"].copy()
+    start = {n: win._checkpoints[0][n] + 2.0 for n in win._names}
+    start[HALO] = start["mup"]
+    model.relinearise(Trajectory(slots=[], start=start))
+    np.testing.assert_array_equal(model._lbc_args()[0]["u"], before + 2.0)
+    np.testing.assert_array_equal(win._start["lbc_u_west"], tables)
+
+
 @pytest.mark.parametrize("press,ph", [("wrfda", "zero"), ("dnw", "hydrostatic")])
 def test_fourd_term_over_the_window_is_its_transpose(press, ph):
     from test_var_fourd import _case, _x

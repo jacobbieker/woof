@@ -297,10 +297,12 @@ The policy picks how many step-start states the window keeps:
 - `WindowModel.checkpoint_report()` gives the stored and peak states, their
   bytes, and the untaped steps each AD reruns.
 
-**Why `"all"` is the default.** It is the simplest policy that meets G3,
-and the cheapest. At the tutorial's size its memory (1.2 GB) is far below
-the A6000's 48 GB and the Mac's unified memory. `"slot"` cuts the memory
-about tenfold for one more forward step per step, which costs about 1x the
+**Why `"all"` is the recommended policy** (and what the L1 harness and
+the receipt use). It is the simplest policy that meets G3, and the
+cheapest. At the tutorial's size its memory (1.2 GB) is far below
+the A6000's 48 GB and the Mac's unified memory. `"slot"` cuts the stored
+states tenfold and the AD's peak about fourfold, for one more forward step
+per step, which costs about 1x the
 forward window per AD. Binomial (revolve) schedules for long windows remain
 P4.1's `woof/grad/checkpoint.py` and are not needed here.
 

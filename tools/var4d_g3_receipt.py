@@ -34,23 +34,27 @@ STRICT = dict(GPUWM_WRF_EXACT="1", WOOF_WRF_EXACT_DIAGNOSTICS="1", WOOF_WRF_EXAC
               GPUWM_WRF_EXACT_DIFFUSION="1", GPUWM_WRF_EXACT_BIGSTEP="1")
 
 
-def _first(o):
-    while isinstance(o, (dict, list, tuple)):
-        if not o:
-            return None
-        o = next(iter(o.values())) if isinstance(o, dict) else o[0]
-    return o
+def _leaves(o):
+    if isinstance(o, dict):
+        for v in o.values():
+            yield from _leaves(v)
+    elif isinstance(o, (list, tuple)):
+        for v in o:
+            yield from _leaves(v)
+    elif o is not None and hasattr(o, "ravel"):
+        yield o
 
 
 def _sync(cp, out=None):
-    """Wait for the device: a host read of one value forces a lazy backend too."""
+    """Wait for the device: a host read of one value of EVERY output array
+    forces a lazy backend (Metal) to evaluate each of them."""
     try:
         cp.cuda.get_current_stream().synchronize()
     except Exception:
         pass
-    v = _first(out)
-    if v is not None:
-        float(v.ravel()[0])
+    for v in _leaves(out):
+        if v.size:
+            float(v.ravel()[0])
 
 
 def _timed(cp, fn):
@@ -169,6 +173,7 @@ def l1_rows(lane: Path, work: Path, repeats):
         row["model_ad_all"] = _timed(cp, lambda: model.ad(fs))[0]
         reports["all"] = model.checkpoint_report()
         model = w4.WindowModel(win, sps, checkpoint="slot")
+        model._lbc_args()   # the table maps' host cache, built by the TL in the "all" row
         row["model_ad_slot"] = _timed(cp, lambda: model.ad(fs))[0]
         reports["slot"] = model.checkpoint_report()
         if r:
