@@ -1,0 +1,241 @@
+"""The Kain-Fritsch capped-downdraft rain floor (quirk pass, correct-mode FQ11).
+
+THE QUIRK
+---------
+WRF's Kain-Fritsch family caps the downdraft when it would evaporate more
+than the updraft rains: DDINC = TRPPT/TDER, TDER = TDER*DDINC, then
+PPTFLX = TRPPT - TDER with no floor (module_cu_kfeta.F:1810-1821,
+module_cu_kfcup.F:2711-2721, module_cu_mskf.F:5840 of WRF 4.7.1; the same
+lines in 4.8.1).  The float64 answer is 0, but in binary32 TDER*DDINC can
+round above TRPPT, and the flux is then a few ulp negative: RAINCV is
+negative for the whole NCA window and RAINC accumulates below zero.
+RunConfig.kf_capped_downdraft_rain_floor floors the flux at zero.
+
+WHAT THIS FILE HOLDS
+--------------------
+* The key is correct-mode finding FQ11: on by default, off in exact mode,
+  read only under cu_physics = 1 (kf.cu), 10 (kfcup.cu) and 11 (mskf.cu).
+* Exact mode is WRF's program: each unit carries the floor only inside one
+  ``#ifdef KF_CAPPED_DOWNDRAFT_RAIN_FLOOR`` block after WRF's bare
+  subtraction, and each unit with the block removed is byte-identical to
+  its source with the earlier unconditional floor taken out (kfcup.cu: the
+  file at a70e40753, before the floor; mskf.cu and kf.cu: the files at
+  a70e40753 with WRF's ``PPTFLX = TRPPT - TDER`` back in place of the
+  floored statement, as before 695ddf87a and d547dc8c3).
+* Every launcher compiles the define exactly when the key reaches the run;
+  a direct launcher call is WRF's arithmetic unless it asks.
+* A checkpoint written before the key resumes as that build ran: KF-eta and
+  MSKF floored unconditionally, so there an absent key is ON (a
+  correct-mode resume continues, an exact-mode one is refused by name);
+  KF-CuP ran WRF's bare subtraction, so there it is OFF.
+
+The device columns are in tests/test_kfcup_capped_downdraft_gpu.py (KF-CuP)
+and tests/test_kf.py (the seven WRF-graded KF-eta capped columns).
+"""
+from __future__ import annotations
+
+import hashlib
+import inspect
+from pathlib import Path
+
+import pytest
+
+from woof import correct_mode
+from woof.config import RunConfig, validate_run_config
+
+ROOT = Path(__file__).resolve().parents[1]
+KERNELS = ROOT / "woof" / "core" / "kernels"
+KEY = "kf_capped_downdraft_rain_floor"
+DEFINE = "KF_CAPPED_DOWNDRAFT_RAIN_FLOOR"
+
+#: Each unit: (WRF's bare statement, the floor in the block, sha256 of the
+#: unit with the block removed).
+UNITS = {
+    "kf.cu": ("pptflx = trppt - tder;", "pptflx = fmaxf(pptflx, 0.0f);",
+              "cec65b1c6d537c0960b910283e49623b2ff1fce12c7776ccad38d6787b168093"),
+    "kfcup.cu": ("PPTFLX = TRPPT - TDER;", "PPTFLX = fmaxf(PPTFLX, 0.0f);",
+                 "2a77ac6f1bbaf0f3704c7a4d6813774cfe7b19525649c528cdae21134d702dae"),
+    "mskf.cu": ("PPTFLX = TRPPT - TDER;", "PPTFLX = fmaxf(PPTFLX, 0.0f);",
+                "4881ebc1510695b0dd8de0414403a974c359af53ec612839c632c663a4bf9df1"),
+}
+
+
+def _split_blocks(text):
+    """(block bodies, text with the blocks removed)."""
+    bodies, kept, current = [], [], None
+    for line in text.splitlines(keepends=True):
+        word = line.strip()
+        if current is None:
+            if word == f"#ifdef {DEFINE}":
+                current = []
+            else:
+                kept.append(line)
+            continue
+        if word.startswith("#endif"):
+            bodies.append("".join(current))
+            current = None
+            continue
+        assert not word.startswith("#"), "the block holds no preprocessor arm"
+        current.append(line)
+    assert current is None, "unterminated floor block"
+    return bodies, "".join(kept)
+
+
+def _run(**kw):
+    kw.setdefault("moist", True)
+    return validate_run_config(RunConfig(
+        nx=8, ny=8, nz=12, dx=3000.0, dy=3000.0, ztop=12000.0, dt=10.0,
+        run_seconds=60.0, **kw))
+
+
+def test_the_key_is_correct_mode_finding_fq11():
+    assert correct_mode.FINDING_BY_KEY[KEY] == "FQ11"
+    assert correct_mode.KEY_SCOPE[KEY] == ("cu_physics", (1, 10, 11))
+    assert RunConfig.__dataclass_fields__[KEY].default is correct_mode.CORRECT_KEYS_DEFAULT
+    assert correct_mode.resolve("exact").settings[KEY] is False
+    assert correct_mode.resolve("correct").settings[KEY] is True
+
+
+@pytest.mark.parametrize("cu", [1, 10, 11])
+def test_the_launchers_read_it_where_the_kf_family_runs(cu):
+    from woof.core.kf import capped_downdraft_rain_floor_due
+    extra = dict(bl_pbl_physics=1, sf_sfclay_physics=1) if cu == 10 else {}
+    assert capped_downdraft_rain_floor_due(_run(cu_physics=cu, **extra)) \
+        is correct_mode.CORRECT_KEYS_DEFAULT
+    assert capped_downdraft_rain_floor_due(_run(cu_physics=cu, **extra, **{KEY: True})) is True
+    assert capped_downdraft_rain_floor_due(_run(cu_physics=cu, **extra, **{KEY: False})) is False
+    exact = _run(cu_physics=cu, **extra, **correct_mode.resolve("exact").settings)
+    assert capped_downdraft_rain_floor_due(exact) is False
+
+
+@pytest.mark.parametrize("cu", [0, 99])
+def test_it_is_inert_where_the_kf_family_does_not_run(cu):
+    """The old KF (99, module_cu_kf.F) forms no capped TRPPT - TDER."""
+    from woof.core.kf import capped_downdraft_rain_floor_due
+    assert capped_downdraft_rain_floor_due(_run(cu_physics=cu, **{KEY: True})) is False
+
+
+@pytest.mark.parametrize("unit", sorted(UNITS))
+def test_without_the_define_every_unit_is_wrfs_subtraction(unit):
+    text = (KERNELS / unit).read_text(encoding="utf-8")
+    bare, floor, digest = UNITS[unit]
+    bodies, stripped = _split_blocks(text)
+    assert len(bodies) == 1, unit
+    # The block floors the flux WRF's statement just formed, and nothing else.
+    statements = [line.strip() for line in bodies[0].splitlines()
+                  if line.strip() and not line.strip().startswith(("/*", "*"))]
+    assert statements == [floor], (unit, statements)
+    assert text.count(bare) == 1, unit
+    head = text[:text.index(f"#ifdef {DEFINE}")]
+    assert head.rstrip().endswith(bare), unit
+    assert "fmaxf(trppt - tder" not in stripped.lower(), unit
+    assert hashlib.sha256(stripped.encode("utf-8")).hexdigest() == digest, unit
+
+
+def test_the_default_compile_never_sets_the_define():
+    from woof.core.kf import CAPPED_DOWNDRAFT_RAIN_FLOOR_DEFINES
+    assert CAPPED_DOWNDRAFT_RAIN_FLOOR_DEFINES == ((DEFINE, 1),)
+    from woof.core import kf, mskf
+    # A direct launcher call is WRF's arithmetic unless it asks.
+    for launcher in (kf.launch_kf, kf.launch_kfcup_columns, mskf.launch_mskf):
+        assert inspect.signature(launcher).parameters["rain_floor"].default is False
+
+
+def test_every_production_adapter_passes_the_key():
+    from woof.core import column_cumulus, kf
+    for source in (inspect.getsource(kf.KainFritsch.__call__),
+                   inspect.getsource(kf.KFCumulusPotential.__call__),
+                   inspect.getsource(column_cumulus.MskfColumnCumulus.__call__)):
+        assert "rain_floor=capped_downdraft_rain_floor_due(cfg)" in source
+
+
+
+def _pre_key_header(cfg):
+    """The echo a build before the key wrote for ``cfg``'s scheme choice."""
+    from woof.io import restart
+    echo = restart.configuration_echo(cfg)
+    echo.pop(KEY, None)
+    return echo
+
+
+_KF_CUP = dict(bl_pbl_physics=1, sf_sfclay_physics=1)
+_strict_skip = pytest.mark.skipif(correct_mode.STRICT,
+                                  reason="a strict process refuses correct mode")
+
+
+@_strict_skip
+@pytest.mark.parametrize("cu", [1, 11])
+def test_an_echo_carries_the_key_only_where_it_differs_from_what_absence_ran(cu):
+    from woof.io import restart
+    assert KEY not in restart.configuration_echo(_run(cu_physics=cu))
+    exact = restart.configuration_echo(
+        _run(cu_physics=cu, **correct_mode.resolve("exact").settings))
+    assert exact[KEY] is False
+    cup = restart.configuration_echo(_run(cu_physics=10, **_KF_CUP))
+    assert cup[KEY] is True
+    assert KEY not in restart.configuration_echo(
+        _run(cu_physics=10, **_KF_CUP, **correct_mode.resolve("exact").settings))
+
+
+@_strict_skip
+@pytest.mark.parametrize("cu", [1, 11])
+def test_a_pre_key_kf_or_mskf_checkpoint_resumes_in_correct_mode(cu):
+    """main floored kf.cu and mskf.cu unconditionally: absent is ON."""
+    from woof.io import restart
+    live = _run(cu_physics=cu)
+    restart._require_config_match(_pre_key_header(live), live, "pre-key.npz")
+
+
+@pytest.mark.parametrize("cu", [1, 11])
+def test_a_pre_key_kf_or_mskf_checkpoint_is_refused_in_exact_mode_by_name(cu):
+    """Exact mode would silently drop the floor that checkpoint ran with."""
+    from woof.io import restart
+    header = restart.configuration_echo(_run(cu_physics=cu, **{KEY: False}))
+    header.pop(KEY)      # what the pre-key build wrote: its floor was on
+    live = _run(cu_physics=cu, **correct_mode.resolve("exact").settings)
+    with pytest.raises(restart.RestartMismatchError) as refused:
+        restart._require_config_match(header, live, "pre-key.npz")
+    assert KEY in str(refused.value)
+    assert "before the key existed" in str(refused.value)
+
+
+def test_a_pre_key_kfcup_checkpoint_ran_without_the_floor():
+    """main's kfcup.cu was WRF's bare subtraction: absent is OFF, so an
+    exact-mode resume continues and a correct-mode one is refused."""
+    from woof.io import restart
+    exact = _run(cu_physics=10, **_KF_CUP, **correct_mode.resolve("exact").settings)
+    header = _pre_key_header(exact)
+    restart._require_config_match(header, exact, "pre-key.npz")
+    if correct_mode.STRICT:
+        return
+    with pytest.raises(restart.RestartMismatchError) as refused:
+        restart._require_config_match(header, _run(cu_physics=10, **_KF_CUP), "pre-key.npz")
+    assert KEY in str(refused.value)
+
+
+@pytest.mark.parametrize("cu", [1, 11])
+@pytest.mark.parametrize("umbrella, named, floor", [
+    ("all", {}, True),
+    ("none", {}, False),
+    ("none", {KEY: True}, True),
+])
+def test_the_umbrella_resolves_before_the_absent_rule(cu, umbrella, named, floor):
+    """woof_quirk_corrections resolves to an explicit key (a key named next
+    to 'none' wins); the echo and a pre-key KF/MSKF checkpoint then read
+    that value against absent-is-on, whatever the umbrella was."""
+    from woof.io import restart
+    if correct_mode.STRICT and floor:
+        pytest.skip("a strict process refuses correct mode")
+    live = _run(cu_physics=cu, woof_quirk_corrections=umbrella, **named)
+    assert getattr(live, KEY) is floor
+    echo = restart.configuration_echo(live)
+    assert (KEY in echo) is (not floor)
+    header = restart.configuration_echo(_run(cu_physics=cu, **{KEY: False}))
+    header.pop(KEY)      # a pre-key checkpoint: its floor was on
+    if floor:
+        restart._require_config_match(header, live, "pre-key.npz")
+    else:
+        assert echo[KEY] is False
+        with pytest.raises(restart.RestartMismatchError) as refused:
+            restart._require_config_match(header, live, "pre-key.npz")
+        assert KEY in str(refused.value)

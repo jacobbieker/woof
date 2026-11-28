@@ -725,6 +725,15 @@ void mynn_surface_column(
     real t2 = th2 * SL_POW(__fdiv_rn(psfc, 100.0f), rovcp);
     real q2 = qsfcmr + (qv1 - qsfcmr) * psiq2 / psiq;
     q2 = fmaxf(q2, fminf(qsfcmr, qv1));
+#ifdef MYNN_SL_Q2_LAND_CAP
+    // Correct mode (RunConfig.mynn_sfclay_q2_land_cap, FQ10): WRF
+    // module_sf_mynn.F:1149 caps Q2 at 1.05*QV1D at every point, but the driver's
+    // own cap of the same limit (module_surface_driver.F:4452-4455, "unrealistic
+    // values when QFX is not mostly surface flux ... vegetation source") runs
+    // over land only (XLAND < 1.5).  Over water the 2 m moisture is the
+    // surface-flux profile this kernel computed, so keep it.
+    if (xland < 1.5f)
+#endif
     q2 = fminf(q2, 1.05f * qv1);
 
     regime_o[idx] = regime; zol_o[idx] = zol; rmol_o[idx] = rmol;

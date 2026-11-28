@@ -1,0 +1,48 @@
+{
+  "schema": "woof.runtime-estimate.receipt.v1",
+  "id": "a6000-held-out-20261127",
+  "recorded_utc": "2026-11-27T10:35:00Z",
+  "what": "two woof go forecasts predicted by woof estimate BEFORE they ran (code 711ee4d70, after the a6000-manila-3km-l anchor was added), then timed end to end; neither is an anchor",
+  "host": {"card": "NVIDIA RTX A6000", "card_memory_mib": 49140, "driver": "610.57.04", "host_cpus": 32, "os": "Linux"},
+  "contention": {
+    "method": "nvidia-smi compute apps and /proc/loadavg every 15 s",
+    "card": "each forecast was the only compute process on the card in every sample",
+    "host": "load average 5 to 12"
+  },
+  "runs": [
+    {
+      "id": "a6000-india-3km-l",
+      "configuration": {
+        "emitted_by": "woof domain --point 15,78 --root-dx 3 --point-extent-km 1800 --clock fixed --source gfs --cycle 2026-11-07T00 --hours 3",
+        "grid": "600 x 480 x 49, dx 3 km", "columns": 288000, "dt_s": 7.5,
+        "run_seconds": 10800, "steps": 1440, "radt_min": 12,
+        "physics": "Morrison, RTE+RRTMGP, YSU, Noah, no cumulus",
+        "history_interval_s": 3600, "restart_interval_s": 3600
+      },
+      "predicted_s": {"total": [623.4, 1045.5], "prepare": [86.0, 117.0], "model steps": [523.3, 680.3], "radiation steps": [13.1, 17.0], "output": [0.0, 74.9], "restart writes": [1.0, 156.3], "root_seconds_per_step": [0.372, 0.484]},
+      "measured_s": {"launch_to_done": 620, "fetch": 18, "prepare": 53, "forecast_stage": 575, "forecast_loop": 556.4, "step_walls_sum": 530.7, "seconds_per_step_steps_only": 0.3685, "ordinary_step_median": 0.3557, "radiation_step_mean": 1.630, "radiation_step_ratio": 4.58, "history_writes": 13.43, "restart_writes": 16.01},
+      "verdict": "total 3 s (0.5 %) under the low end; the steps (530.7 s against 536.4-697.3 s for model plus radiation) 1 % under; prepare under (71 s against 86-117 s: the preparation fit is from another host, and go starts the forecast while later boundary intervals are still being prepared); output and restarts inside"
+    },
+    {
+      "id": "a6000-australia-9km",
+      "configuration": {
+        "emitted_by": "woof domain --point -25,135 --root-dx 9 --point-extent-km 2700 --clock fixed --source gfs --cycle 2026-11-07T00 --hours 6",
+        "grid": "300 x 240 x 49, dx 9 km", "columns": 72000, "dt_s": 45,
+        "run_seconds": 21600, "steps": 480, "radt_min": 12,
+        "physics": "Morrison, RTE+RRTMGP, YSU, Noah, Kain-Fritsch (cudt 5.25 min)",
+        "history_interval_s": 3600, "restart_interval_s": 3600
+      },
+      "predicted_s": {"total": [99.4, 315.7], "prepare": [32.0, 63.0], "model steps": [58.2, 90.8], "radiation steps": [8.7, 51.0], "output": [0.0, 32.8], "restart writes": [0.5, 78.2], "root_seconds_per_step": [0.139, 0.295]},
+      "measured_s": {"launch_to_done": 132, "fetch": 17, "prepare": 43, "forecast_stage": 91, "forecast_loop": 79.9, "step_walls_sum": 70.08, "seconds_per_step_steps_only": 0.146, "ordinary_step_median": 0.1226, "radiation_step_mean": 0.452, "radiation_step_ratio": 3.69, "history_writes": 4.2, "restart_writes": 6.69},
+      "verdict": "inside: total 132 s against 99-316 s; steps 70.1 s against 66.9-141.8 s"
+    }
+  ],
+  "calibration_demo": {
+    "command": "woof estimate rt-mnl-3km.toml --calibrate 100 --prepared-root <the manila run's prepared bundle>",
+    "measured_steps": 109,
+    "settled_median_s_per_step": 0.19,
+    "extrapolated_forecast_min": 9.5,
+    "full_run_step_walls_min": 10.06,
+    "note": "the extrapolation from 109 steps fell 5 % under the full run's summed step walls"
+  }
+}

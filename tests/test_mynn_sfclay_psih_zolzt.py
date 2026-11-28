@@ -45,6 +45,8 @@ ORACLE = REPO / "tests" / "data" / "oracles" / "mynn" / "surface-layer.csv"
 PRE_OPT_IN_SHA256 = "a02979c2ef27ce361f092675cef0d55705be6ff3f298a04b7e969b1c9694bdd9"
 
 _BLOCK = re.compile(r"#ifdef MYNN_SL_PSIH_ZOLZT\n.*?#endif\n", re.S)
+#: the later FQ10 block is not part of the unit pinned before this key
+_Q2_BLOCK = re.compile(r"#ifdef MYNN_SL_Q2_LAND_CAP\n.*?#endif\n", re.S)
 
 #: Outputs psih2/psih10 reach: the 2 m / 10 m diagnostics only.
 MOVED = frozenset({"th2", "t2", "q2", "chs2", "cqs2", "ck", "cka"})
@@ -69,7 +71,7 @@ def test_the_default_program_is_the_pre_opt_in_unit():
     blocks = _BLOCK.findall(source)
     assert len(blocks) == 2
     assert all("zolzt);" in block for block in blocks)
-    stripped = _BLOCK.sub("", source)
+    stripped = _BLOCK.sub("", _Q2_BLOCK.sub("", source))
     assert hashlib.sha256(stripped.encode("utf-8")).hexdigest() == PRE_OPT_IN_SHA256
 
 
@@ -79,19 +81,24 @@ def _base(**kw):
                      dt=10.0, run_seconds=60.0, **kw)
 
 
-def test_the_key_is_off_by_default_and_mynn_wrf461_only():
+def test_the_key_follows_the_mode_and_is_read_by_mynn_wrf461_only():
+    from woof import correct_mode
     from woof.config import ConfigurationRefused, RunConfig, validate_run_config
+    from woof.quirk_corrections import run_reads
     field = RunConfig.__dataclass_fields__["mynn_sfclay_psih_zolzt"]
-    assert field.default is False and field.kw_only
-    validate_run_config(_base(bl_pbl_physics=5, sf_sfclay_physics=5,
-                              mynn_sfclay_psih_zolzt=True))
-    with pytest.raises(ConfigurationRefused, match="sf_sfclay_physics = 5"):
-        validate_run_config(_base(bl_pbl_physics=1, sf_sfclay_physics=1,
-                                  mynn_sfclay_psih_zolzt=True))
-    with pytest.raises(ConfigurationRefused, match="wrf_461"):
-        validate_run_config(_base(bl_pbl_physics=5, sf_sfclay_physics=5,
-                                  mynn_sfclay_variant="gsl_wrf39",
-                                  mynn_sfclay_psih_zolzt=True))
+    # correct-mode finding FQ3: on in a default process, off in exact mode
+    assert field.default is correct_mode.CORRECT_KEYS_DEFAULT and field.kw_only
+    assert correct_mode.resolve("exact").settings["mynn_sfclay_psih_zolzt"] is False
+    assert run_reads(validate_run_config(_base(bl_pbl_physics=5, sf_sfclay_physics=5,
+                                               mynn_sfclay_psih_zolzt=True)), "mynn_sfclay_psih_zolzt")
+    assert not run_reads(validate_run_config(_base(bl_pbl_physics=1, sf_sfclay_physics=1,
+                                                   mynn_sfclay_psih_zolzt=True)), "mynn_sfclay_psih_zolzt")
+    # the gsl_wrf39 fork integrates from z0/L throughout: nothing to correct
+    gsl = validate_run_config(_base(bl_pbl_physics=5, sf_sfclay_physics=5,
+                                    mynn_sfclay_variant="gsl_wrf39",
+                                    mynn_sfclay_psih_zolzt=True))
+    assert not run_reads(gsl, "mynn_sfclay_psih_zolzt")
+    assert "FQ3" not in correct_mode.uncorrected(gsl)
     with pytest.raises(ConfigurationRefused, match="true or false"):
         validate_run_config(_base(bl_pbl_physics=5, sf_sfclay_physics=5,
                                   mynn_sfclay_psih_zolzt=1))
@@ -184,11 +191,11 @@ def test_the_umbrella_turns_it_on_for_the_wrf461_surface_layer():
     kw = apply_run_corrections(dict(woof_quirk_corrections="all", bl_pbl_physics=5, sf_sfclay_physics=5))
     assert kw["mynn_sfclay_psih_zolzt"] is True
     assert validate_run_config(_base(**kw)).mynn_sfclay_psih_zolzt is True
-    # the gsl_wrf39 fork has nothing to correct, so the umbrella leaves it off
+    # the gsl_wrf39 fork has nothing to correct: the key is not read there
+    from woof.quirk_corrections import run_reads
     kw = apply_run_corrections(dict(woof_quirk_corrections="all", bl_pbl_physics=5, sf_sfclay_physics=5,
                                     mynn_sfclay_variant="gsl_wrf39"))
-    assert "mynn_sfclay_psih_zolzt" not in kw
-    validate_run_config(_base(**kw))
+    assert not run_reads(validate_run_config(_base(**kw)), "mynn_sfclay_psih_zolzt")
     with pytest.raises(ConfigurationRefused, match="mynn_sfclay_psih_zolzt"):
-        apply_run_corrections(dict(woof_quirk_corrections="all", sf_sfclay_physics=5,
+        apply_run_corrections(dict(woof_quirk_corrections="all", bl_pbl_physics=5, sf_sfclay_physics=5,
                                    mynn_sfclay_psih_zolzt=False))

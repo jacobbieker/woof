@@ -79,7 +79,7 @@
 #undef RHOWATER
 #undef EP2
 
-#define MSKF_KMAX 160
+#define MSKF_KMAX 256
 #define MSKF_LANES 32
 #define MSKF_FSLOTS 101
 #define MSKF_DSLOTS 62
@@ -2120,15 +2120,19 @@ TRPPT = ((TRPPT+PPTLIQ(KQ))+PPTICE(KQ));
                 DDR(NK) = DDR(NK) * DDINC;
             }
             CPR = TRPPT;
-            /* Declared divergence from WRF, the one kf.cu already carries
-             * for module_cu_kfeta.F: when the cap above sets DDINC =
-             * TRPPT/TDER, binary32 TDER*DDINC can round above TRPPT, and the
-             * bare TRPPT-TDER is then minus a few ulp, so PRATEC is negative
-             * and RAINC accumulates below zero (hex option matrix,
-             * cumulus.multiscale-kf: 9 cells at -5e-10 .. -4.5e-9 mm after
-             * 1 h on a 5 km regional mesh; the hex snapshot gate refuses a
-             * negative accumulation).  The float64 answer there is 0. */
-            PPTFLX = fmaxf(TRPPT - TDER, 0.0f);
+            PPTFLX = TRPPT - TDER;
+#ifdef KF_CAPPED_DOWNDRAFT_RAIN_FLOOR
+            /* RunConfig.kf_capped_downdraft_rain_floor (correct-mode FQ11):
+             * when the cap above sets DDINC = TRPPT/TDER, binary32
+             * TDER*DDINC can round above TRPPT, and WRF's bare TRPPT-TDER
+             * (module_cu_mskf.F:5840) is then minus a few ulp, so PRATEC
+             * is negative and RAINC accumulates below zero (hex option
+             * matrix, cumulus.multiscale-kf: 9 cells at -5e-10 .. -4.5e-9
+             * mm after 1 h on a 5 km regional mesh).  The float64 answer
+             * there is 0; the flux is floored at it.  Without the define
+             * this is WRF's arithmetic. */
+            PPTFLX = fmaxf(PPTFLX, 0.0f);
+#endif
             PEFF = PPTFLX / TRPPT;
             if (LDB > 1) {
                 for (NK = 1; NK <= LDB - 1; ++NK) {

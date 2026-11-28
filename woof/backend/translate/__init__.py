@@ -734,8 +734,26 @@ class _Rewriter:
         # A reference member's binding is recorded where its constructor runs, which the real pass may
         # reach after a function that reads through the member: the probe's whole-unit record seeds it.
         self._reference_field_seed = {key: set(spaces) for key, spaces in probe.ref_field_spaces.items()}
-        generic = {owner for (owner, _field), spaces in probe.field_spaces.items() if len(spaces) > 1}
+        # A field that names its space outright (``annotate("woof_space:...")``, _field_space) keeps it:
+        # its struct is not made generic (GFL's Metal lowering moves every local a lane pointer can
+        # reach into device memory, but the probe still sees the constructors' unbound parameters).
+        named = self._space_named_fields(top)
+        generic = {key[0] for key, spaces in probe.field_spaces.items() if len(spaces) > 1 and key not in named}
         return self._generic_companions(top, generic)
+
+    def _space_named_fields(self, top) -> set:
+        """field_key of every pointer field annotated with an explicit address space."""
+        from woof.backend.translate.spaces import field_key
+        named = set()
+        for c in top:
+            if not self.main_file(c):
+                continue
+            for n in c.walk_preorder():
+                if n.kind.name == "FIELD_DECL" and any(
+                        a.kind.name == "ANNOTATE_ATTR" and a.spelling.startswith(_SPACE_HINT)
+                        for a in n.get_children()):
+                    named.add(field_key(n))
+        return named
 
     def _generic_companions(self, top, generic: set) -> set:
         """Pointer-holding class templates that a generic struct's methods
@@ -1030,7 +1048,8 @@ class _Rewriter:
         """
         K = self.ci.CursorKind
         canon = node.type.get_canonical().kind.name
-        if canon == "CONSTANTARRAY" and node.type.get_canonical().element_type.get_canonical().kind.name == "POINTER":
+        if canon in ("CONSTANTARRAY", "DEPENDENTSIZEDARRAY") \
+                and node.type.get_canonical().element_type.get_canonical().kind.name == "POINTER":
             self.local_pointer_array(node)
             return
         if canon not in ("POINTER", "LVALUEREFERENCE"):
@@ -2550,10 +2569,22 @@ class _Rewriter:
             if call.kind != K.CALL_EXPR or not self.main_file(call):
                 continue
             fn = call.referenced
+            if fn is None and getattr(self, "spaces", None) is not None:
+                # a call in a template on its own parameter (p3's
+                # p3_impose_max_total_ni<NCAT>(ni_, ...)): clang leaves it unresolved
+                info = self.spaces.resolve_call(call)
+                fn = info.cursor if info is not None else None
             if fn is None or fn.kind not in kinds:
                 continue
             from woof.backend.translate.spaces import _call_arguments
             for i, arg in enumerate(_call_arguments(call)):
+                bare = arg
+                while bare.kind.name in ("UNEXPOSED_EXPR", "PAREN_EXPR") and len(list(bare.get_children())) == 1:
+                    bare = list(bare.get_children())[0]
+                if bare.kind.name == "DECL_REF_EXPR" and _local_pointer_array(bare) is not None:
+                    # the array itself (a dependent-sized one is no T** to clang)
+                    storage.setdefault((fn.get_usr(), i), set()).add("thread")
+                    continue
                 if not _is_table(arg.type):
                     continue
                 if _local_pointer_array(arg) is not None:
@@ -2667,7 +2698,18 @@ class _Rewriter:
     #: THOMPSON_COLUMN_KMAX 128 and 256, and at the default 64 as well, so
     #: the tier gate covers every tier.  Out of line (size or none: the same
     #: words) the three tiers agree word for word on the same columns.
-    INLINE_POLICY_BY_KERNEL_TIER = {("thompson_column_step", "THOMPSON_COLUMN_KMAX", 64): "size"}
+    #: WSM7, WDM5 and WDM7's per-thread level arrays at their 256 tier
+    #: (28.7-39 KB frames) crash the service the same way fully inlined;
+    #: the 64/80/128 tiers build fully inlined as before.  QNSE's EDMF
+    #: mfshconv_column at its QNSE_KMAX 256 tier (a 30.7 KB frame) does too.
+    #: The policy is per unit, so qnsepbl_column at 256 is built out of line
+    #: as well; both kernels' words at 256 match CUDA's under GPUWM_WRF_EXACT
+    #: (#823), and the QNSE 128 tier builds fully inlined as before.
+    INLINE_POLICY_BY_KERNEL_TIER = {("thompson_column_step", "THOMPSON_COLUMN_KMAX", 64): "size",
+                                    ("wsm7_column", "WSM7_KMAX", 256): "size",
+                                    ("wdm5_column", "WDM5_KMAX", 256): "size",
+                                    ("wdm7_column", "WDM6_KMAX", 256): "size",
+                                    ("mfshconv_column", "QNSE_KMAX", 256): "size"}
 
     def _unit_inline_policy(self) -> str:
         policy = self.INLINE_POLICY_BY_UNIT.get(self.unit.split("[", 1)[0], "")
@@ -2768,6 +2810,9 @@ class _Rewriter:
                 break
         if idx is None:
             return None
+        if cursor.kind.name == "CONVERSION_FUNCTION":
+            # `explicit operator char*()`: the type follows `operator`
+            return tokens[idx + 1].extent.start.offset if idx + 1 < len(tokens) else None
         i = 0
         if tokens and tokens[0].spelling == "template":
             depth = 0

@@ -30,6 +30,11 @@
   ``operator[]`` a ``device`` reference when a function using it was
   analysed before the field's threadgroup assignment, and the MSL did not
   compile.  The field's space is now seeded from the whole-unit probe.
+* A local array of pointers sized by a template parameter (P3's
+  ``float* qi_[NCAT]``) is dependent-sized in the template: it got no
+  address space, its element assignments were not seen, and passing it to a
+  ``float* const*`` parameter through an unresolved template call kept the
+  address-table overload, so the P3 unit did not compile.
 """
 
 import importlib.util
@@ -248,3 +253,78 @@ def test_strict_compare_and_minmax_keep_subnormals(cp, monkeypatch, name):
     zero = np.float32(0)
     got = cp.asnumpy(getattr(cp, name)(cp.asarray(x), zero))
     assert got.tobytes() == np.asarray(getattr(np, name)(x, zero)).tobytes()
+
+
+_NAMED_DEVICE_FIELD = r'''
+// GFL's lane pointer (woof.core.gfl_lanes): a class template whose one pointer
+// field names its space, with a value type that has its own operator* in scope.
+struct Word { float v; };
+__device__ Word operator*(Word a, Word b) { return Word{a.v * b.v}; }
+template<class T> struct LanePtr {
+  T* p __attribute__((annotate("woof_space:device")));
+  __device__ LanePtr(T* q) : p(q) {}
+  template<class I> __device__ T& operator[](I i) const { return *(T*)((char*)p + (long long)i * 8); }
+  __device__ T& operator*() const { return *p; }
+  __device__ explicit operator char*() const { return (char*)p; }
+};
+template<class T> __device__ char* raw(LanePtr<T> q) { return (char*)q.p; }
+template<class T> __device__ T& deref(T* q) { T& r = *q; return r; }
+__device__ void scale(LanePtr<Word> a, int n) {
+  for (int i = 1; i < n; i++) a[i] = a[i] * a[0];
+  *a = Word{-1.0f};
+  ((float*)raw(a))[1] += 0.5f;
+  ((float*)(char*)a)[3] += 0.25f;
+  deref(a.p + 5).v += 0.125f;
+}
+extern "C" __global__ void named_device_field(Word* w, int n) { scale(LanePtr<Word>(w), n); }
+'''
+
+
+def test_struct_field_that_names_device_space_returns_device_references(cp):
+    """A device-named pointer field: ``*p``, ``*(T*)...`` and ``*q`` on a parameter (unresolved
+    operator calls while an operator* is in scope), a returned ``(char*)q.p`` and
+    ``operator char*`` stay device."""
+    from woof.backend.translate import translate
+    msl = translate(_NAMED_DEVICE_FIELD, unit="named_device_field").msl
+    assert "device T& operator*()" in msl and "operator device char*()" in msl
+    host = np.array([2, 0, 3, 0, 4, 0, 5, 0], dtype=np.float32)
+    w = cp.asarray(host)
+    cp.RawKernel(_NAMED_DEVICE_FIELD, "named_device_field")((1,), (1,), (w, np.int32(4)))
+    want = host.copy()
+    want[2], want[4], want[6] = 6, 8, 10
+    want[0] = -1
+    want[1] += 0.5
+    want[3] += 0.25
+    want[5] += 0.125
+    assert cp.asnumpy(w).tobytes() == want.tobytes()
+
+
+_TEMPLATE_POINTER_ARRAY = r'''
+template <int N>
+__device__ float sum_at(float* const* p, int at) {
+    float s = 0.0f;
+    for (int c = 0; c < N; ++c) s += p[c][at];
+    return s;
+}
+template <int N>
+__device__ void gather(float* a, float* b, float* out, int at) {
+    float* x[N];
+    x[0] = a;
+    x[1] = b;
+    for (int c = 0; c < N; ++c) x[c][at] = x[c][at] * 2.0f;
+    out[at] = sum_at<N>(x, at);
+}
+extern "C" __global__ void template_pointer_array(float* a, float* b, float* out, int n) {
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i < n) gather<2>(a, b, out, i);
+}
+'''
+
+
+def test_template_sized_local_pointer_array(cp):
+    a = np.arange(32, dtype=np.float32)
+    b = np.arange(32, dtype=np.float32) * 3.0
+    da, db, out = cp.asarray(a), cp.asarray(b), cp.zeros(32, dtype=cp.float32)
+    cp.RawKernel(_TEMPLATE_POINTER_ARRAY, "template_pointer_array")((1,), (32,), (da, db, out, np.int32(32)))
+    assert cp.asnumpy(out).tobytes() == (2 * a + 2 * b).tobytes()
+    assert cp.asnumpy(da).tobytes() == (2 * a).tobytes()

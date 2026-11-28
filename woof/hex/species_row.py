@@ -919,8 +919,15 @@ def engine_species_row(
             # WRF Morrison sums signed category fallout (morrison.cu,
             # precipitation sums). The engine preserves these bucket words;
             # only its consumer-facing snow fraction is bounded to [0, 1].
-            signed_fallout=(int(mp_physics) == 10
-                            and key in ("RAINNC", "SNOWNC", "GRAUPELNC")))
+            # WRF CAM-MG (mp_physics=11) forms RAINNCV and SNOWNCV as
+            # (prec_sed + prec_pcw) * dtime * 1e3 and adds them unclipped
+            # (phys/module_mp_cammgmp_driver.F:1385-1390, WRF 4.7.1): a
+            # roundoff-negative step (-3.2e-24 mm in one cell of the hex
+            # option matrix at step 0) is WRF's word, not a broken state.
+            signed_fallout=((int(mp_physics) == 10
+                             and key in ("RAINNC", "SNOWNC", "GRAUPELNC"))
+                            or (int(mp_physics) == 11
+                                and key in ("RAINNC", "SNOWNC"))))
         for key in keys
     )
     return MicrophysicsSpeciesRow(

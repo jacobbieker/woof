@@ -33,7 +33,7 @@ import pytest
 from woof.da.var import fourd as f4
 from woof.da.var import transfer4d as t4
 from woof.da.var import window4d as w4
-from woof.grad.wrfplus.model import STEP_INPUTS
+from woof.grad.wrfplus.model import SPECIES, STEP_INPUTS
 
 from woof.grad.wrfplus import model as _M  # noqa: E402
 
@@ -71,28 +71,54 @@ ROOT = Path(__file__).resolve().parents[1]
 class FakeWindow:
     """A linear stand-in for :class:`woof.grad.wrfplus.window.Window`
     (numpy, its names and shapes): each step rolls every field along ``i``
-    and feeds ``p_pert`` into ``p`` and ``thp`` and ``muts`` into ``mup``."""
+    and feeds ``p_pert`` into ``p`` and ``thp`` and ``muts`` into ``mup``.
+    With ``lbc`` it is a specified domain's: boundary tables (``params``,
+    width 2, coupled-field shapes) that add into ``thp``'s first column
+    each step, and the constants :func:`window4d.lbc_tl` reads."""
 
-    def __init__(self, nx, ny, nz, nsteps, dtype=np.float64, every=1, halo=False):
+    def __init__(self, nx, ny, nz, nsteps, dtype=np.float64, every=1, halo=False, moist=False, lbc=False):
         mass, two = (nz, ny, nx), (ny, nx)
         shapes = {"u": (nz, ny, nx + 1), "v": (nz, ny + 1, nx), "w": (nz + 1, ny, nx), "php": (nz + 1, ny, nx),
                   "thp": mass, "p": mass, "al": mass, "alt": mass, "p_pert": mass, "mup": two, "muts": two,
-                  HALO: two}
-        if halo:   # a specified domain's Window.inputs (#743)
-            self.inputs = STEP_INPUTS + (HALO,)
-        names = STEP_INPUTS + ((HALO,) if halo else ())
+                  HALO: two, "qv": mass, "qc": mass, "qr": mass}
+        names = STEP_INPUTS + (SPECIES if moist else ()) + ((HALO,) if halo else ())
+        if halo or moist:   # Window.inputs: a moist state's species, a specified domain's halo
+            self.inputs = names
         self._start = {n: np.ones(shapes[n], dtype=dtype) for n in names}
+        self._names = names
+        self.params = ()
+        if lbc:
+            self.inputs = names
+            rng = np.random.default_rng(11)
+            for n in names:   # a base with structure (the coupling's products)
+                self._start[n] = 1.0 + 0.1 * rng.standard_normal(shapes[n])
+            self._start.update(mub2d=9.0 + rng.random(two), msfu=1.0 + 0.1 * rng.random((ny, nx + 1)),
+                               msfv=1.0 + 0.1 * rng.random((ny + 1, nx)))
+            fields = {"u": "u", "v": "v", "theta": "thp", "phi": "php", "mu": "mup", **({"qv": "qv"} if moist else {})}
+            params = []
+            for f, n in fields.items():
+                full = np.zeros((1,) + two if f == "mu" else shapes[n])
+                for side in w4._SIDES:
+                    t = np.ascontiguousarray(w4._side(full, side, 2))
+                    self._start[f"lbc_{f}_{side}"] = t + 50.0
+                    self._start[f"lbc_{f}_{side}_t"] = t - 0.01
+                    params += [f"lbc_{f}_{side}", f"lbc_{f}_{side}_t"]
+            self.params = tuple(params)
+            self.lbc_seconds = 600.0
         self.nsteps = nsteps
         self.every = every
         self._checkpoints = None
         self.forwards = 0
 
-    def forward(self):
-        """The base: the start plus ``k`` in every field at state ``k``."""
+    def forward(self, x0=None, *, trajectory=None):
+        """The base: the start plus ``k`` in every field at state ``k`` (or
+        ``trajectory``'s states, as ``Window.forward(trajectory=)``)."""
+        if trajectory is not None:
+            return self.use_trajectory(list(trajectory))
         self.forwards += 1
-        self._checkpoints = {k: {n: v + k for n, v in self._start.items()}
+        self._checkpoints = {k: {n: self._start[n] + k for n in self._names}
                              for k in range(0, self.nsteps, self.every)}
-        return {n: v + self.nsteps for n, v in self._start.items()}
+        return {n: self._start[n] + self.nsteps for n in self._names}
 
     def use_trajectory(self, states):
         """``forward(trajectory=states)`` as #746 keeps it: every state but
@@ -107,6 +133,9 @@ class FakeWindow:
         d["p"] = d["p"] + 0.3 * d["p_pert"]
         d["mup"] = d["mup"] + 0.2 * d["muts"]
         d["thp"] = d["thp"] + 0.05 * d["p_pert"]
+        if "qv" in d:   # qv feels theta, and qc carries qv
+            d["qv"] = d["qv"] + 0.07 * d["thp"]
+            d["qc"] = d["qc"] + 0.4 * d["qv"]
         if HALO in d:
             d[HALO] = d[HALO] + 0.5 * d["mup"]
         return d
@@ -116,18 +145,31 @@ class FakeWindow:
         a = dict(a)
         if HALO in a:
             a["mup"] = a["mup"] + 0.5 * a[HALO]
+        if "qv" in a:
+            a["qv"] = a["qv"] + 0.4 * a["qc"]
+            a["thp"] = a["thp"] + 0.07 * a["qv"]
         a["p_pert"] = a["p_pert"] + 0.05 * a["thp"]
         a["muts"] = a["muts"] + 0.2 * a["mup"]
         a["p_pert"] = a["p_pert"] + 0.3 * a["p"]
         return {n: v + 0.1 * np.roll(v, -1, axis=-1) for n, v in a.items()}
 
+    def _push(self, dx, tables):
+        """The tables' share of a step: table ``j`` adds ``0.01 (j + 1) sum``
+        into thp's first column."""
+        for j, n in enumerate(self.params):
+            if n in tables:
+                dx["thp"][..., 0] += 0.01 * (j + 1) * float(np.sum(tables[n]))
+
     def tl(self, dx0, save_at=(), *, partial=False):
-        assert partial and set(dx0) <= set(self._start)
+        assert partial and set(dx0) <= set(self._names) | set(self.params)
+        for n in set(dx0) & set(self.params):
+            assert dx0[n].shape == self._start[n].shape, n
         self.last_dx0 = dx0
-        dx = {n: np.array(dx0[n]) if n in dx0 else np.zeros_like(v) for n, v in self._start.items()}
+        dx = {n: np.array(dx0[n]) if n in dx0 else np.zeros_like(self._start[n]) for n in self._names}
         out = {0: dx} if 0 in save_at else {}
         for k in range(self.nsteps):
             dx = self._step(dx)
+            self._push(dx, dx0)
             if k + 1 in save_at or k + 1 == self.nsteps:
                 out[k + 1] = dx
         return out
@@ -135,19 +177,23 @@ class FakeWindow:
     def ad(self, ax_final, forcing):
         assert ax_final is None and self._checkpoints is not None
         for f in forcing.values():
-            assert set(f) == set(self._start)
-            assert all(f[n].shape == self._start[n].shape for n in self._start)
+            assert set(f) == set(self._names)
+            assert all(f[n].shape == self._start[n].shape for n in self._names)
         ax = {n: np.array(v) for n, v in forcing.get(self.nsteps, {}).items()} or \
-            {n: np.zeros_like(v) for n, v in self._start.items()}
+            {n: np.zeros_like(self._start[n]) for n in self._names}
+        at = {n: np.zeros_like(self._start[n]) for n in self.params}
         for k in reversed(range(self.nsteps)):
+            s = float(np.sum(ax["thp"][..., 0]))
+            for j, n in enumerate(self.params):
+                at[n] += 0.01 * (j + 1) * s
             ax = self._step_ad(ax)
             if k in forcing:
                 ax = {n: ax[n] + forcing[k][n] for n in ax}
-        return ax
+        return {**ax, **at}
 
 
-def _fake(nx=5, ny=4, nz=3, sps=2, nslots=3, halo=False, **kw):
-    win = FakeWindow(nx, ny, nz, sps * (nslots - 1), halo=halo)
+def _fake(nx=5, ny=4, nz=3, sps=2, nslots=3, halo=False, moist=False, **kw):
+    win = FakeWindow(nx, ny, nz, sps * (nslots - 1), halo=halo, moist=moist)
     return w4.WindowModel(win, sps, to_device=np.asarray, to_host=np.asarray, **kw), (nx, ny, nz)
 
 
@@ -162,12 +208,17 @@ def _dot(a, b):
     return sum(float(np.sum(a[k] * b[k])) for k in t4.TL_KEYS)
 
 
-@pytest.mark.parametrize("halo,halo_start", [(False, "wrfplus"), (True, "wrfplus"), (True, "carried")])
-def test_fake_window_dot_product(halo, halo_start):
+@pytest.mark.parametrize("halo,halo_start,moist", [(False, "wrfplus", False), (True, "wrfplus", False),
+                                                   (True, "carried", False), (False, "wrfplus", True),
+                                                   (True, "wrfplus", True)])
+def test_fake_window_dot_product(halo, halo_start, moist):
     """With ``halo`` the window is a specified domain's: its inputs add the
     carried mu halo (fed from ``mup``), which the adjoint must force too,
-    and under ``wrfplus`` the TL start seeds it from ``g_mu``."""
-    model, dims = _fake(halo=halo, halo_start=halo_start)
+    and under ``wrfplus`` the TL start seeds it from ``g_mu``.  With
+    ``moist`` the window carries qv, qc and qr: g_qv starts the window's qv
+    and reads back from it (``moisture="advect"``, the default there)."""
+    model, dims = _fake(halo=halo, halo_start=halo_start, moist=moist)
+    assert model.moisture == ("advect" if moist else "persist")
     rng = np.random.default_rng(0)
     g0 = _tl_state(rng, *dims)
     fs = [_tl_state(rng, *dims) for _ in range(3)]
@@ -178,6 +229,135 @@ def test_fake_window_dot_product(halo, halo_start):
     assert lhs == pytest.approx(rhs, rel=1e-12)
     # the slots differ (the window moved them) and p felt p_pert's start
     assert not np.array_equal(gs[1]["p"], gs[2]["p"])
+    if moist:   # g_qv moved with the window, and felt theta
+        assert not np.array_equal(gs[1]["qv"], g0["qv"])
+
+
+def _lbc_case(rng, nx=7, ny=6, nz=4, qv=True):
+    two, mass = (ny, nx), (nz, ny, nx)
+    base = {"mup": rng.standard_normal(two) * 50.0, "u": rng.standard_normal((nz, ny, nx + 1)),
+            "v": rng.standard_normal((nz, ny + 1, nx)), "thp": rng.standard_normal(mass),
+            "php": rng.standard_normal((nz + 1, ny, nx)), "qv": rng.random(mass) * 1e-2}
+    consts = {"mub2d": 9.0e4 + 1e3 * rng.random(two), "msfu": 1.0 + 0.1 * rng.random((ny, nx + 1)),
+              "msfv": 1.0 + 0.1 * rng.random((ny + 1, nx))}
+    g = {k: rng.standard_normal(v.shape) for k, v in base.items()}
+    fields = ("u", "v", "theta", "phi", "mu") + (("qv",) if qv else ())
+    return base, consts, g, fields
+
+
+@pytest.mark.parametrize("qv", [False, True])
+def test_lbc_tl_ad_dot_product(qv):
+    """lbc_ad is lbc_tl's transpose: <TL(g), a> == <g, AD(a)> (WRFDA's
+    da_transfer_wrftl_lbc_t0 and its adjoint, da_transfer_wrftl_lbc_t0_adj)."""
+    rng = np.random.default_rng(21)
+    base, consts, g, fields = _lbc_case(rng, qv=qv)
+    t = w4.lbc_tl(g, base, consts, fields, 3, 21600.0)
+    assert len(t) == 8 * len(fields)
+    for n, v in t.items():   # the tendency takes the value to zero over the interval
+        if not n.endswith("_t"):
+            np.testing.assert_allclose(t[n + "_t"] * 21600.0, -v, rtol=1e-15)
+    a = {n: rng.standard_normal(v.shape) for n, v in t.items()}
+    ga = w4.lbc_ad(a, base, consts, fields, 3, 21600.0)
+    assert set(ga) == {"mup", "u", "v", "thp", "php"} | ({"qv"} if qv else set())
+    lhs = sum(float(np.sum(t[n] * a[n])) for n in t)
+    rhs = sum(float(np.sum(g[k] * ga[k])) for k in ga)
+    assert abs(lhs) > 1.0
+    assert lhs == pytest.approx(rhs, rel=1e-12)
+
+
+def test_lbc_tl_is_the_table_coupling_linearised():
+    """lbc_tl's value tables are the derivative of woof's own table coupling
+    (lateral_bc's domain_boundary_snapshot, non-hybrid: c1 = 1, c2 = 0) cut
+    as extract_lateral_side cuts it: the coupling is bilinear, so the
+    central difference is exact to rounding."""
+    import types
+
+    from woof.ingest import lateral_bc as LB
+
+    rng = np.random.default_rng(22)
+    base, consts, g, fields = _lbc_case(rng)
+    nz = base["thp"].shape[0]
+
+    def tables(sign):
+        f = {k: base[k] + sign * g[k] for k in base}
+        mu = consts["mub2d"] + f["mup"]
+        st = types.SimpleNamespace(
+            total_mu=lambda: mu, c1h=np.ones(nz), c2h=np.zeros(nz), c1f=np.ones(nz + 1), c2f=np.zeros(nz + 1),
+            u=f["u"], v=f["v"], has_msf=True, msfu=consts["msfu"], msfv=consts["msfv"], use_theta_m=0,
+            total_theta=lambda: f["thp"] + 300.0, php=f["php"], mup=f["mup"], qv=f["qv"],
+            _external_scalar_boundary_fields=("qv",))
+        snap = dict(LB._coupled_device_field_items(st))
+        return {f"lbc_{n}_{side}": np.asarray(v, dtype=np.float64)
+                for side in w4._SIDES for n, v in LB.extract_lateral_side(snap, side, 3).items()}
+
+    plus, minus = tables(1.0), tables(-1.0)
+    t = w4.lbc_tl(g, base, consts, fields, 3, 21600.0)
+    for n in plus:
+        fd = 0.5 * (plus[n] - minus[n])
+        scale = float(np.max(np.abs(plus[n]))) or 1.0
+        assert float(np.max(np.abs(t[n] - fd))) <= 1e-12 * scale, n
+
+
+@pytest.mark.parametrize("moist,halo", [(False, False), (False, True), (True, True)])
+def test_fake_window_lbc_dot_product(moist, halo):
+    """A specified window (boundary tables in ``params``): ``lbc="wrfda"``
+    (the default there) passes lbc_tl's tables in the TL start and adds their
+    adjoint, and the whole map stays a transpose; ``fixed`` passes none."""
+    nx, ny, nz, sps = 5, 4, 3, 2
+    win = FakeWindow(nx, ny, nz, 2 * sps, halo=halo, moist=moist, lbc=True)
+    model = w4.WindowModel(win, sps, to_device=np.asarray, to_host=np.asarray)
+    assert model.lbc == "wrfda"
+    rng = np.random.default_rng(23)
+    g0 = _tl_state(rng, nx, ny, nz)
+    fs = [_tl_state(rng, nx, ny, nz) for _ in range(3)]
+    gs = model.tl(g0, 3)
+    assert set(win.params) <= set(win.last_dx0)
+    inc = model.boundary_increment(g0)
+    assert set(inc) == set(win.params)
+    for n, v in inc.items():
+        np.testing.assert_array_equal(win.last_dx0[n], v)
+    lhs = sum(_dot(g, f) for g, f in zip(gs, fs))
+    rhs = _dot(g0, model.ad(fs))
+    assert abs(lhs) > 1.0
+    assert lhs == pytest.approx(rhs, rel=1e-12)
+    fixed = w4.WindowModel(win, sps, to_device=np.asarray, to_host=np.asarray, lbc="fixed")
+    gf = fixed.tl(g0, 3)
+    assert not set(win.params) & set(win.last_dx0) and fixed.boundary_increment(g0) == {}
+    assert not np.array_equal(gf[2]["t_2"], gs[2]["t_2"])
+    assert _dot(g0, fixed.ad(fs)) == pytest.approx(sum(_dot(g, f) for g, f in zip(gf, fs)), rel=1e-12)
+    # the outer loop's update: the increment lands on the window's tables
+    before = {n: win._start[n].copy() for n in win.params}
+    model.add_boundary_increment(inc)
+    for n in win.params:
+        np.testing.assert_allclose(win._start[n], before[n] + inc[n], rtol=1e-15)
+    with pytest.raises(ValueError, match="no boundary table"):
+        model.add_boundary_increment({"lbc_w_west": inc["lbc_u_west"]})
+
+
+def test_lbc_refusals():
+    model, dims = _fake()
+    assert model.lbc is None and model.boundary_increment(_tl_state(np.random.default_rng(0), *dims)) == {}
+    with pytest.raises(ValueError, match="no boundary tables"):
+        _fake(lbc="wrfda")
+    win = FakeWindow(5, 4, 3, 4, lbc=True)
+    with pytest.raises(ValueError, match="lbc must be one of"):
+        w4.WindowModel(win, 2, to_device=np.asarray, to_host=np.asarray, lbc="var4d_lbc")
+
+
+def test_moist_window_advects_qv_and_starts_qc_qr_at_zero():
+    model, dims = _fake(moist=True)
+    g0 = _tl_state(np.random.default_rng(3), *dims)
+    gs = model.tl(g0, 3)
+    np.testing.assert_array_equal(gs[0]["qv"], g0["qv"])
+    dx0 = model.window.last_dx0
+    assert "qv" in dx0 and "qc" not in dx0 and "qr" not in dx0
+    # one step: qv rolled, plus theta's share
+    r = lambda a: a + 0.1 * np.roll(a, 1, axis=-1)
+    model.window.nsteps, model.sps = 1, 1
+    g1 = model.tl(g0, 2)[1]
+    p0, t0, q0 = (w4.to_window(g0[k]) for k in ("p", "t_2", "qv"))
+    th1 = r(t0) + 0.05 * r(p0)
+    np.testing.assert_allclose(g1["qv"], w4.from_window(r(q0) + 0.07 * th1), rtol=1e-14)
 
 
 def test_slot_zero_is_wrfda_start_and_qv_persists():
@@ -212,6 +392,11 @@ def test_refusals():
         model.tl({k: v for k, v in g0.items() if k != "qv"}, 3)
     with pytest.raises(NotImplementedError, match="dry"):
         w4.WindowModel(model.window, 2, moisture="advect", to_device=np.asarray, to_host=np.asarray)
+    with pytest.raises(ValueError, match="moist window"):
+        w4.WindowModel(FakeWindow(*dims, 4, moist=True), 2, moisture="persist", to_device=np.asarray,
+                       to_host=np.asarray)
+    with pytest.raises(ValueError, match="moisture must be one of"):
+        w4.WindowModel(model.window, 2, moisture="hold", to_device=np.asarray, to_host=np.asarray)
     with pytest.raises(ValueError, match="steps_per_slot"):
         w4.WindowModel(model.window, 0, to_device=np.asarray, to_host=np.asarray)
 
@@ -328,10 +513,12 @@ STRICT = dict(GPUWM_WRF_EXACT="1", WOOF_WRF_EXACT_DIAGNOSTICS="1", WOOF_WRF_EXAC
 
 
 @pytest.mark.skipif(not any(shutil.which(c) for c in ("clang++", "g++", "c++")), reason="no C++ compiler")
-def test_real_window_dot_product(tmp_path):
+@pytest.mark.parametrize("moist", [False, True])
+def test_real_window_dot_product(tmp_path, moist):
     """The real window (host backend, binary64, a warm ridge case): three
-    slots two steps apart, ``sum_n <TL(g0)_n, f_n> == <g0, AD(f)>``."""
-    env = dict(os.environ, WOOF_BACKEND="host", PYTHONPATH=str(ROOT),
+    slots two steps apart, ``sum_n <TL(g0)_n, f_n> == <g0, AD(f)>``.  Moist:
+    qv, qc and qr (mp_physics 0), g_qv advected by the window."""
+    env = dict(os.environ, WOOF_BACKEND="host", PYTHONPATH=str(ROOT), WOOF_TEST_MOIST=str(int(moist)),
                WOOF_HOST_CACHE=str(tmp_path / "hostcache"), WOOF_HOST_THREADS="4", **STRICT)
     script = """
 import dataclasses, json, numpy as np, woof
@@ -344,7 +531,10 @@ from woof.core import dycore as D
 from woof.grad.wrfplus import window as W
 from woof.da.var import transfer4d as t4, window4d as w4
 nx, ny, nz = 16, 12, 10
-cfg = H.make_config(nx, ny, nz, h_sca_adv_order=5, terrain_opt=1)
+import os
+moist = os.environ["WOOF_TEST_MOIST"] == "1"
+cfg = H.make_config(nx, ny, nz, h_sca_adv_order=5, terrain_opt=1,
+                    **(dict(moist=True, moist_adv_opt=0) if moist else {}))
 jj, ii = np.meshgrid(np.arange(ny), np.arange(nx), indexing='ij')
 ridge = 400.0 * np.exp(-(((ii - nx / 2) / (nx / 5)) ** 2 + ((jj - ny / 2) / (ny / 4)) ** 2))
 geo = dataclasses.replace(H.neutral_geography(cfg), terrain=ridge)
@@ -353,7 +543,9 @@ D.step(state, cfg)
 win = W.Window(state, cfg, 4)
 model = w4.WindowModel(win, 2)
 rng = np.random.default_rng(5)
-names = {"u_2": "u", "v_2": "v", "w_2": "w", "t_2": "thp", "mu_2": "mup", "ph_2": "php", "p": "p_pert", "qv": "thp"}
+names = {"u_2": "u", "v_2": "v", "w_2": "w", "t_2": "thp", "mu_2": "mup", "ph_2": "php", "p": "p_pert",
+         "qv": "qv" if moist else "thp"}
+assert model.moisture == ("advect" if moist else "persist")
 def rnd():
     out = {}
     for k, n in names.items():
@@ -366,11 +558,12 @@ dot = lambda a, b: sum(float(np.sum(a[k] * b[k])) for k in t4.TL_KEYS)
 lhs = sum(dot(g, f) for g, f in zip(gs, fs))
 rhs = dot(g0, model.ad(fs))
 same = all(np.array_equal(gs[0][k], g0[k]) for k in t4.TL_KEYS)
-print('RESULT ' + json.dumps(dict(lhs=lhs, rhs=rhs, same=same)))
+moved = (not np.array_equal(gs[2]["qv"], g0["qv"])) if moist else True
+print('RESULT ' + json.dumps(dict(lhs=lhs, rhs=rhs, same=same, moved=moved)))
 """
     done = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, env=env, timeout=1800)
     assert done.returncode == 0, done.stderr[-4000:]
     out = json.loads([ln for ln in done.stdout.splitlines() if ln.startswith("RESULT ")][-1][7:])
-    assert out["same"]
+    assert out["same"] and out["moved"]
     assert abs(out["lhs"]) > 0.0
     assert out["lhs"] == pytest.approx(out["rhs"], rel=1e-12)

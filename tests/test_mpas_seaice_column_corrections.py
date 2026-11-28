@@ -41,6 +41,10 @@ def glibc239(monkeypatch):
 
 
 def test_every_correction_is_named_and_unknown_names_are_refused():
+    # none named: every one in correct mode, none in exact mode (this
+    # module's default: tests/conftest.py)
+    assert cv.corrections({"config_physics_mode": "correct"}) == frozenset(cv.CORRECTIONS)
+    assert cv.corrections({"config_physics_mode": "exact"}) == frozenset()
     assert cv.corrections({}) == frozenset()
     assert cv.corrections({KEY: ("set_sfcflux_order",)}) == {"set_sfcflux_order"}
     assert cv.corrections({KEY: "dedd_zero_volume_ice"}) == {"dedd_zero_volume_ice"}
@@ -278,3 +282,50 @@ def test_dedd_zero_volume_ice_is_transparent_finite_and_conserves_energy(glibc23
     budget = sum(out[f"shortwave/{k}"][:n_solve] for k in ("surfaceShortwaveFlux", "interiorShortwaveFlux",
                                                            "penetratingShortwaveFlux"))
     np.testing.assert_allclose(budget[lit], absorbed[lit], rtol=1e-9)
+
+
+def _zap_snow_case(**overrides):
+    return _case(co.BGC_NONREACTIVE_CARRY_CASES, "itd_nonreactive_mushy_level_ponds", **overrides)
+
+
+def test_zap_snow_area_without_the_vertical_tracers_is_refused():
+    from woof.hex.mpas_seaice import column_itd_v842 as citd
+    case = _case(co.BGC_CARRY_CASES, "itd_bgc_brine_mushy_level_ponds", **{KEY: "zap_snow_area"})
+    with pytest.raises(ConfigurationRefusal, match="zap_snow_area"):
+        citd.refuse_unported(case["config"], {**case["dims"], "nSnowLayers": 1})
+    # the umbrella alone names no correction: no refusal where the scheme does not run
+    umbrella = _case(co.BGC_CARRY_CASES, "itd_bgc_brine_mushy_level_ponds", woof_quirk_corrections="all")
+    umbrella["config"].pop(KEY, None)
+    assert "zap_snow_area" in cv.corrections(umbrella["config"])
+    citd.refuse_unported(umbrella["config"], {**umbrella["dims"], "nSnowLayers": 1})
+
+
+@requires_gpu
+def test_zap_snow_area_puts_the_snow_surface_layer_into_the_flux():
+    """v8.4.2's zap_small_areas hands zap_snow the area it has just zeroed, so a
+    zapped category's snow goes to the ocean at the interior layer's
+    concentration, all of it. With the area, the surface layer's share
+    min(vsnon/2, hs_ssl*aicen) goes at its own concentration: the flux moves
+    by (C_ssl - C_int)*dvssl/dt in each zapped cell and nowhere else."""
+    default = _zap_snow_case()
+    fixed = _zap_snow_case(**{KEY: "zap_snow_area"})
+    t = default["pools"]["tracers"]
+    nbl, dt = default["dims"]["nBioLayers"], default["config"]["config_dt"]
+    area, snow = t["iceAreaCategory"][:, :, 0], t["snowVolumeCategory"][:, :, 0]
+    conc = t["verticalNonreactiveConc"]
+    zapped = (area > 0.0) & (area <= PUNY)
+    dvssl = np.where(zapped, np.minimum(0.5 * snow, 0.040 * area), 0.0)
+    expected = ((conc[:, :, nbl + 1] - conc[:, :, nbl + 2]) * dvssl).sum(axis=1) / dt
+    got_default, _ = co.run_gpu(default)
+    got_fixed, _ = co.run_gpu(fixed)
+    key = "biogeochemistry/oceanBioFluxes"
+    moved = got_fixed[key][:, 0] - got_default[key][:, 0]
+    cells = np.flatnonzero(expected)
+    assert cells.size
+    np.testing.assert_array_equal(np.flatnonzero(moved), cells)
+    # the move is a few hundred ulps of the flux it is added to: held to two of them
+    ulp = np.spacing(np.abs(got_default[key][cells, 0]))
+    np.testing.assert_allclose(moved[cells], expected[cells], rtol=0.0, atol=2.0 * ulp.max())
+    for name in got_default:
+        if name != key:
+            assert co.word_mismatches(got_fixed[name], got_default[name]) == 0, name

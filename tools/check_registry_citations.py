@@ -91,6 +91,10 @@ _TOKEN = re.compile(
 
 _WRF = "WRF v4.6.1 @ d66e442fccc04111067e29274c9f9eaccc3cef28, not vendored here"
 _WRF471 = "WRF v4.7.1, not vendored here"
+#: WRF v4.8.1 (tag commit + submodule gitlinks), not vendored here either,
+#: but pinned file by file in tools/wrf481_source/source-v4.8.1.json: a
+#: citation declared in this tree must name a file the pin holds.
+_WRF481 = "WRF v4.8.1 @ e209f84a1a811424990a8f2f373a0b77c0d35f0d, not vendored here"
 
 #: Citations into another source tree.  Declared, not inferred: an unknown file
 #: that happens not to exist here must fail rather than be assumed external.
@@ -549,8 +553,8 @@ def _tree_index() -> dict[str, tuple[str, ...]]:
     for candidate in MODEL.rglob("*"):
         relative_parts = candidate.relative_to(MODEL).parts
         # Other checkouts live INSIDE the main checkout: nested
-        # worktrees and parked clones under the .worktrees and .claude
-        # directories.  A citation into THIS worktree must never resolve
+        # worktrees and parked clones under dot-named directories
+        # (.worktrees and the like).  A citation into THIS worktree must never resolve
         # into some other ref's tree (a rotted citation could come back
         # RESOLVED against a file this tree no longer carries), and those
         # clones contain Linux symlinks Windows cannot stat (WinError
@@ -610,6 +614,20 @@ def drifted_report() -> list[str]:
     ]
 
 
+@functools.lru_cache(maxsize=1)
+def _wrf481_pinned() -> frozenset[str]:
+    pin = MODEL / "tools" / "wrf481_source" / "source-v4.8.1.json"
+    files = json.loads(pin.read_text(encoding="utf-8"))["files"]
+    return frozenset(path for path, row in files.items() if row["sha256"])
+
+
+def _in_wrf481_pin(cited_path: str) -> bool:
+    """``cited_path`` (full, or a bare file name) is a file the 4.8.1 pin holds."""
+    pinned = _wrf481_pinned()
+    return cited_path in pinned or any(
+        path.rpartition("/")[2] == cited_path for path in pinned)
+
+
 def check(registry: dict | None = None) -> list[str]:
     """Return one message per unresolved, unanchored, stale or healed
     citation.
@@ -656,6 +674,12 @@ def check(registry: dict | None = None) -> list[str]:
             continue
         cited_path, _, spec = citation.rpartition(":")
         if cited_path in EXTERNAL:
+            if (EXTERNAL[cited_path] == _WRF481
+                    and not _in_wrf481_pin(cited_path)):
+                failures.append(
+                    f"{citation} (in {where[0]}) is declared WRF v4.8.1 but "
+                    "tools/wrf481_source/source-v4.8.1.json pins no such file")
+                continue
             if _resolve(cited_path):
                 failures.append(
                     f"{citation} (in {where[0]}) is declared EXTERNAL but a "

@@ -530,6 +530,113 @@ def test_wddm_preflight_permits_graphics_and_prices_large_pure_cuda(
         allow_shared_gpu=True)["verdict"] == "admitted"
 
 
+LINUX_MPS_PMON = (
+    "# gpu         pid   type     sm    mem    enc    dec    jpg    ofa     fb   ccpm    command \n"
+    "# Idx           #    C/G      %      %      %      %      %      %     MB     MB    name \n"
+    "    0    1861874     G      -      -      -      -      -      -     12      0    Xorg           \n"
+    "    0    3108601   M+C      -      -      -      -      -      -   2410      0    python         \n"
+    "    0    3108653   M+C      -      -      -      -      -      -      -      0    python         \n"
+    "    0    3108700   M+G      -      -      -      -      -      -     30      0    viewer         \n"
+    "    0    3108701 M+C+G      -      -      -      -      -      -     31      0    viewer2        \n"
+    "    0    3108702     M      -      -      -      -      -      -     32      0    idle-client    \n"
+    "    0    3108800     C      -      -      -      -      -      -    300      0    nvidia-cuda-mps-server\n"
+    "    0    3999999     C      -      -      -      -      -      -   9000      0    foreign-python \n"
+)
+
+
+def test_pmon_parses_every_mps_type_and_dash_columns():
+    modes = _parse_pmon_output(LINUX_MPS_PMON)
+    assert modes[3108601] == ("M+C", 2410)
+    assert modes[3108653] == ("M+C", None)
+    assert modes[3108700] == ("M+G", 30)
+    assert modes[3108701] == ("M+C+G", 31)
+    assert modes[3108702] == ("M", 32)
+    assert modes[3999999] == ("C", 9000)
+
+
+@pytest.mark.parametrize("bad", ["X", "M+X", "C+C", "M++C", "", "MC", "m+c"])
+def test_pmon_rejects_unknown_type_strings(bad):
+    row = f"0 41004 {bad or '-'} - - - - - - 5 0 p\n"
+    with pytest.raises(GPUPreflightError, match="unknown pmon type"):
+        _parse_pmon_output(row)
+
+
+def test_pmon_malformed_pid_with_mps_type_still_fails_closed():
+    with pytest.raises(GPUPreflightError, match="malformed pmon PID"):
+        _parse_pmon_output("0 - M+C - - - - - - 5 0 python\n")
+
+
+def test_mps_preflight_exempts_only_token_carrying_siblings(
+        monkeypatch, tmp_path):
+    import woof.supervisor as supervisor
+
+    gpu = GPUIdentity("GPU-test", "610.74", "RTX A6000", 0)
+    modes = _parse_pmon_output(LINUX_MPS_PMON)
+    names = {3108800: "nvidia-cuda-mps-server"}
+    processes = tuple(
+        GPUProcess(gpu.uuid, pid, names.get(pid, "python"), memory, mode)
+        for pid, (mode, memory) in modes.items())
+    own = tmp_path / "pipe"
+    own.mkdir()
+    other = tmp_path / "other-pipe"
+    token = "tok-1"
+    # 3108601 sibling (token); 3108653 SAME pipe dir but no token (an
+    # unrelated client of the same/external daemon); 3108700 another daemon.
+    envs = {
+        3108601: {"CUDA_MPS_PIPE_DIRECTORY": str(own),
+                  supervisor.MPS_PACK_TOKEN_ENV: token},
+        3108653: {"CUDA_MPS_PIPE_DIRECTORY": str(own)},
+        3108800: {"CUDA_MPS_PIPE_DIRECTORY": str(own)},
+        3108700: {"CUDA_MPS_PIPE_DIRECTORY": str(other),
+                  supervisor.MPS_PACK_TOKEN_ENV: token},
+    }
+    monkeypatch.setattr(
+        supervisor, "_process_environ_value",
+        lambda pid, name: envs.get(pid, {}).get(name))
+    monkeypatch.setattr(supervisor, "select_gpu", lambda uuid: gpu)
+    monkeypatch.setattr(
+        supervisor, "query_compute_processes", lambda uuid: processes)
+    monkeypatch.setattr(supervisor, "_ADMISSION_WARNED", set())
+    _priced_device(monkeypatch)
+    monkeypatch.setenv("CUDA_MPS_PIPE_DIRECTORY", str(own))
+    monkeypatch.setenv(supervisor.MPS_PACK_TOKEN_ENV, token)
+    monkeypatch.delenv(supervisor.MPS_OWNED_DAEMON_ENV, raising=False)
+
+    def cotenants():
+        return preflight_exclusive_gpu(
+            gpu.uuid, reservation_bytes=2 ** 30)["cotenants"]
+
+    # External/adopted daemon (not owned): the token sibling is exempt; the
+    # untokened same-pipe client, the server and the foreign C are priced.
+    out = cotenants()
+    assert "pid=3108601 " not in out
+    for pid in (3108653, 3108800, 3999999):
+        assert f"pid={pid} " in out
+    with pytest.raises(GPUPreflightError, match="pid=3108653"):
+        preflight_exclusive_gpu(gpu.uuid, reservation_bytes=30 * 2 ** 30)
+
+    # Daemon this multi-run started: its server is exempt too, the
+    # untokened same-pipe client and foreign C are still co-tenants.
+    monkeypatch.setenv(supervisor.MPS_OWNED_DAEMON_ENV, "1")
+    out = cotenants()
+    assert "pid=3108800 " not in out and "pid=3108601 " not in out
+    assert "pid=3108653 " in out and "pid=3999999 " in out
+
+    # No token (not a packed MPS child): nothing is a sibling.
+    monkeypatch.delenv(supervisor.MPS_PACK_TOKEN_ENV)
+    out = cotenants()
+    for pid in (3108601, 3108653, 3108800, 3999999):
+        assert f"pid={pid} " in out
+
+    # Wrong token / another daemon's client stay co-tenants; M+G, M and
+    # M+C+G (graphics) are never co-tenants.
+    monkeypatch.setenv(supervisor.MPS_PACK_TOKEN_ENV, "tok-other")
+    out = cotenants()
+    assert "pid=3108601 " in out and "pid=3108700 " not in out
+    for pid in (3108700, 3108701, 3108702):
+        assert f"pid={pid} " not in out
+
+
 def test_stale_threshold_is_three_p99_with_120_second_floor():
     assert stale_threshold_seconds([1.0, 2.0, 40.0]) == 120.0
     assert stale_threshold_seconds([1.0, 2.0, 50.0]) == 150.0

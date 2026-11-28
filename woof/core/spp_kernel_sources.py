@@ -148,7 +148,7 @@ def specialized_source(name: str, *, capacity: int = 40, kernel_dir=None,
         return prefix + (f"#define GF_KMAX {capacity}\n" if capacity > 40 else "") + source
     for key, value in defines:
         if (key, value) not in (("MYNN_SFCLAY_GSL_WRF39", 1), ("OCEAN_WAVE_ROUGHNESS", 1), ("OCEAN_SPP_SURFACE", 1),
-                                ("MYNN_SL_PSIH_ZOLZT", 1)):
+                                ("MYNN_SL_PSIH_ZOLZT", 1), ("MYNN_SL_Q2_LAND_CAP", 1)):
             raise ValueError(f"unknown MYNN surface SPP define {key}={value}")
     if name == "mynn_pbl":
         return _mynn_pbl(module_source(name, **options))

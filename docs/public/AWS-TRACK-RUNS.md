@@ -132,7 +132,7 @@ run:
 | `files` | no | companion files. Each one is a URL string, a `{url, path}` table, or a `{path, content}` table that carries the file's text inline. Each file is staged beside the config under `path`, which defaults to the URL's file name. `path` must be relative, with no `..` |
 | `icechunk_url` | no | the repository the run writes (`s3://`, `gs://` or `file://`). The default is `$WOOF_ENERGY_OUTPUT_URL/<job_id>.icechunk`. A rendered deployment sets that variable from `output_url` |
 | `products` | no | the value passed to `woof go --products`. The default is `none` |
-| `go_args` | no | extra `woof go` flags, from a fixed list: `--cycle`, `--transport`, `--keep-checkpoints`, `--devices`, `--late-after-minutes`, `--verify-inputs`, `--whole-cycle`, `--no-memory-gate` and `--no-verify-visuals`. The flags go-job sets itself (`--icechunk`, `--products` and `--outdir`) are refused, as is any other flag |
+| `go_args` | no | extra `woof go` flags, from a fixed list: `--cycle`, `--transport`, `--keep-checkpoints`, `--devices`, `--late-after-minutes`, `--verify-inputs`, `--whole-cycle`, `--no-memory-gate`, `--no-verify-visuals` and `--run-stamp on|off` (`off` writes the store as `icechunk_url/d01`... rather than `icechunk_url/run-<stamp>/d01`...). The flags go-job sets itself (`--icechunk`, `--products` and `--outdir`) are refused, as is any other flag |
 | `result_url` | no | where a copy of the result JSON is written (`s3://`, `gs://` or `file://`) |
 | `resources.gpu_mem_gib` | no | the run's peak GPU memory in GiB. Workers pack jobs by this value. go-job refuses a job that declares more memory than the card holds |
 | `depends_on`, `description`, `labels` | no | passed through. `depends_on` holds the queue's job ids |
@@ -258,6 +258,26 @@ The queue makes its writes safe with conditional writes (`If-None-Match`
 and `If-Match`), which a general-purpose bucket supports. It deletes each
 lease object as the job settles, so the policy grants `s3:DeleteObject` on
 the queue prefix.
+
+**A store in another account.** When the stores live in a bucket the job
+role cannot write, such as a Source Cooperative repository, give the Icechunk
+writer its own keys. `rw_icechunk` reads `WOOF_ICECHUNK_AWS_ACCESS_KEY_ID` and
+`WOOF_ICECHUNK_AWS_SECRET_ACCESS_KEY` (both or neither, plus an optional
+`WOOF_ICECHUNK_AWS_SESSION_TOKEN`), `WOOF_ICECHUNK_AWS_ENDPOINT_URL` and
+`WOOF_ICECHUNK_AWS_REGION` (set it when the store's bucket is in another
+region than the job) for the store alone. The queue, the inputs, the static data and `result_url` keep
+the job role. Map the variables from Secrets Manager in the job definition's
+`secrets`, with an execution role that may read the secret, so no key is in
+the job document, the queue or the logs:
+
+```json
+"secrets": [
+  {"name": "WOOF_ICECHUNK_AWS_ACCESS_KEY_ID",
+   "valueFrom": "arn:aws:secretsmanager:us-west-2:ACCOUNT:secret:NAME:AWS_ACCESS_KEY_ID::"},
+  {"name": "WOOF_ICECHUNK_AWS_SECRET_ACCESS_KEY",
+   "valueFrom": "arn:aws:secretsmanager:us-west-2:ACCOUNT:secret:NAME:AWS_SECRET_ACCESS_KEY::"}
+]
+```
 
 ## 6. Render the two fleets
 

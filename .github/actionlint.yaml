@@ -12,3 +12,10 @@ paths:
   .github/workflows/publish-data.yml:
     ignore:
       - 'SC2012'
+  # `concurrency.queue: max` (GitHub's newer concurrency key, kept so a pending
+  # manual publish is never dropped) is not in actionlint 1.7.12's schema, the
+  # newest on conda-forge.  Ignore exactly that message; drop this once
+  # actionlint learns the key.
+  .github/workflows/publish-metal.yml:
+    ignore:
+      - 'unexpected key "queue" for "concurrency" section'
