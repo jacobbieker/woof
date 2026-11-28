@@ -521,8 +521,10 @@ def test_two_outer_loops_on_the_tutorial_with_a_persistence_model():
 
 def test_l1_two_outer_loops_against_wrfda(tmp_path):
     """The 4D.4 L1 gate (plan section 4): ``analyse(var4d=..., max_ext_its=N)``
-    against WRFDA 4.7.1 + WRFPLUS 4.7.1 on lane L1 (adiabatic, ``diff_opt 0``,
-    ``damp_opt 0``, ``emdiv 0``, ``moist_adv_opt 0``; ``var4d_lbc`` off).
+    against WRFDA 4.7.1 + WRFPLUS 4.7.1 on lane L1 (adiabatic, ``diff_opt 0``, WRF's
+    default dynamics ``damp_opt 3``, ``emdiv 0.01``, ``moist_adv_opt 1``, ``mp_zero_out 0``;
+    ``var4d_lbc`` off).  The 4D.4 lane (``L1_NARROW=1``: ``damp_opt``, ``emdiv`` and
+    ``moist_adv_opt`` 0) passes the same tolerances.
 
     ``WOOF_WRFDA471_4DVAR_L1_DIR`` is ``tools/wrfda_oracle/run_4dvar.sh l1``'s run
     directory with ``MAX_EXT_ITS`` 1 or 2 (``namelist.input``, ``fg``,
@@ -565,12 +567,14 @@ def test_l1_two_outer_loops_against_wrfda(tmp_path):
 
 
 #: L1 tolerances (two models from one start, not word-exact: the test's docstring),
-#: from the 2026-11-27 pb runs, whose agreement docs/var.md records: loop 1 J0 4.2e-4,
-#: |grad J0| 1.8e-3, final J 1.1e-3; loop 2 J0 5.7e-6, |grad J0| 9.7e-3, final J 6.8e-6;
-#: 35 iterations in each loop on both sides; increments correlate to >= 0.99947.
-L1_J0_RTOL = (1e-3, 1e-4)
+#: from the pb runs docs/var.md records.  Default dynamics (2026-11-28): loop 1 J0 2.3e-4,
+#: |grad J0| 7.0e-4, final J 7.7e-4; loop 2 J0 2.2e-4, |grad J0| 4.3e-3, final J 1.5e-4
+#: (loop 2 starts from loop 1's analysis, so it inherits loop 1's gap).  The narrowed
+#: lane (L1_NARROW=1, 2026-11-27): loop 1 4.2e-4, 1.8e-3, 1.1e-3; loop 2 5.7e-6, 9.7e-3,
+#: 6.8e-6.  35 iterations in each loop on both sides; increments correlate to >= 0.99947.
+L1_J0_RTOL = (1e-3, 1e-3)
 L1_G0_RTOL = (5e-3, 2e-2)
-L1_JF_RTOL = (3e-3, 1e-4)
+L1_JF_RTOL = (3e-3, 1e-3)
 L1_ITER_SLACK = 2
 L1_INC_CORR = 0.999
 

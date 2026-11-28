@@ -2,8 +2,9 @@
 tests/_var4d_l1.py.
 
 The WRFDA 4.7.1 4D-Var tutorial case (2008-02-05 12Z, 90x60x41, ``time_step`` 360 s) run
-as lane L1 (``tools/wrfda_oracle/run_4dvar.sh l1``): no physics, ``diff_opt = 0``, and the
-dynamics P3a's window covers (``damp_opt 0``, ``emdiv 0``, ``moist_adv_opt 0``).  The
+as lane L1 (``tools/wrfda_oracle/run_4dvar.sh l1``): no physics, ``diff_opt = 0``, WRF's
+default dynamics (``damp_opt 3``, ``emdiv 0.01``, ``moist_adv_opt 1``, which P3a's window
+covers; the 4D.4 lane, ``L1_NARROW=1``, set them to 0) and ``mp_zero_out 0``.  The
 woof state comes through woof's wrfinput door from a prepared copy of the lane's inputs
 (:func:`prepare_case`), with two test-side workarounds, each a request in the
 coordinator's P3A-REQUESTS note:

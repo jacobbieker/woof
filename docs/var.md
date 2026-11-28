@@ -304,25 +304,30 @@ Tests:
   (`WOOF_WRFDA471_4DVAR_L1_DIR` = `tools/wrfda_oracle/run_4dvar.sh l1`'s run
   directory, `MAX_EXT_ITS` 1 or 2; CUDA, `WOOF_TEST_VAR4D_BACKEND=cuda`;
   `tests/_var4d_l1.py`). L1 is the tutorial case (2008-02-05 12-18Z, 7
-  slots) with no physics, `diff_opt 0`, `damp_opt 0`, `emdiv 0` and
-  `moist_adv_opt 0`: the dynamics P3a's window covers. P3a's window is both
+  slots) with no physics and `diff_opt 0`, on WRF's default dynamics
+  (`damp_opt 3`, `emdiv 0.01`, `moist_adv_opt 1`), which P3a's window
+  covers. `mp_zero_out` stays 0, because the window has no zero-out.
+  `L1_NARROW=1` gives the 4D.4 lane, with those three options at 0. P3a's window is both
   woof's nonlinear and TL/AD model, because WRFPLUS's trajectory cannot be
   read out of this WRFDA build (`trajectory_io = .false.` is broken). So
   the two sides run two models from one start, and agreement is a
-  tolerance, not word for word. Two loops on pb (2026-11-27):
+  tolerance, not word for word. Two loops on pb (2026-11-28):
 
   | | loop 1 | loop 2 |
   |---|---|---|
-  | `J0` (woof / WRFDA) | 60582.76 / 60557.17 (4.2e-4) | 43933.48 / 43933.23 (5.7e-6) |
-  | `|grad J0|` | 2002.03 / 1998.48 (1.8e-3) | 1193.66 / 1205.40 (9.7e-3) |
-  | final `J` | 35712.31 / 35672.88 (1.1e-3) | 39012.68 / 39012.41 (6.8e-6) |
+  | `J0` (woof / WRFDA) | 60429.27 / 60415.39 (2.3e-4) | 43963.57 / 43973.14 (2.2e-4) |
+  | `|grad J0|` | 2003.17 / 2001.77 (7.0e-4) | 1181.13 / 1186.21 (4.3e-3) |
+  | final `J` | 35705.87 / 35678.27 (7.7e-4) | 39084.57 / 39078.59 (1.5e-4) |
   | iterations | 35 / 35 | 35 / 35 |
-  | increment correlation (U V T QVAPOR MU PH) | >= 0.99985 | >= 0.99947 |
-  | increment rms ratio | within 0.3% | within 0.5% |
+  | increment correlation (U V T QVAPOR MU PH) | >= 0.99986 | >= 0.99983 |
+  | increment rms ratio | within 0.16% | within 0.22% |
 
+  The narrowed lane (2026-11-27) agrees more closely in loop 2, because
+  loop 1 lands closer to WRFDA. There, loop 1's `J0` and final `J` are
+  4.2e-4 and 1.1e-3 off, and loop 2's are 5.7e-6 and 6.8e-6 off.
   Without the boundary-table perturbation (`lbc="fixed"`), loop 1's final
   `J` is 2.3% off and the increments correlate to only 0.91-0.97.
-  The window's dot product with the tables agrees to 1.5e-15. The lane
+  The window's dot product with the tables agrees to 3e-16. The lane
   needs two importer workarounds, which live in the test only
   (`tests/_var4d_l1_case.py`): `diff_opt 0` and a qv-only state at
   `mp_physics 0`.

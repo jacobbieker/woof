@@ -9,10 +9,12 @@
 #        per-slot H' are all that is left, the gate for woof's
 #        transfer4d (4D.1) and FourDObsTerm (4D.2).
 #   l1   adiabatic: no physics in the nonlinear, TL or AD model
-#        (mp/cu/bl/ra/sfclay/surface 0, diff_opt 0), and the dynamics P3a's
-#        window covers (damp_opt 0, emdiv 0, moist_adv_opt 0, mp_zero_out 0;
-#        before 4D.4 the lane kept WRF's defaults 3, 0.01, 1 and the
-#        namelist's 2).
+#        (mp/cu/bl/ra/sfclay/surface 0, diff_opt 0) on WRF's default
+#        dynamics (damp_opt 3, emdiv 0.01, moist_adv_opt 1), which P3a's
+#        window covers since #884-#889, with mp_zero_out 0 (the window has
+#        no zero-out; the namelist says 2).  The 4D.4 gate (#883) ran
+#        before those: damp_opt 0, emdiv 0 and moist_adv_opt 0 (L1_NARROW=1
+#        restores them).
 #   l0   the tutorial's namelist as shipped (warm rain, PBL 98, CU 98).
 #
 # Every lane: hybrid_opt = 0 and use_theta_m = 0 (the testdata are
@@ -42,6 +44,8 @@ S=$W/src/${TREE:-WRFDAV4.7.1-4dvar-dump}
 PLUS=$W/src/WRFPLUSV4.7.1
 export HOME=/tmp
 MAX_EXT_ITS=${MAX_EXT_ITS:-1}
+L1_NARROW=${L1_NARROW:-0}
+case "$L1_NARROW" in 0|1) ;; *) echo "L1_NARROW must be 0 or 1" >&2; exit 2;; esac
 case "$MAX_EXT_ITS" in [1-9]) ;; *) echo "MAX_EXT_ITS must be 1-9" >&2; exit 2;; esac
 H="2008-02-05_"
 NL=$S/var/test/4dvar/namelist.input
@@ -65,9 +69,9 @@ cp "$D/rc/2008020512/wrfinput_d01" fg
 ln -sf fg wrfinput_d01
 cp "$D/rc/2008020512/wrfbdy_d01" wrfbdy_d01
 for n in 1 2 3 4 5 6 7; do h=$((11 + n)); cp "$D/ob/20080205$h/ob0$n.ascii" "ob0$n.ascii"; done
-python3 - "$NL" "$LANE" "$MAX_EXT_ITS" > namelist.input <<'PY'
+python3 - "$NL" "$LANE" "$MAX_EXT_ITS" "$L1_NARROW" > namelist.input <<'PY'
 import re, sys
-src, lane, ext_its = sys.argv[1:4]
+src, lane, ext_its, narrow = sys.argv[1:4] + [sys.argv[4] == "1"]
 H = "2008-02-05_"
 want = {
     "wrfvar1": {"var4d": ".true.", "var4d_bin": "3600", "var4d_lbc": ".false.", "write_increments": ".true.",
@@ -107,11 +111,14 @@ if lane == "l1":
     # WRFPLUS has no cu/bl_pbl _ad keys: its simplified TL/AD PBL and
     # cumulus (98) follow cu_physics / bl_pbl_physics being non-zero
     want["dynamics"]["diff_opt"] = "0"
-    # and the dynamics P3a's window covers (woof/grad/wrfplus/model.py
-    # _refuse): no Rayleigh w damping (damp_opt 3, WRF's default), no
-    # external-mode filter (emdiv 0.01), the non-positive-definite moist
-    # advection (moist_adv_opt 0); mp_zero_out 0 so nothing clips qv
-    want["dynamics"].update({"damp_opt": "0", "emdiv": "0", "moist_adv_opt": "0"})
+    # WRF's default dynamics (damp_opt 3, emdiv 0.01, moist_adv_opt 1:
+    # P3a's window covers them); mp_zero_out 0 so nothing clips qv (the
+    # window has no zero-out).  L1_NARROW=1: the 4D.4 gate's narrowed
+    # dynamics (damp_opt 0, emdiv 0, moist_adv_opt 0)
+    # (written out, not left to the Registry, so the lane does not depend on
+    # what the shipped namelist sets)
+    want["dynamics"].update({"damp_opt": "0", "emdiv": "0", "moist_adv_opt": "0"} if narrow else
+                            {"damp_opt": "3", "emdiv": "0.01", "moist_adv_opt": "1"})
     want["physics"]["mp_zero_out"] = "0"
 lines = open(src).read().splitlines()
 out, group, seen = [], None, set()
