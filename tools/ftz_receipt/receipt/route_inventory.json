@@ -7230,7 +7230,7 @@
     },
     {
       "file": "woof/core/bandwidth_glue.py",
-      "line": 42,
+      "line": 50,
       "column": 11,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -8530,7 +8530,7 @@
     },
     {
       "file": "woof/core/physics.py",
-      "line": 1950,
+      "line": 1951,
       "column": 17,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -8546,7 +8546,7 @@
     },
     {
       "file": "woof/core/physics.py",
-      "line": 1965,
+      "line": 1966,
       "column": 17,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -8562,7 +8562,7 @@
     },
     {
       "file": "woof/core/physics.py",
-      "line": 1988,
+      "line": 1989,
       "column": 21,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
@@ -8594,7 +8594,7 @@
     },
     {
       "file": "woof/core/ring_frame.py",
-      "line": 43,
+      "line": 45,
       "column": 11,
       "surface": "package",
       "constructor": "cp.ElementwiseKernel",
