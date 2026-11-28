@@ -23,8 +23,10 @@ qr), on a dry state WRF's diff_opt 1 / km_opt 4 horizontal mixing (the
 deformation, smag2d_km and the u, v, w and theta rows of the time-t
 fields into the held tendencies, coupled to the map factors and added on
 every stage), no physics, ``rk_ord = 3``, ``h_*_adv_order`` 3-6, a 3-D
-base state (terrain), the w_damp limiter and damp_opt 3's implicit w
-damper (in advance_w; not the fork's noaa_wrf39 upper-wind limiter).
+base state (terrain), the w_damp limiter, damp_opt 3's implicit w
+damper (in advance_w; not the fork's noaa_wrf39 upper-wind limiter) and
+WRF's external-mode filter (``emdiv > 0``: advance_uv's MUDF_XY from the
+previous substep's mudf, which advance_mu_t writes and rk_step 1 zeroes).
 Everything else is refused by :func:`step_geometry`.
 """
 
@@ -253,6 +255,7 @@ class StepGeometry:
     final: tuple = ()         # spec_bdy_final: (kind, FinalGeometry), mu first
     moist: bool = False       # qv, qc and qr (SPECIES)
     qv_table: bool = False    # specified, with qv's tables (held capture, final)
+    emdiv: bool = False       # mudf carried between substeps, zeroed on rk_step 1
 
 
 def _refuse(cfg, state) -> None:
@@ -262,7 +265,6 @@ def _refuse(cfg, state) -> None:
         "open lateral boundaries": bool((cfg.open_x or cfg.open_y) and not cfg.specified),
         "microphysics": bool(cfg.mp_physics),
         "rk_ord 2": getattr(cfg, "rk_ord", 3) != 3,
-        "emdiv": float(cfg.emdiv) > 0.0,
         # damp_opt 3's w damper is linearised (advance_w); the fork's
         # NOAA-WRF 3.9 upper-wind limiter it switches on is not
         "damp_opt 3 with upper_wind_limiter_form noaa_wrf39": (
@@ -549,6 +551,14 @@ def step_geometry(state, cfg, *, reuse_first: bool | None = None,
         buoy = dataclasses.replace(buoy, moist=1)
     lb = _lbc_geometries(state, cfg, step, msf, qvt) if spec else None
     mixq = moist and _mixes(cfg)   # the moist rows' held sources
+    emdiv = float(cfg.emdiv) > 0.0
+    em = {}
+    if emdiv:
+        # acoustic._uv_emdiv_args: -emdiv times the spacing advance_uv
+        # rebuilds from the stored REAL rdx/rdy, in REAL
+        em = dict(use_emdiv=1,
+                  xscale=float(f32(f32(-cfg.emdiv) * f32(f32(1.0) / f32(1.0 / dx)))),
+                  yscale=float(f32(f32(-cfg.emdiv) * f32(f32(1.0) / f32(1.0 / dy)))))
     stages = []
     for istage, (nsub, dtau_stage) in enumerate(D._rk_acoustic_stages(cfg)):
         dtau = float(f32(dtau_stage))
@@ -559,8 +569,9 @@ def step_geometry(state, cfg, *, reuse_first: bool | None = None,
 
         def sub(smdiv):
             return (UVGeometry(nz, ny, nx, rdx, rdy, dtau, smdiv=smdiv, top_lid=top_lid,
-                               has_msf=msf, spec_zone=szone, moist_cq=int(moist), **cf),
-                    MTGeometry(nz, ny, nx, rdx, rdy, dtau, write_mudf=0, mapped=msf,
+                               has_msf=msf, spec_zone=szone, moist_cq=int(moist), **em,
+                               **cf),
+                    MTGeometry(nz, ny, nx, rdx, rdy, dtau, write_mudf=int(emdiv), mapped=msf,
                                spec_zone=mzone, open_x=bx, open_y=by),
                     WGeometry(nz, ny, nx, rdx, rdy, dtau, epssm=float(f32(cfg.epssm)),
                               top_lid=top_lid, dampmag=float(damp_magnitude(cfg, dtau)),
@@ -629,7 +640,7 @@ def step_geometry(state, cfg, *, reuse_first: bool | None = None,
         sw=SWGeometry(nz, ny, nx, half_rdx=float(f32(0.5 / dx)),
                       half_rdy=float(f32(0.5 / dy)), mapped=msf, boundary_x=bx,
                       boundary_y=by, **cf),
-        specified=spec, moist=moist, qv_table=qvt, mix=mix, held=held,
+        specified=spec, moist=moist, qv_table=qvt, mix=mix, held=held, emdiv=emdiv,
         couple=held if msf else (), v_inv=bool(D.BIGSTEP_ENABLED),
         **({} if not spec else dict(
             capture=lb["capture"], fold=lb["fold"], fold_msf=bool(msf),
@@ -1046,6 +1057,13 @@ def _step(x, dx, geom, tape, observe, *, tl):
         if spec.sf is not None:                                   # zero_sumflux
             snap(SUMFLUX)
             sumflux_zero_tl(x, dx, spec.sf, nl=True)
+        if geom.emdiv and spec.rk_step == 1:
+            # small_step_prep zeroes MUDF on rk_step 1 only; stages 2
+            # and 3 read the previous stage's last mudf
+            snap(("mudf",))
+            x["mudf"][...] = 0
+            if tl:
+                dx["mudf"][...] = 0
         for i in range(spec.nsub):
             acoustic_substep_tl(_acoustic(x), _acoustic(dx),
                                 spec.first if i == 0 else spec.later, tape)
@@ -1511,6 +1529,9 @@ def step_ad(ax: dict, x: dict, tape: list, geom: StepGeometry) -> dict:
             cur = acoustic_substep_ad(_acoustic(ax), _acoustic(cur), tape,
                                       spec.first if i == 0 else spec.later)
             cur.update(fnm=x["fnm"], fnp=x["fnp"], msfv=x["msfv"])
+        if geom.emdiv and spec.rk_step == 1:                      # mudf's reset
+            back()
+            ax["mudf"][...] = 0
         if spec.sf is not None:                                   # zero_sumflux
             back()
             sumflux_zero_ad(ax, spec.sf)

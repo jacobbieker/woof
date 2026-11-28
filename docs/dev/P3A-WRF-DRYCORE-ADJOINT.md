@@ -1247,7 +1247,6 @@ Each step is one small PR, taken to merged before the next widens.
      - Tests (`tests/test_grad_wrfplus_mix2_step.py`): the forward
        against `dycore.step` word for word, dot product, base-only step
        = the joint base, TL against FD, and the refusals.
-
 11. `damp_opt = 3`, the implicit Rayleigh w damper (P3a window option 2,
    asked for by the 4D-Var lane: WRF 4.7.1's default and the tutorial's).
    - Where: WRF `advance_w` (`dyn_em/module_small_step_em.F:1445-1458`),
@@ -1320,6 +1319,77 @@ Each step is one small PR, taken to merged before the next widens.
      The damper adds about 0.035 ms to the primal, 0.02-0.04 ms to the
      TL and 0.06 ms to the AD (the AD recomputes the damped column and
      then reverses it); the ratios stay within G3's ~5x.
+
+12. External-mode filter, `emdiv > 0` (P3a window request 1; WRF's
+    default 0.01, which the 4D-Var L0/L1 lanes run).
+   - NL: WRF 4.7.1 `dyn_em/module_small_step_em.F:809,868` (u) and
+     `:880,942` (v): `MUDF_XY = -emdiv*dx*(MUDF(i)-MUDF(i-1))/msfuy`
+     (`*msfvx_inv` for v), added as `c1h(k)*mudf_xy` after the pressure
+     gradient. MUDF is the column-mass tendency `dmdt + mu_tend` that
+     `advance_mu_t` writes (`:1105`) and `small_step_prep` zeroes under
+     `IF (rk_step == 1)` only (`:128,135`), so stages 2 and 3 start from
+     the previous stage's last substep's MUDF.
+   - What was already there: `kernels/advance_uv.cu` had the term
+     (`use_emdiv`, `xscale`, `yscale`; graded against WRFPLUS
+     `g_/a_advance_uv` in the `lid_moist_emdiv` fixture case) and
+     `kernels/advance_mu_t.cu` the MUDF write (`write_mudf`). What was
+     missing was the step glue: `model.step_geometry` built every
+     substep with the filter off and `write_mudf = 0`, and refused
+     `emdiv > 0` by name.
+   - Binding (`woof/grad/wrfplus/model.py`): with `emdiv > 0` every
+     substep's `UVGeometry` takes `use_emdiv = 1` and the strict
+     launcher's scale (`acoustic._uv_emdiv_args`: `-emdiv` times the
+     spacing rebuilt from the REAL rdx, in REAL), every `MTGeometry`
+     `write_mudf = 1`, and `StepGeometry.emdiv` makes `step_tl` zero
+     mudf (and its perturbation) before rk_step 1's substeps, as the
+     primal zeroes its `acoustic_mudf` scratch; `step_ad` zeroes the
+     mudf adjoint at the same point. mudf is a carrier within the step,
+     not a step input: each step's reset consumes it. Under
+     `GPUWM_WRF_EXACT` the primal folds the increment into `advance_uv`
+     and its separate `apply_emdiv` launch only saves mu'' (unused
+     here), so the strict words are the folded kernel's.
+   - Oracle (`tools/wrfplus_oracle/emdiv_chain.F90`, fixture
+     `tests/data/wrfplus/emdiv_chain.npz`): nsub substeps of
+     `g_advance_uv`, `g_advance_mu_t` and `g_spec_bdyupdate` (t, mu,
+     muts) carrying u, v, mu, t and MUDF in WRFPLUS's own arrays, and the
+     adjoint backwards over the saved bases. Two cases (emdiv 0.01 with
+     3 substeps; 0.1 with 4, a lid and moist cq), spec_zone 1, the zone
+     the step runs `advance_mu_t` with. woof's chain matches to 1e-12
+     relative (TL u, v, mu, theta, mudf; AD of the chain's start, the
+     tendencies and the base mass); without the filter the TL u moves
+     well above that, so the coupling is graded.
+   - Finding (WRFPLUS): `g_advance_uv` and `a_advance_uv`
+     (`wrftladj/module_small_step_em_tl.F:1326-1327,1426-1428`,
+     `module_small_step_em_ad.F:2446,2714`) add `mudf_xy` without WRF's
+     `c1h(k)` factor. The NL has had `c1h(k)*mudf_xy` since the hybrid
+     coordinate went in; on the terrain-following coordinate (c1h = 1,
+     the only one WRFPLUS linearises) the two agree. woof's TL/AD follow
+     the NL (the `c1h` factor), so with `hybrid_opt = 2` they are graded
+     by the dot-product and FD tests, not by WRFPLUS.
+   - Tests: `tests/test_grad_wrfplus_emdiv_chain.py` (WRFPLUS agreement,
+     dot product, adjoint accumulation, TL against FD);
+     `tests/test_grad_wrfplus_emdiv_step.py` (the step: strict words
+     against `dycore.step` including the last mudf, and that the filter
+     moves u, v and mu; dot product, base-only build, TL against FD, the
+     mudf adjoint consumed by the reset, the lifted refusal), on five
+     periodic cases (warm, mapped and rotated with the hybrid coordinate,
+     w_damp and 6 substeps, with the diff_opt 1 mixing, a cold chain of
+     three, moist and mapped) and three specified ones; and an emdiv
+     configuration in `tests/test_grad_wrfplus_substep.py` (two full
+     substeps with advance_w).
+   - Cost (A6000, 40 x 120 x 120, binary32, periodic with a ridge, one
+     full step, median of 20 after 3 warm-ups; the card was shared, so
+     differences of a few per cent are within the noise):
+
+     | Measurement | emdiv 0 | emdiv 0.01 | Ratio to primal |
+     |---|---|---|---|
+     | Primal (`dycore.step`) | 7.71 ms | 7.62 ms | |
+     | TL (`step_tl`) | 10.78 ms | 11.39 ms | 1.49x |
+     | AD (`step_base` + `step_ad`) | 30.96 ms | 32.84 ms | 4.31x |
+
+     The filter adds about 6% to the TL and AD (an extra gather in
+     `advance_uv`, a store in `advance_mu_t`); a first run on a busier
+     card gave -1% and +4%.
 
 Cost is measured from item 2 on. Kernel-level AD/forward ratios are
 reported at every merge, so a G3 cost miss shows up before item 8.

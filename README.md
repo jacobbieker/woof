@@ -1592,6 +1592,14 @@ Notes on the 1.1.7 sync:
   terrain-slope limiter, `calculate_N2` and `smag_km`), each reproducing
   woof's strict kernels word for word and checked against FD of WRF
   4.7.1's own routines.
+  The step also covers WRF's external-mode filter (`emdiv > 0`, WRF's
+  default 0.01): advance_uv's damping term from the column-mass tendency
+  the previous acoustic substep wrote, carried between substeps and
+  stages and reset on the first RK stage. It reproduces `dycore.step` word
+  for word, and the substep chain matches WRFPLUS 4.7.1 to 1e-12 on the
+  terrain-following coordinate (WRFPLUS's TL/AD drop WRF's `c1h` factor
+  on this term, so with the hybrid coordinate woof follows WRF's
+  nonlinear model instead).
 - **LETKF host solve on every core by default (Linux).** An analysis on host
   arrays (no `solve_namespace`, the dense reference route) now runs its
   chunks on forked worker processes once the work is large (2x10^8
