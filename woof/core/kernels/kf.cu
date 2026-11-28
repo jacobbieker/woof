@@ -1378,21 +1378,21 @@ void kf_column(
             ddr(nk) = ddr(nk) * ddinc;
         }
         cpr = trppt;
-        /* Declared divergence from WRF (d547dc8c3, kept on the port): when
+        pptflx = trppt - tder;
+#ifdef KF_CAPPED_DOWNDRAFT_RAIN_FLOOR
+        /* RunConfig.kf_capped_downdraft_rain_floor (correct-mode FQ11): when
          * the cap above sets DDINC = TRPPT/TDER the downdraft evaporates
          * all of the updraft's precipitation and the float64 answer is 0,
-         * but in binary32 TDER*DDINC rounds to either side of TRPPT and
+         * but in binary32 TDER*DDINC can round to either side of TRPPT and
          * WRF's bare TRPPT-TDER (module_cu_kfeta.F:1810-1821) leaves minus
-         * a few ulp.  RAINC accumulates PRATEC*DT signed, so it went
-         * negative on a global 60 km hex forecast (11 columns by hour 1,
-         * minimum -3.5e-8 mm) under the pre-port kernel.  WRF's own
-         * arithmetic gives exactly 0 on those seven columns
-         * (tests/data/oracles/kf/oracle-capped-O0.out), and no column of
-         * 37,101 run through the WRF Fortran (the committed fixtures, those
-         * seven and two seeded sweeps) has a negative PRATEC, but TDER*DDINC can
-         * still round above TRPPT, so the floor stays: zero in both
-         * arithmetic modes, the only place the port leaves WRF on purpose. */
-        pptflx = fmaxf(trppt - tder, 0.0f);
+         * a few ulp, which RAINC accumulates signed.  The pre-port kernel
+         * did so on a global 60 km hex forecast (11 columns by hour 1,
+         * minimum -3.5e-8 mm; d547dc8c3).  WRF's own arithmetic, and this
+         * port's without the define, give exactly 0 on those seven columns
+         * (tests/data/oracles/kf/oracle-capped-O0.out).  The flux is floored
+         * at 0; without the define this is WRF's arithmetic. */
+        pptflx = fmaxf(pptflx, 0.0f);
+#endif
         peff = pptflx / trppt;
         if (ldb > 1) {
             for (int nk = 1; nk <= ldb - 1; ++nk) {

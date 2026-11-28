@@ -647,6 +647,13 @@ BGC_NONREACTIVE_STEP_CASES = (
     ("seaice_nonreactive_bl99_dedd_rothrock", 20262911, _SEAICE_STEP, {
         **_COUPLED_BASE, **_NR_STEP, "oracle_n_steps": 3, "config_start_time": "2001-06-01_10:00:00"},
      (12, 6, 3)),
+    # the velocity solver between two subcycles' combines (subcycle_snow_ice_tracers)
+    ("seaice_nonreactive_bl99_dedd_two_subcycles_gregorian", 20262912, _SEAICE_STEP, {
+        **_COUPLED_BASE, **_NR_STEP, "oracle_n_steps": 2, "config_dynamics_subcycle_number": 2,
+        "config_elastic_subcycle_number": 12, "config_revised_evp": True,
+        "config_ridging_participation_function": "exponential",
+        "config_ridging_redistribution_function": "exponential", "config_nCategories": 3, "config_nIceLayers": 4,
+        "config_calendar_type": "gregorian", "config_start_time": "2000-07-10_06:00:00"}, (12, 6, 3)),
 )
 
 #: the z-aerosols (config_use_zaerosols: black carbon 1 and 2 and the first dust), alone and

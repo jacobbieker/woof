@@ -22,12 +22,16 @@ glibc 2.44), 2026-11-22.
   `seaice_column_dynamics_time_integration` starts with
   `column_combine_snow_ice_tracers` before the ridging. No advection (the
   column oracle's coupled cases run without it).
-- Cases: `BGC_NONREACTIVE_STEP_CASES`: three column steps and
-  `seaice_nonreactive_bl99_dedd_rothrock`, the coupled step (12x6 torus,
-  3 owned columns). `_nonreactive_carry_state` adds the
+- Cases: `BGC_NONREACTIVE_STEP_CASES`: three column steps and two coupled
+  steps (12x6 torus, 3 owned columns): `seaice_nonreactive_bl99_dedd_rothrock`
+  and `seaice_nonreactive_bl99_dedd_two_subcycles_gregorian` (two dynamics
+  subcycles with the velocity solver between them, revised EVP, exponential
+  ridging; added 2026-11-28 from the same build, the other cases' words,
+  logs and input digests unchanged byte for byte). `_nonreactive_carry_state` adds the
   tracer profiles, mobile fractions, ocean concentrations,
   `oceanBioFluxes` and the brine grids to the step state.
-  - `step_nonreactive_bl99_dedd_subcycles_gregorian`: two dynamics
+  - `step_nonreactive_bl99_dedd_subcycles_gregorian` and
+    `seaice_nonreactive_bl99_dedd_two_subcycles_gregorian`: two dynamics
     subcycles, so the second combine overwrites the first subcycle's ridging
     of the tracer with the pre-dynamics `*Snow`/`*Ice` (v8.4.2's order; the
     opt-in correction `subcycle_snow_ice_tracers` is not held to the oracle).

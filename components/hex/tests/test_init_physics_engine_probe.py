@@ -128,12 +128,15 @@ def test_a_suite_aware_engine_that_fails_reports_its_own_error(monkeypatch, tmp_
 
 
 def test_registry_only_selectors_have_no_table_row_and_need_no_legacy_metadata(monkeypatch, tmp_path):
-    """THE BREAKAGE (hex option matrix, plan 1.3): a generic-seam selector
-    named by its registry option id has no suite-table row, and the door
-    stopped with a bare KeyError on it before the forecast opened."""
+    """THE BREAKAGE (hex 0.6.1; fork jacobbieker/woof PR 379): a generic-seam selector named by its
+    registry option id has no suite-table row, and the door stopped with a bare KeyError on it
+    (``--physics-suite arwen_mpas_column --physics mp_physics=2``) before the forecast opened."""
     from woof.hex import init_physics
     from woof.hex.physics_suites import load_table, resolve_physics
 
+    # (WOOF 1.1.7 round 4) resolve_physics plans mp_physics=2 on the engine's column seam, which imports CuPy;
+    # test_physics_suites.py skips the same way on a CPU runner
+    pytest.importorskip("woof.core.mpas_column_suite")
     options = load_table()["options"]
     assert "lin-mp2" not in options["config_microp_scheme"]
     assert "ssib" not in options["config_lsm_scheme"]

@@ -361,7 +361,7 @@ __device__ static void noah_canres(real solar, real ch, real sfctmp,
     // to one FP32 self multiply; at -O0 the same source calls powf, which is
     // the gfk_pow arm below and differs in rare words. Keep the subtract,
     // square, coefficient and final subtract separately rounded, as in the
-    // -O2 executable (release box and a development machine disassembly, 2026-11-02).
+    // -O2 executable (release box and RTX 4090 test host disassembly, 2026-11-02).
     real temperature_delta = __fsub_rn(topt, sfctmp);
     real rct = __fsub_rn(1.0f, __fmul_rn(0.0016f,
                                     __fmul_rn(temperature_delta, temperature_delta)));
@@ -705,6 +705,13 @@ __device__ static void noah_sstep(real* sh2oout, const real* sh2oin,
         } else {
             wplus = 0.0f;
         }
+#ifdef NOAH_SMC_FLOOR_BOOKING
+        // Opt-in (RunConfig.noah_smc_floor_booking, default off): WRF
+        // module_sf_noahlsm.F:4026 raises a layer below 0.02 to 0.02 and
+        // books the water it adds nowhere; take it from the layer below
+        // (WPLUS < 0), and below the bottom layer from RUNOFF3.
+        if (stot < 0.02f) wplus = (stot - 0.02f) * ddz;
+#endif
         smc[k] = fmaxf(fminf(stot, smcmax), 0.02f);
         sh2oout[k] = fmaxf(smc[k] - sice[k], 0.0f);
     }
@@ -1576,6 +1583,13 @@ __device__ __noinline__ static void noah_glacial_column(
     real eta_e = (etp_e > 0.0f) ? esnow_e : etp_e;
     real ssoil_out = __fmul_rn(-1.0f, ssoil);
     real runoff1 = __fdiv_rn(snomlt, dt);
+#ifdef NOAH_LAND_ICE_RAIN_RUNOFF
+    // RunConfig.noah_land_ice_rain_runoff: WRF's SFLX_GLACIAL books only the
+    // snowmelt (module_sf_noahlsm_glacial_only.F:406) and drops the liquid
+    // precipitation PRCPF (:287, PRCP1 :912 never read); it leaves the
+    // glacier as surface runoff, in m s-1 like SNOMLT/DT.
+    runoff1 = __fadd_rn(runoff1, __fmul_rn(prcpf, 0.001f));
+#endif
 
     // ---------------- lsm post-update (ICE == -1 sets SOILM = 0,
     // XLAI = 0.01, RUNOFF2 = RUNOFF3 = 0, SWC = SMC = SMAV = 1; SOILW keeps
@@ -2083,6 +2097,15 @@ void noah_column_body(const int* __restrict__ ivgtyp,
         real frcsno = snowhk / dtot;
         real frcsoi = dsoil / dtot;
         real df1a = frcsno * sncond + frcsoi * df1;
+#ifdef NOAH_SNOW_SERIES_CONDUCTIVITY
+        // RunConfig.noah_snow_series_conductivity: WRF computes the series
+        // (harmonic) conductivity DF1H (module_sf_noahlsm.F:649) and never
+        // reads it; the flux it blends is the thickness-weighted arithmetic
+        // (parallel-flow) DF1A (:656, :663).  Heat crossing the snow and
+        // then the half soil layer is in series: DF1H takes DF1A's place in
+        // the SNCOVR blend, as the commented line at :654-655 intended.
+        df1a = (sncond * df1) / (frcsoi * sncond + frcsno * df1);
+#endif
         df1 = df1a * sncovr + df1 * (1.0f - sncovr);
         ssoil = df1 * (t1 - stc[0]) / dtot;
     }

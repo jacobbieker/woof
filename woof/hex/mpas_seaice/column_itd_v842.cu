@@ -107,6 +107,7 @@
 #define ITD_UPDATE_OCN_F 64
 #define ITD_HEAT_CAPACITY 128
 #define ITD_SOLVE_ZSAL 256     // zsal_solve: the column package's solve_zsal
+#define ITD_ZAP_SNOW_AREA 512  // zap_snow_area: zap_small_areas' zap_snow sees the category's area
 
 #define ITD_RHOSI 940.0
 #define ITD_SALT_LOSS 0.4
@@ -955,11 +956,15 @@ __device__ int itd_zap_small_areas(const ItdTracers &T, double dt, int ncat, dou
             *dfresh = A(*dfresh, xtmp);
             xtmp = D(M(M(M(RHOI, vicen[n]), ICE_REF_SAL), P001), dt);
             *dfsalt = A(*dfsalt, xtmp);
+            const double area = aicen[n];
             *aice0 = A(*aice0, aicen[n]);
             aicen[n] = 0.0;
             vicen[n] = 0.0;
             tr[ix[TI_TSFC]] = TOCNFRZ;
-            itd_zap_snow(T, dt, tr, &vsnon[n], dfresh, dfhocn, aicen[n], dflux_bio);
+            // v8.4.2 passes the area it just zeroed (the snow's surface layer drops out of
+            // dflux_bio); the zap_snow_area correction passes the category's area
+            itd_zap_snow(T, dt, tr, &vsnon[n], dfresh, dfhocn, (flags & ITD_ZAP_SNOW_AREA) ? area : aicen[n],
+                         dflux_bio);
             for (int it = 1; it < nt; ++it) tr[it] = it == ix[TI_FBRI] ? 1.0 : 0.0;   // tr_brine: fbri = 1
             first_ice[n] = 1;
         }

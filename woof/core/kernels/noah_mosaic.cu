@@ -697,6 +697,13 @@ __device__ static void noah_sstep(real* sh2oout, const real* sh2oin,
         } else {
             wplus = 0.0f;
         }
+#ifdef NOAH_SMC_FLOOR_BOOKING
+        // Opt-in (RunConfig.noah_smc_floor_booking, default off): WRF
+        // module_sf_noahlsm.F:4026 raises a layer below 0.02 to 0.02 and
+        // books the water it adds nowhere; take it from the layer below
+        // (WPLUS < 0), and below the bottom layer from RUNOFF3.
+        if (stot < 0.02f) wplus = FMUL(FSUB(stot, 0.02f), ddz);
+#endif
         smc[k] = fmaxf(fminf(stot, smcmax), 0.02f);
         sh2oout[k] = fmaxf(FSUB(smc[k], sice[k]), 0.0f);
     }
@@ -1358,6 +1365,11 @@ __device__ static void noah_mosaic_tile_glacial(MosaicState& s,
  real eta_e=etp_e>0.0f?esnow_e:etp_e;
  real ssoil_out=FMUL(-1.0f, ssoil);
  real runoff1=FDIV(snomlt, dt);
+#ifdef NOAH_LAND_ICE_RAIN_RUNOFF
+ // RunConfig.noah_land_ice_rain_runoff, as noah.cu: the liquid precipitation
+ // SFLX_GLACIAL drops (glacial_only.F:287, :912) leaves as surface runoff.
+ runoff1=FADD(runoff1, FMUL(prcpf, 0.001f));
+#endif
  // noahdrv:3605-3729 and 4062-4080. SOILW retains its previous tile value.
  s.lai=0.01f;s.canwat=FMUL(cmc, 1000.0f);s.snow=FMUL(sneqv, 1000.0f);s.snowh=snowhk;
  s.albedo=albedo;s.albbck=alb;s.z0=z0brd;s.emiss=emissi;s.znt=z0k;
@@ -1697,6 +1709,11 @@ __device__ static void noah_mosaic_tile(MosaicState& s,
         real frcsno = FDIV(snowhk, dtot);
         real frcsoi = FDIV(dsoil, dtot);
         real df1a = FADD(FMUL(frcsno, sncond), FMUL(frcsoi, df1));
+#ifdef NOAH_SNOW_SERIES_CONDUCTIVITY
+        // RunConfig.noah_snow_series_conductivity, as noah.cu: the unused
+        // series DF1H (module_sf_noahlsm.F:649) in place of DF1A (:656).
+        df1a = FDIV(FMUL(sncond, df1), FADD(FMUL(frcsoi, sncond), FMUL(frcsno, df1)));
+#endif
         df1 = FADD(FMUL(df1a, sncovr), FMUL(df1, (FSUB(1.0f, sncovr))));
         ssoil = FDIV(FMUL(df1, (FSUB(t1, stc[0]))), dtot);
     }

@@ -84,10 +84,11 @@ def _run(backend, body, tmp_path):
     return json.loads(line[len("RESULT "):])
 
 
-# nz 3 (advance_uv's floor) without 3-D base state, a lid, and nz 19
-# across the adjoints' level chunks (AD_KCHUNK = 8).
+# nz 3 (advance_uv's floor) without 3-D base state, a lid, nz 19
+# across the adjoints' level chunks (AD_KCHUNK = 8), and the external-mode
+# filter (advance_uv reading the mudf the previous substep wrote).
 CONFIGS = [dict(), dict(nz=3, ny=2, nx=3, base3d=0),
-           dict(nz=19, ny=3, nx=4, top_lid=1)]
+           dict(nz=19, ny=3, nx=4, top_lid=1), dict(top_lid=1, emdiv=0.05)]
 
 
 @pytest.mark.parametrize("backend", BACKENDS)

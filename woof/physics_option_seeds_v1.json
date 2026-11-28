@@ -1435,7 +1435,7 @@
           "ra_sw_physics": 99
         },
         "warnings": [
-          "The packaged co2tf=0 CONRAD table has 42 layers and requires its matching vertical grid; co2tf=1 computes transmission for the selected grid. Native ozone tables allow at most 81 layers. Strict replay matches captured native words; default hardware math differs. One three-hour real forecast and idealized nest lifecycle checks do not establish general forecast skill. The inherited WK82 relocation verifier refuses its open parent on the unchanged candidate before moving; that independent check remains open."
+          "The packaged co2tf=0 CONRAD table has 42 layers and requires its matching vertical grid; co2tf=1 computes transmission for the selected grid. Columns of at most 81 layers run the unchanged units; 82 to 256 layers run the regenerated 256-layer storage tier. Strict replay matches captured native words; default hardware math differs. One three-hour real forecast and idealized nest lifecycle checks do not establish general forecast skill. The inherited WK82 relocation verifier refuses its open parent on the unchanged candidate before moving; that independent check remains open."
         ]
       }
     }

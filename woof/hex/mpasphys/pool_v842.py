@@ -186,6 +186,9 @@ class RegistryLayout:
         _hailcast.extend_registry(self.root, _hailcast.packages(config))
         _spacewx.extend_registry(self.root, _spacewx.packages(config))
         _reduce.extend_registry(self.root, _reduce.packages(config))
+        # MPAS-Model PR #1409 (elvmax, config_gwdo_factor/_nonhyd) only when the run selects bl_kim_gwdo.
+        from .kim_gwdo_2026 import prepare_registry as _kim_registry
+        _kim_registry(self.root, config)
         self.configs = {}
         self.config_kinds = {}
         for option in self.root.findall(".//nml_option"):

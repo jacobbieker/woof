@@ -560,7 +560,8 @@ def test_era5_layers_are_remapped_to_noah_by_layer_means():
 
 def test_gfs_takes_over_past_era5s_last_hour():
     times = (datetime(2026, 10, 11, 12), datetime(2026, 10, 12, 0))
-    assert _REAL_LAND_STATE_SOURCE(times, era5_through=datetime(2026, 10, 12)) == "era5"
+    assert _REAL_LAND_STATE_SOURCE(times, era5_through=datetime(2026, 10, 12),
+                                   era5_holds=lambda valid: True) == "era5"
     assert _REAL_LAND_STATE_SOURCE(times, era5_through=datetime(2026, 10, 11, 23)) == "gfs"
     assert ukv.gfs_cycle_for(datetime(2026, 10, 24, 15)) == datetime(2026, 10, 24, 12)
     assert ukv.gfs_lead(datetime(2026, 10, 24, 12), datetime(2026, 10, 25, 3)) == 15
@@ -669,11 +670,13 @@ def _live_object(path, run, valid, product):
         data.units = units
 
 
-def _live_bucket(tmp_path, monkeypatch, run, times):
+def _live_bucket(tmp_path, monkeypatch, run, times, names=None, drop=()):
     store = {}
     for valid in times:
         for product in ukv._LIVE_OBJECTS:
-            key = ukv.live_key(run, valid, product)
+            if product in drop:
+                continue
+            key = ukv.live_key(run, valid, (names or {}).get(product, product))
             path = tmp_path / "bucket" / Path(key).name
             path.parent.mkdir(parents=True, exist_ok=True)
             _live_object(path, run, valid, product)
@@ -706,6 +709,81 @@ def test_live_window_is_read_from_one_run(tmp_path, monkeypatch):
         assert np.allclose(dataset.variables["eastward_wind"][0], 10.0, atol=1e-4)
         assert np.allclose(dataset.variables["surface_altitude"][0], 42.0)
     assert not (tmp_path / "out" / ".ukv-staging").exists()
+
+
+def test_live_run_before_the_height_rename_is_read(tmp_path, monkeypatch):
+    from netCDF4 import Dataset
+    _small_plane(monkeypatch)
+    run = datetime(2026, 1, 21, 9)
+    times = (datetime(2026, 1, 21, 12), datetime(2026, 1, 21, 15))
+    old = "height_ASL_on_pressure_levels"
+    store = _live_bucket(tmp_path, monkeypatch, run, times,
+                         names={"geopotential_height_on_pressure_levels": old})
+    assert any(key.endswith(f"-{old}.nc") for key in store)
+    assert ukv.live_missing(run, times) == []
+    monkeypatch.setattr(ukv, "read_era5", _fake_era5)
+    lat, lon = ukv.laea_inverse(_SMALL["x0"] + 60000.0, _SMALL["y0"] + 50000.0)
+    area = Area(float(lat) - 0.1, float(lon) - 0.1, float(lat) + 0.1, float(lon) + 0.1)
+    manifest = ukv.acquire(cycle=times[0], hours=3, cadence=3, area=area,
+                           out=tmp_path / "out", progress=lambda text: None)
+    assert manifest["store"] == "live" and manifest["run"] == run.isoformat()
+    with Dataset(tmp_path / "out" / manifest["files"][0]["path"]) as dataset:
+        assert np.allclose(dataset.variables["geopotential_height"][0], 1000.0)
+
+
+def test_live_run_without_orography_derives_its_terrain(tmp_path, monkeypatch):
+    from netCDF4 import Dataset
+    _small_plane(monkeypatch)
+    run = datetime(2025, 11, 24, 9)
+    times = (datetime(2025, 11, 24, 12), datetime(2025, 11, 24, 15))
+    _live_bucket(tmp_path, monkeypatch, run, times, drop={"height_of_orography"})
+    assert ukv.live_missing(run, times) == []
+    monkeypatch.setattr(ukv, "read_era5", _fake_era5)
+    lat, lon = ukv.laea_inverse(_SMALL["x0"] + 60000.0, _SMALL["y0"] + 50000.0)
+    area = Area(float(lat) - 0.1, float(lon) - 0.1, float(lat) + 0.1, float(lon) + 0.1)
+    kwargs = dict(cycle=times[0], hours=3, cadence=3, area=area, out=tmp_path / "out",
+                  progress=lambda text: None)
+    manifest = ukv.acquire(**kwargs)
+    assert manifest["store"] == "live"
+    assert manifest["terrain"]["from"] == f"derived from the surface pressure at {times[0].isoformat()}"
+    assert {entry["terrain_from"] for entry in manifest["files"]} == {manifest["terrain"]["from"]}
+    with Dataset(tmp_path / "out" / manifest["files"][0]["path"]) as dataset:
+        derived = np.asarray(dataset.variables["surface_altitude"][0])
+        attributes = " ".join(str(dataset.getncattr(name)) for name in dataset.ncattrs())
+    assert np.isfinite(derived).all() and not np.allclose(derived, 42.0)
+    assert "hypsometric height" in attributes and "published height_of_orography" not in attributes
+    # An interrupted request (hours stamped, no manifest) resumes from the
+    # stamps and still names the derived terrain.
+    from woof import fetch_routes
+    (tmp_path / "out" / fetch_routes.MANIFEST_NAME).unlink()
+    said = []
+    again = ukv.acquire(**{**kwargs, "progress": said.append})
+    assert sum("kept from an interrupted run" in line for line in said) == len(times)
+    assert again["terrain"]["from"] == manifest["terrain"]["from"]
+    # The resume reads the terrain back from the float32 files.
+    assert again["terrain"]["min_m"] == pytest.approx(manifest["terrain"]["min_m"], rel=1e-6)
+
+
+def test_live_run_after_the_orography_cut_over_still_posting_is_incomplete(tmp_path, monkeypatch):
+    # From 2025-12-12 every run publishes orography, last of a lead's objects:
+    # a run that has not posted it yet is still posting, not an early run.
+    run = datetime(2025, 12, 12, 9)
+    times = (datetime(2025, 12, 12, 12),)
+    _live_bucket(tmp_path, monkeypatch, run, times, drop={"height_of_orography"})
+    assert ukv.live_missing(run, times) == [
+        ukv.live_key(run, times[0], "height_of_orography")]
+    before = datetime(2025, 12, 11, 21)
+    _live_bucket(tmp_path, monkeypatch, before, times, drop={"height_of_orography"})
+    assert ukv.live_missing(before, times) == []
+
+
+def test_live_run_missing_every_height_name_is_incomplete(tmp_path, monkeypatch):
+    run = datetime(2026, 1, 21, 9)
+    times = (datetime(2026, 1, 21, 12),)
+    store = _live_bucket(tmp_path, monkeypatch, run, times)
+    key = ukv.live_key(run, times[0], "geopotential_height_on_pressure_levels")
+    monkeypatch.setattr(ukv, "live_listing", lambda probe, valid: set(store) - {key})
+    assert ukv.live_missing(run, times) == [key]
 
 
 def test_live_run_selection_skips_a_run_still_posting(monkeypatch):
@@ -774,3 +852,31 @@ def test_gfs_cycle_falls_back_while_the_newest_has_not_posted(monkeypatch):
     times = (datetime(2026, 10, 16, 15), datetime(2026, 10, 16, 18))
     assert ukv.choose_gfs_cycle(datetime(2026, 10, 16, 15), times) == datetime(2026, 10, 16, 6)
     assert asked[-1].endswith("gfs.t06z.pgrb2.0p25.f012.idx")
+
+
+def test_an_era5_hole_inside_the_published_span_sends_the_window_to_gfs():
+    times = [datetime(2026, 11, 17, 9) + timedelta(hours=h) for h in range(52)]
+    through = datetime(2026, 11, 19, 23)
+    hole = {datetime(2026, 11, 18, h) for h in range(24)}
+    assert _REAL_LAND_STATE_SOURCE(times, era5_through=through,
+                                   era5_holds=lambda valid: valid not in hole) == "gfs"
+    assert _REAL_LAND_STATE_SOURCE(times, era5_through=through,
+                                   era5_holds=lambda valid: True) == "era5"
+
+
+def test_a_window_past_the_published_span_is_gfs_without_probing():
+    times = [datetime(2026, 11, 19, 9) + timedelta(hours=h) for h in range(52)]
+
+    def probe(valid):
+        raise AssertionError("no hour is probed past the span")
+
+    assert _REAL_LAND_STATE_SOURCE(times, era5_through=datetime(2026, 11, 19, 23),
+                                   era5_holds=probe) == "gfs"
+
+
+@pytest.mark.network
+@pytest.mark.skipif(os.environ.get("WOOF_NETWORK_TESTS") != "1",
+                    reason="reads Google's ARCO ERA5 copy")
+def test_arco_misses_2026_11_18():
+    assert ukv.era5_hour_published(datetime(2026, 11, 17, 23))
+    assert not ukv.era5_hour_published(datetime(2026, 11, 18, 0))

@@ -178,7 +178,7 @@ def test_new_tiedtke_consumes_the_advective_forcing_pair():
 
     WRF's cumulus driver pre-folds RTHRATEN + RTHBLTEN into RTHFTEN at
     module_cumulus_driver.F:867 for G3SCHEME and NTIEDTKESCHEME ONLY. GF
-    is not in that list and sums the three lanes itself, so WOOF's dycore
+    is not in that list and sums the three lanes itself, so WOOF-ArWen's dycore
     exports PURE ADVECTION. The fold belongs in the New Tiedtke ADAPTER --
     moving the export double-counts radiative and PBL heating for GF and
     moves run_myj, the baseline every intensity number is graded against.
@@ -447,6 +447,20 @@ def test_the_prepared_cache_identity_needs_no_scheme_entry():
     # (woof.wind_table.drop_inert_config).
     from woof.wind_table import drop_inert_config
     drop_inert_config(expected_run)
+    # 3.0.0: the WRF 4.8.0 keys whose scheme is off (dynamic lightning,
+    # gwd_opt = 1, Shin-Hong, the MYNN-SFC roughness keys) and the TEMPO
+    # generation leave the identity, by the document's rule
+    # (woof.experiment).  The MYNN v6.1 switch is correct-mode MY1 since
+    # 3.0.3 and leaves with the correction keys below.
+    from woof.core.dyn_lightning import drop_default_dyn_lightning
+    drop_default_dyn_lightning(expected_run)
+    for name in ("gwdo_version", "gwd_dx_factor", "gwd_if_nonhyd",
+                 "shinhong_version", "shinhong_nonlocal_flux",
+                 "shinhong_scu_mixing", "shinhong_ke_dissipation",
+                 "sf_mynn_sfcflux_land", "sf_mynn_sfcflux_water", "shalwater_z0",
+                 "tempo_version", "tempo_hailhyperaware"):
+        expected_run.pop(name)
+
     neutral = {"surface_energy_diag": False, "cycling": False,
                "aercu_opt": 0, "aercu_fct": 1.0,
                "ruc_irrigation": "wrf_461", "ruc_qvg_cold_start": "wrf",
@@ -520,7 +534,20 @@ def test_the_prepared_cache_identity_needs_no_scheme_entry():
              "radtran_mol_abs_param": "reptran coarse",
              "radtran_solver": "disort", "radtran_streams": 0,
              "radtran_pseudospherical": False, "radtran_aerosol": "none",
-             **MULTI_PERTURB_RUN_DEFAULTS}
+             **MULTI_PERTURB_RUN_DEFAULTS,
+             # Fork keys appended since, each default-off and absent from the
+             # identity at its default (the same document rule).
+             "solar_tsi_opt": 0,
+             "solar_tsi_source": "", "solar_tsi_mode": "absolute",
+             "obstacle_opt": 0, "obstacle_file": "",
+             "obstacle_solid_fraction": 0.5, "obstacle_relax_factor": 10.0,
+             "obstacle_drag_coefficient": 0.4, "obstacle_wall_z0": 0.01,
+             "spacewx_ionosphere_opt": 0, "spacewx_f107_source": "",
+             "spacewx_f107_mode": "81day", "spacewx_ionosphere_maps": "ccir",
+             "spacewx_aurora_opt": 0, "spacewx_kp_source": "",
+             "solar_ssi_opt": 0, "solar_ssi_source": "",
+             "spacewx_epp_opt": 0, "spacewx_epp_source": "",
+             "urban_param_file": "", "woof_quirk_corrections": None}
     for name, default in later.items():
         assert expected_run.pop(name) == default, name
     # 2.9.7 tc/nest: the fixed-frame archive is read only on a nested domain;
@@ -536,6 +563,12 @@ def test_the_prepared_cache_identity_needs_no_scheme_entry():
     # this domain's identity binds it while it is on.
     if correct_mode.CORRECT_KEYS_DEFAULT:
         expected_run["hydrometeor_handover_numbers"] = True
+    # FQ1/FQ2/FQ4 are read under Grell-Freitas, YSU and Noah, which this
+    # domain runs, so its identity binds them while they are on.
+    fq = ({"gf_deep_rain_evaporation_booking": True,
+           "ysu_surface_heat_exner": True, "noah_smc_floor_booking": True}
+          if correct_mode.CORRECT_KEYS_DEFAULT else {})
+    expected_run.update(fq)
     assert cached["run"] == expected_run
     assert cached["start_time"] == start.isoformat()
     assert compare(cached, identity(domain)) == ([], [])
@@ -544,9 +577,17 @@ def test_the_prepared_cache_identity_needs_no_scheme_entry():
     # Under New Tiedtke its WB4 key is read, so the default (on) is bound.
     wb4 = ({"ntiedtke_dry_mass_coupling": True}
            if correct_mode.CORRECT_KEYS_DEFAULT else {})
-    assert new_scheme["run"] == {**expected_run, "cu_physics": 16, **wb4}
+    # cu_physics = 3's generation (GFL by default since 3.0.0) leaves an
+    # identity whose cumulus is not Grell-Freitas.
+    assert new_scheme["run"] == {**{k: v for k, v in expected_run.items()
+                                    if k not in ("cu_gf_version",
+                                                 "gf_deep_rain_evaporation_booking")},
+                                 "cu_physics": 16, **wb4}
+    # and drops the Grell-Freitas booking key it no longer reads.
     assert compare(cached, new_scheme) == (
-        [], ["run.cu_physics"] + (["run.ntiedtke_dry_mass_coupling"] if wb4 else []))
+        [], ["run.cu_physics"]
+        + (["run.gf_deep_rain_evaporation_booking"] if fq else [])
+        + (["run.ntiedtke_dry_mass_coupling"] if wb4 else []))
     # A selected-field or per-scheme serializer cannot drop unrelated
     # trajectory controls or the newly serialized delayed-domain date.
     changed = identity(replace(domain, run=replace(run, dt=10.),
@@ -649,7 +690,8 @@ def test_no_scheme_whitelist_restates_the_scheme_set():
         ("config.py", "if cfg.kf_edrates and cfg.cu_physics not in (11, 99):"),
         # These two paths only implement the native CU99 batch and leave
         # other schemes on the ordinary, fully admitted forecast runner.
-        ("ensemble/batch_physics.py", "if cfg.cu_physics not in (0, 99) or cfg.sf_urban_physics or getattr(cfg, \"sf_surface_mosaic\", 0) or driver.terrain_drag is not None:"),
+        # (WRF-480 L07 wrapped it to add the kim_tofd VAR producer refusal.)
+        ("ensemble/batch_physics.py", "if (cfg.cu_physics not in (0, 99) or cfg.sf_urban_physics or getattr(cfg, \"sf_surface_mosaic\", 0)"),
         ("ensemble/prepared_component_reservation.py", "if cfg.cu_physics not in (0, 99):"),
         # The same exact-chain ring, now also kept for do_avgflx_em (the
         # averaged-flux path reads the same sumflux ring); still no scheme gate.

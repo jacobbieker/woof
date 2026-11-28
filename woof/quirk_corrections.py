@@ -1,40 +1,47 @@
-"""The umbrella over woof's opt-in corrections of WRF / MPAS quirks.
+"""The umbrella over woof's corrections of WRF / MPAS quirks.
 
 Every correction of a WRF 4.7.1 / MPAS v8.4.2 quirk that woof ports word
-for word has its own named opt-in, off by default (the oracle's words).
-``woof_quirk_corrections = 'all'`` turns every one of them on where its
-scheme runs; ``'none'`` (the default) leaves each to its own key.
+for word has its own named key. Since the upstream WOOF 1.1.7 sync the
+corrections follow the physics mode (woof.correct_mode, ``physics.mode``):
+in correct mode, the default, every one is on where its scheme runs; in
+exact mode (``physics.mode = 'exact'``, the hex door's ``--physics-mode
+exact``, an MPAS config dict's ``config_physics_mode = 'exact'``, or a
+strict ``GPUWM_WRF_EXACT=1`` process) every one is off, so the run is
+the oracle's arithmetic word for word. Parity gates run in exact mode.
 
 The rules, the same on every route:
 
-* Default (``'none'``): nothing changes; each individual key keeps working.
-* ``'all'``: each correction below whose scheme the run carries takes its
-  corrected value. A correction whose scheme the run does not carry stays
-  off (YSU's on a MYNN run, the MALI statistics' on a run without them).
-* A key set explicitly to anything but its corrected value next to
-  ``'all'`` is a conflict and is refused by name.
-* A correction its own key refuses in some combination (YSU's with BEP/BEM,
-  say) is refused there by name under the umbrella too: ``'all'`` never
-  bypasses a refusal and never drops a correction silently. (The
-  MPAS-Seaice ``ice_velocity_at_cell`` needs the velocity solver's
-  ``vVelocity`` and ``interiorVertex`` pools: a column run without them
-  does not carry it, so 'all' leaves it off there; named, it is refused.)
-* On the WRF route RunConfig derives the correction keys under 'all'
-  (on where the scheme runs, off elsewhere, again after a
-  ``dataclasses.replace`` that changes the scheme); the TOML readers
-  refuse an explicit conflicting key first. A RunConfig built in Python
-  with 'all' takes the derived values over its correction keys.
+* Unset umbrella (the default): each correction takes the mode's value
+  (correct: corrected; exact: WRF's / MPAS's), and a correction's own key,
+  when set, wins: that is how one correction is turned off in correct
+  mode, or on in exact mode.
+* ``woof_quirk_corrections = 'all'`` / ``'none'``: every correction on /
+  off whatever the mode. A key set the other way next to ``'all'`` is a
+  conflict and is refused by name; next to ``'none'`` the key wins (that
+  is how a single correction is run on its own).
+* A correction is read only where its scheme runs (YSU's on a MYNN run,
+  the MALI statistics' on a run without them, are inert). Where its
+  scheme cannot carry it (YSU's with BEP/BEM, Noah's with a WRF-Hydro
+  coupling, the MPAS-Seaice ``ice_velocity_at_cell`` without the
+  velocity solver's pools) it stays off; the WRF route's run receipt
+  lists such a finding as uncorrected (woof.correct_mode.uncorrected).
+* On the WRF route the RunConfig keys are correct-mode findings FQ1-FQ12
+  of woof.correct_mode: their defaults are ``CORRECT_KEYS_DEFAULT``,
+  exact mode authors them off with every other correct-mode key, and the
+  checkpoint echo binds one only where it is on and read.
 * Each route's umbrella reaches the keys that route carries. The hex
-  door's ``--quirk-corrections all`` sets its own flag only: the
-  RunConfig corrections (GF's, YSU's) are not hex flags. Where a hex
-  route's drivers do not carry the undriven-species rule (the MPAS suite
-  route, local time stepping, partial nest, the partitioned same-host
-  executor) it stays off there, as a scheme the run does not carry.
+  door's ``--quirk-corrections`` sets its own flag only: the RunConfig
+  corrections (GF's, YSU's) are not hex flags. Where a hex route's
+  drivers do not carry the undriven-species rule (the MPAS suite route,
+  local time stepping, partial nest, the partitioned same-host executor)
+  it stays off there, as a scheme the run does not carry. The MPAS-Seaice
+  corrections are names, not keys: under ``'none'`` the ones named in
+  ``woof_v842_corrections`` still apply, which is how a subset is run.
 
 :data:`CORRECTIONS` is the ledger: one row per correction, with the route
 and key that carries it. tests/test_quirk_corrections.py holds the code's
-opt-ins, README.md and docs/public/CONFIGURATION.md to it, so a new
-correction cannot be left out of the umbrella.
+corrections, README.md and docs/public/CONFIGURATION.md to it, and checks
+that exact mode turns every one off.
 """
 
 from __future__ import annotations
@@ -42,11 +49,16 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from woof import correct_mode as _correct_mode
+
 #: The umbrella's key on every route (RunConfig field, MPAS config dicts,
 #: and the hex door's ``--quirk-corrections``).
 UMBRELLA = "woof_quirk_corrections"
-#: Its values: 'none' (default) and 'all'.
+#: Its values: 'none' and 'all' (unset, the default, follows the physics mode).
 UMBRELLA_VALUES = ("none", "all")
+#: The physics-mode key of the MPAS config dicts (MPAS's namelist spelling,
+#: as MPAS-A's &nhyd_model config_physics_mode): 'correct' or 'exact'.
+MODE_KEY = "config_physics_mode"
 
 #: the routes, and where each carries its keys
 ROUTES = {
@@ -61,15 +73,16 @@ ROUTES = {
 
 @dataclass(frozen=True)
 class QuirkCorrection:
-    """One opt-in correction: ``key`` on ``route`` takes ``corrected``
-    under the umbrella; ``default`` is the word-exact value.
+    """One correction: ``key`` on ``route`` takes ``corrected`` in correct
+    mode (and under 'all'); ``exact`` is the word-exact value, taken in
+    exact mode (and under 'none').
 
     ``active`` (WRF route only) says whether a run carries the scheme:
     it takes ``get(name)``, the run's value of RunConfig field ``name``."""
 
     key: str
     route: str
-    default: object
+    exact: object
     corrected: object
     scheme: str
     summary: str
@@ -91,6 +104,47 @@ CORRECTIONS: tuple[QuirkCorrection, ...] = (
         "the MYNN surface layer's 2 m / 10 m heat profile is integrated from zt/L, as its log term is",
         # the gsl_wrf39 fork integrates from z0/L throughout: nothing to correct
         active=lambda get: int(get("sf_sfclay_physics")) == 5 and get("mynn_sfclay_variant") == "wrf_461"),
+    QuirkCorrection(
+        "noah_smc_floor_booking", "wrf", False, True, "sf_surface_physics = 2",
+        "Noah's 0.02 soil-moisture floor takes the water it adds from the layer below, or RUNOFF3",
+        active=lambda get: int(get("sf_surface_physics")) == 2),
+    QuirkCorrection(
+        "thompson_rain_snow_closure", "wrf", False, True, "mp_physics = 8, 28 or 38",
+        "Thompson's rain-snow collection below 0 C makes graupel from what rain and snow lose after their limiters",
+        active=lambda get: int(get("mp_physics")) in (8, 28, 38)),
+    QuirkCorrection(
+        "rrtmg_lw_model_top", "wrf", False, True, "ra_lw_physics = 4, ra_rrtmg_variant = rrtmg_legacy",
+        "WRF's RRTMG longwave keeps the model-top interface and top layer temperatures when it matches the standard profile above the model top",
+        # RTE+RRTMGP is another implementation: nothing to correct
+        active=lambda get: (int(get("ra_physics") if int(get("ra_lw_physics")) == -1
+                                else get("ra_lw_physics")) == 4
+                            and get("ra_rrtmg_variant") == "rrtmg_legacy")),
+    QuirkCorrection(
+        "thompson_lamc_updated_rc", "wrf", False, True, "mp_physics = 28 or 38",
+        "Thompson's cloud-water mass/number balance forms the cloud slope from the updated cloud mass, not the entry mass",
+        active=lambda get: int(get("mp_physics")) in _correct_mode.THOMPSON_CLOUD_BALANCE_MP),
+    QuirkCorrection(
+        "noah_land_ice_rain_runoff", "wrf", False, True, "sf_surface_physics = 2, land-ice points",
+        "Noah books the liquid rain that falls on land ice as surface runoff, where WRF's glacial arm drops it",
+        active=lambda get: int(get("sf_surface_physics")) == 2),
+    QuirkCorrection(
+        "noah_snow_series_conductivity", "wrf", False, True, "sf_surface_physics = 2, snow-covered land points",
+        "Noah blends the series snow-soil conductivity into the soil heat flux, where WRF computes it and uses the arithmetic mean",
+        active=lambda get: int(get("sf_surface_physics")) == 2),
+    QuirkCorrection(
+        "mynn_sfclay_q2_land_cap", "wrf", False, True, "sf_sfclay_physics = 5, mynn_sfclay_variant = wrf_461",
+        "the MYNN surface layer caps its 2 m mixing ratio at 1.05 times the lowest level over land only, as the surface driver does, not over water",
+        # the gsl_wrf39 fork is another source: nothing to correct
+        active=lambda get: int(get("sf_sfclay_physics")) == 5 and get("mynn_sfclay_variant") == "wrf_461"),
+    QuirkCorrection(
+        "kf_capped_downdraft_rain_floor", "wrf", False, True, "cu_physics = 1, 10 or 11",
+        "Kain-Fritsch, KF-CuP and MSKF floor the capped downdraft's precipitation flux at zero, so convective rain is never negative",
+        active=lambda get: int(get("cu_physics")) in (1, 10, 11)),
+    QuirkCorrection(
+        "diff_metrics_seam_slope", "wrf", False, True, "diff_opt = 1 or 2",
+        "the diffusion metrics take the true terrain slope at a periodic axis's seam on the top w level, "
+        "where WRF keeps a cold zero",
+        active=lambda get: int(get("diff_opt")) in (1, 2)),
     # hex (MPAS) regional route
     QuirkCorrection(
         "undriven_species_boundary", "hex", "free", "wrf-flow-dependent", "regional mesh (--lbc-dir)",
@@ -155,6 +209,9 @@ CORRECTIONS: tuple[QuirkCorrection, ...] = (
         "subcycle_snow_ice_tracers", "mpas_seaice", False, True, "vertical tracers with dynamics subcycles",
         "the vertical tracers are separated after each subcycle, so the next combine keeps the ridging"),
     QuirkCorrection(
+        "zap_snow_area", "mpas_seaice", False, True, "vertical tracers with the ITD cleanup (zap_small_areas)",
+        "zap_small_areas hands zap_snow the category's area, so the snow surface layer's tracer reaches oceanBioFluxes"),
+    QuirkCorrection(
         "zaero_snow_scavenging", "mpas_seaice", False, True, "z-aerosols",
         "each z-aerosol is scavenged from the melting snow with its own coefficient, not the table's first"),
     QuirkCorrection(
@@ -189,6 +246,18 @@ def keys(route: str) -> tuple[str, ...]:
     return tuple(c.key for c in CORRECTIONS if c.route == route)
 
 
+def default_umbrella(mode=None) -> str:
+    """The umbrella an unset ``woof_quirk_corrections`` stands for under
+    physics mode ``mode`` (None: this process's default mode, which is
+    exact in a strict WRF process): 'all' in correct mode, 'none' in exact."""
+    from woof import correct_mode
+    if mode is None:
+        mode = correct_mode.PHYSICS_MODE_DEFAULT
+    if mode not in correct_mode.PHYSICS_MODES:
+        raise ValueError(f"physics mode {mode!r} must be one of {list(correct_mode.PHYSICS_MODES)}")
+    return "all" if mode == correct_mode.PHYSICS_MODE_CORRECT else "none"
+
+
 def _refusal(knob: str, value, reason: str, declaration: str):
     from woof.hex.errors import ConfigurationRefusal
     return ConfigurationRefusal(knob=knob, value=value, reason=reason, declaration=declaration)
@@ -197,53 +266,75 @@ def _refusal(knob: str, value, reason: str, declaration: str):
 def umbrella_value(value) -> str:
     """``value`` checked as an umbrella value (refused by name otherwise)."""
     if value not in UMBRELLA_VALUES:
-        raise ValueError(f"{UMBRELLA} = {value!r} must be 'none' or 'all'")
+        raise ValueError(f"{UMBRELLA} = {value!r} must be 'none' or 'all' (or unset, to follow the physics mode)")
     return value
 
 
-def conflict_message(key: str, value) -> str:
-    """Why ``key`` = ``value`` next to the umbrella's 'all' is refused, in
-    the spelling of the route that carries ``key``."""
+def _wanted(c: QuirkCorrection, umbrella: str):
+    return c.corrected if umbrella == "all" else c.exact
+
+
+def conflict_message(key: str, value, umbrella: str = "all") -> str:
+    """Why ``key`` = ``value`` next to an explicit ``umbrella`` ('all' or
+    'none') is refused, in the spelling of the route that carries ``key``."""
     c = BY_KEY[key]
-    umbrella = UMBRELLA_SPELLING.get(c.route, f"{UMBRELLA} = 'all'")
+    other = "none" if umbrella == "all" else "all"
+    verb = "turns on" if umbrella == "all" else "turns off"
     if c.route == "hex":
         name = KEY_SPELLING.get(key, key)
-        setting, wanted = f"{name} {value}", f"{name} {c.corrected}"
-        drop = f"--quirk-corrections none with {name}, or --quirk-corrections all without {name}"
+        spelled = f"--quirk-corrections {umbrella}"
+        setting, wanted = f"{name} {value}", f"{name} {_wanted(c, umbrella)}"
+        drop = f"--quirk-corrections unset or {other} with {name}, or --quirk-corrections {umbrella} without {name}"
     else:
-        setting, wanted = f"{key} = {value!r}", f"{key} = {c.corrected!r}"
-        drop = f"{UMBRELLA} = 'none' with the individual keys, or 'all' without {key}"
-    return (f"{umbrella} turns on {wanted} ({c.summary}), but this run sets {setting}; drop one: {drop}")
+        spelled = f"{UMBRELLA} = {umbrella!r}"
+        setting, wanted = f"{key} = {value!r}", f"{key} = {_wanted(c, umbrella)!r}"
+        drop = f"{UMBRELLA} unset or {other!r} with {key}, or {umbrella!r} without {key}"
+    return (f"{spelled} {verb} {wanted} ({c.summary}), but this run sets {setting}; drop one: {drop}")
+
+
+def _umbrella(config: dict) -> tuple[str, bool]:
+    """``(umbrella, explicit)`` for an MPAS config dict: its own
+    ``woof_quirk_corrections`` when set, else the one its physics mode
+    (``config_physics_mode``, else the process default) stands for."""
+    if config.get(UMBRELLA) is not None:
+        value = config[UMBRELLA]
+        try:
+            return umbrella_value(value), True
+        except ValueError as error:
+            raise _refusal(UMBRELLA, value, "the umbrella over the quirk corrections",
+                           f"{UMBRELLA} = 'none' | 'all', or unset") from error
+    mode = config.get(MODE_KEY)
+    try:
+        return default_umbrella(mode), False
+    except ValueError as error:
+        raise _refusal(MODE_KEY, mode, "the physics mode", f"{MODE_KEY} = 'correct' | 'exact'") from error
 
 
 def all_on(config: dict) -> bool:
-    """True when the MPAS config dict ``config`` asks for every correction."""
-    value = config.get(UMBRELLA, "none")
-    try:
-        return umbrella_value(value) == "all"
-    except ValueError as error:
-        raise _refusal(UMBRELLA, value, "the umbrella over the opt-in quirk corrections",
-                       f"{UMBRELLA} = 'none' | 'all'") from error
+    """True when the MPAS config dict ``config`` takes every correction by
+    default: ``woof_quirk_corrections = 'all'``, or unset in correct mode."""
+    return _umbrella(config)[0] == "all"
 
 
 def option(config: dict, key: str):
     """The value an MPAS config dict gives correction ``key``: its own key
-    when set, else the corrected value under ``woof_quirk_corrections =
-    'all'``, else the word-exact default. A set key that conflicts with
-    the umbrella is refused by name."""
+    when set, else the corrected value in correct mode (or under 'all'),
+    else the word-exact value (exact mode, or 'none'). A set key that
+    conflicts with an explicit 'all' is refused by name."""
     c = BY_KEY[key]
     if c.route not in ("mpas_ocean", "mali"):
         raise ValueError(f"{key} is carried on the {c.route} route, not in an MPAS config dict")
-    umbrella = all_on(config)
+    umbrella, explicit = _umbrella(config)
     if key in config:
         value = config[key]
-        # (a value that is neither the default nor the corrected one is the
+        # (a value that is neither the exact nor the corrected one is the
         # port's own to refuse as not an option, with or without the umbrella)
-        if umbrella and value == c.default:
-            raise _refusal(key, value, conflict_message(key, value),
-                           f"{key} = {c.corrected!r} or unset, with {UMBRELLA} = 'all'")
+        other = c.exact if umbrella == "all" else c.corrected
+        if explicit and umbrella == "all" and value == other:
+            raise _refusal(key, value, conflict_message(key, value, umbrella),
+                           f"{key} = {_wanted(c, umbrella)!r} or unset, with {UMBRELLA} = {umbrella!r}")
         return value
-    return c.corrected if umbrella else c.default
+    return _wanted(c, umbrella)
 
 
 def with_options(config: dict, route: str) -> dict:
@@ -252,36 +343,39 @@ def with_options(config: dict, route: str) -> dict:
 
 
 def apply_run_corrections(kw: dict) -> dict:
-    """The WRF route's TOML readers: a RunConfig keyword dict with ``'all'``
-    resolved.
+    """The WRF route's TOML readers: a RunConfig keyword dict with an
+    explicit umbrella resolved.
 
-    Under ``woof_quirk_corrections = 'all'`` every RunConfig correction
-    whose scheme the dict selects is set true; one set explicitly to
-    anything else is refused by name (woof.config.ConfigurationRefused).
-    The returned dict is the input otherwise (``'none'``: unchanged).
+    Under ``woof_quirk_corrections = 'all'`` every RunConfig correction is
+    set true, and one set explicitly false where its scheme runs is refused
+    by name (woof.config.ConfigurationRefused).  Under ``'none'`` every one
+    not set explicitly is set false; one set explicitly keeps its value
+    (as before the mode switch: 'none' with the individual keys).
+    The returned dict is the input otherwise (unset: each key keeps its
+    own value, whose default follows the physics mode).
     RunConfig.__post_init__ applies the same rule to a RunConfig built
-    any other way (:func:`run_corrections_due`)."""
+    any other way (:func:`run_corrections_under`)."""
     from woof.config import ConfigurationRefused, RunConfig
-    value = kw.get(UMBRELLA, "none")
+    value = kw.get(UMBRELLA)
+    if value is None:
+        return kw
     try:
         umbrella_value(value)
     except ValueError as error:
         raise ConfigurationRefused(str(error)) from error
-    if value != "all":
-        return kw
     out = dict(kw)
-    for key in keys("wrf"):
-        if not run_scheme_active(key, out, RunConfig):
-            if out.get(key) is True:
-                # what validate_run_config refuses without the umbrella;
-                # under 'all' the key would be re-derived off, silently
-                raise ConfigurationRefused(
-                    f"{key} corrects {BY_KEY[key].scheme}, which this run does not select, so it would "
-                    "never be read; drop it")
-            continue
-        if key in out and out[key] is not True:
-            raise ConfigurationRefused(conflict_message(key, out[key]))
-        out[key] = True
+    for key, wanted in run_corrections_under(value).items():
+        # a key whose scheme the domain does not run is never read; the
+        # experiment reader writes such keys off on those domains
+        if key in out and value == "none":
+            continue  # 'none' with an individual key: the key wins
+        if key in out and out[key] is not wanted and run_scheme_active(key, out, RunConfig):
+            raise ConfigurationRefused(conflict_message(key, out[key], value))
+        out[key] = wanted
+    if value == "none":
+        # every key is now explicit; RunConfig.__post_init__ would otherwise
+        # write 'none' over the individual keys that won
+        out[UMBRELLA] = None
     return out
 
 
@@ -301,49 +395,89 @@ def run_scheme_active(key: str, cfg, defaults=None) -> bool:
 
 
 def run_corrections_due(cfg) -> tuple[str, ...]:
-    """The RunConfig corrections ``'all'`` turns on for ``cfg``: those whose
-    scheme it runs."""
-    return tuple(key for key in keys("wrf") if run_scheme_active(key, cfg))
+    """The RunConfig corrections ``cfg`` runs: on, and read by its schemes
+    (:func:`run_reads`)."""
+    return tuple(key for key in keys("wrf") if run_reads(cfg, key))
 
 
-def run_corrections_under_all(cfg) -> dict:
-    """Every RunConfig correction's value under ``'all'``: on where its
-    scheme runs, off elsewhere (RunConfig.__post_init__ writes them)."""
-    due = run_corrections_due(cfg)
-    return {key: key in due for key in keys("wrf")}
+def run_corrections_under(umbrella: str) -> dict:
+    """Every RunConfig correction's value under an explicit ``umbrella``:
+    all true under 'all', all false under 'none' (RunConfig.__post_init__
+    writes them for a RunConfig built in Python, where a key passed by name
+    next to 'none' then wins, as it does on the TOML route, which resolves
+    'none' first; each is read only where its scheme runs)."""
+    umbrella_value(umbrella)
+    return {key: _wanted(BY_KEY[key], umbrella) for key in keys("wrf")}
+
+
+def run_reads(cfg, key: str) -> bool:
+    """Whether RunConfig correction ``key`` reaches ``cfg``'s arithmetic:
+    on, and read by the schemes it selects (woof.correct_mode.KEY_SCOPE,
+    KEY_GENERATIONS and KEY_UNREAD, with this launch's WRF-Hydro coupling:
+    correct_mode.launch_values). Every consumer asks this, so a key that is
+    on by default (correct mode) is inert where it is not read."""
+    from woof import correct_mode
+    if BY_KEY[key].route != "wrf":
+        raise ValueError(f"{key} is not a RunConfig correction")
+    return (getattr(cfg, key, False) is True
+            and correct_mode.key_in_scope(key, correct_mode.launch_values(cfg)))
 
 
 def check_run_config(cfg) -> None:
-    """validate_run_config's umbrella check: the value is 'none' or 'all'.
-    (RunConfig.__post_init__ has already turned the due corrections on.)"""
+    """validate_run_config's umbrella check: unset, 'none' or 'all'.
+    (RunConfig.__post_init__ has already applied an explicit one.)"""
     from woof.config import ConfigurationRefused
+    value = getattr(cfg, UMBRELLA)
+    if value is None:
+        return
     try:
-        umbrella_value(getattr(cfg, UMBRELLA))
+        umbrella_value(value)
     except ValueError as error:
         raise ConfigurationRefused(str(error)) from error
 
 
 def seaice_names(configs: dict) -> tuple[str, ...]:
-    """The column corrections the umbrella adds to ``woof_v842_corrections``."""
-    return keys("mpas_seaice") if all_on(configs) else ()
+    """The column corrections the umbrella adds to ``woof_v842_corrections``:
+    every one under an explicit 'all', or in correct mode when
+    ``woof_v842_corrections`` is unset; none under 'none' or in exact mode.
+    A ``woof_v842_corrections`` given under the mode's default is the whole
+    set (so naming fewer, or none, turns the others off)."""
+    umbrella, explicit = _umbrella(configs)
+    if umbrella != "all" or (not explicit and "woof_v842_corrections" in configs):
+        return ()
+    return keys("mpas_seaice")
+
+
+def hex_umbrella(arguments) -> tuple[str, bool]:
+    """``(umbrella, explicit)`` on the hex door: ``--quirk-corrections``
+    when given, else the one ``--physics-mode`` (else the door's default,
+    correct) stands for."""
+    value = getattr(arguments, "quirk_corrections", None)
+    if value is not None:
+        return umbrella_value(value), True
+    # unset: this process's default mode (exact in a strict WRF process)
+    return default_umbrella(getattr(arguments, "physics_mode", None)), False
 
 
 def hex_undriven_species_boundary(arguments, *, carried: bool = True) -> str | None:
     """The hex door's ``--undriven-species-boundary`` with the umbrella:
-    the explicit flag when given, else ``wrf-flow-dependent`` under
-    ``--quirk-corrections all`` on a regional run (``--lbc-dir``) whose
-    route ``carried`` the rule, else None (``free``). An explicit ``free``
-    next to ``all`` on a regional run is refused by name."""
+    the explicit flag when given, else ``wrf-flow-dependent`` on a regional
+    run (``--lbc-dir``) whose route ``carried`` the rule, in correct mode
+    or under ``--quirk-corrections all``, else None (``free``). An explicit
+    flag that contradicts an explicit ``--quirk-corrections all`` on a
+    regional run is refused by name."""
     mode = getattr(arguments, "undriven_species_boundary", None)
-    umbrella = umbrella_value(getattr(arguments, "quirk_corrections", None) or "none") == "all"
+    umbrella, explicit = hex_umbrella(arguments)
     regional = getattr(arguments, "lbc_dir", None) is not None
-    if not (umbrella and regional):
+    if not regional:
         return mode
-    if not carried:
-        # the umbrella leaves the rule off here; an explicit flag is the
-        # caller's to judge (free is the only value such a route honours)
+    c = BY_KEY["undriven_species_boundary"]
+    if mode is not None:
+        if explicit and umbrella == "all" and carried and mode != c.corrected:
+            raise ValueError(conflict_message("undriven_species_boundary", mode, umbrella))
         return mode
-    corrected = BY_KEY["undriven_species_boundary"].corrected
-    if mode is not None and mode != corrected:
-        raise ValueError(conflict_message("undriven_species_boundary", mode))
-    return corrected
+    if umbrella != "all" or not carried:
+        # the umbrella leaves the rule off here (exact mode, or a route
+        # whose drivers do not carry it)
+        return None
+    return c.corrected

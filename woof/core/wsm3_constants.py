@@ -61,12 +61,15 @@ def wrf_init_words():
 #: ``kernels/wsm3.cu``'s ``WSM3_KMAX`` ladder.  One CUDA thread owns a whole
 #: column, so the bound sizes the per-thread work arrays; ``woof/core/
 #: wsm3.py`` compiles the SHALLOWEST tier that holds the configuration's
-#: ``nz``.  64 is the ``#ifndef`` default baked into the source.  The ladder
-#: matches WSM6's (woof/core/wsm6_constants.py) so the two single-moment
-#: schemes admit the same level counts.
+#: ``nz``.  64 is the ``#ifndef`` default baked into the source.  The 64 and
+#: 80 tiers compile the unchanged source, so every column of 80 levels or
+#: fewer is word-identical to the pre-ladder-extension build; 128 and 256
+#: (the dynamical core's own bound) are the same source at a deeper define,
+#: priced by preflight as a deeper per-thread local frame
+#: (``woof.core.preflight.CONDITIONAL_COLUMN_TIERED_FRAMES``).
 WSM3_SHALLOW_KMAX = 64
-WSM3_DEEP_KMAX = 80
-WSM3_KERNEL_LEVEL_TIERS = (WSM3_SHALLOW_KMAX, WSM3_DEEP_KMAX)
+WSM3_DEEP_KMAX = 256
+WSM3_KERNEL_LEVEL_TIERS = (WSM3_SHALLOW_KMAX, 80, 128, WSM3_DEEP_KMAX)
 #: ``(minimum, maximum)`` levels WSM3 admits: 2 (its interface interpolation
 #: reads a layer above and below) up to the deepest compiled tier.
 WSM3_VERTICAL_LEVEL_BOUNDS = (2, WSM3_DEEP_KMAX)

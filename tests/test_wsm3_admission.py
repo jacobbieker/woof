@@ -168,7 +168,7 @@ def test_the_registry_publishes_wsm3_as_an_implemented_option():
     assert rows["nest_transition"]["mixed_edge_ported"] is False
     assert rows["cloud_optics"]["rte_rrtmgp_coupling"] == "wsm3"
     assert rows["cloud_optics"]["legacy_declares_radii"] is True
-    assert rows["vertical_level_bounds"]["maximum"] == 80
+    assert rows["vertical_level_bounds"]["maximum"] == 256
 
 
 def test_wsm3_workspace_is_rebuilt_and_precipitation_is_serialized():
@@ -206,3 +206,7 @@ def test_wsm3_measured_frame_prices_both_launch_tiers():
     assert frame.frame_bytes(select_tier(64)) == 5664
     assert frame.frame_bytes(select_tier(65)) == 7072
     assert frame.frame_bytes(select_tier(80)) == 7072
+    # 128 and 256 read on an RTX A6000 (sm_86, NVRTC 12.9.86), 88 B/level.
+    assert frame.frame_bytes(select_tier(81)) == 11296
+    assert frame.frame_bytes(select_tier(128)) == 11296
+    assert frame.frame_bytes(select_tier(256)) == 22560

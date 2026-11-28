@@ -120,8 +120,70 @@ def hail_aware_scope(enabled: bool):
         _HAIL_AWARE.reset(token)
 
 
+# ---------------------------------------------------------------------------
+# The rain-snow collection closure (RunConfig.thompson_rain_snow_closure, FQ5).
+# ---------------------------------------------------------------------------
+#
+# On in correct mode (the default), off in exact mode.  The cold unit
+# carries two #ifdef blocks and the warm unit two (the second in its
+# WRF 3.9 / hail-aware network) that, below 0 C, set the graupel gain
+# prg_rcs to what rain and snow lose after their limiters, floored at zero
+# (a negative gain moves to snow: snow takes only what rain lost).  Like the generation, a property of one call, set by the
+# adapter (rain_snow_closure_scope) and read through aerosol_kernel; only
+# CLOSURE_MODULES take the define, so the other units keep their images.
+CLOSURE_MODULES = ("thompson_aerosol_cold", "thompson_aerosol_warm")
+
+_RAIN_SNOW_CLOSURE: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "gpuwm_thompson_rain_snow_closure", default=False)
+
+
+@contextlib.contextmanager
+def rain_snow_closure_scope(enabled: bool):
+    """Run the enclosed launches with the rain-snow closure or without."""
+    token = _RAIN_SNOW_CLOSURE.set(bool(enabled))
+    try:
+        yield bool(enabled)
+    finally:
+        _RAIN_SNOW_CLOSURE.reset(token)
+
+
+# ---------------------------------------------------------------------------
+# The cloud slope from the updated mass (RunConfig.thompson_lamc_updated_rc,
+# FQ7).
+# ---------------------------------------------------------------------------
+#
+# On in correct mode, off in exact mode.  The warm unit's cloud-number
+# balance (thompson_aa_ncten_balance) carries one #ifdef block that forms
+# lamc from the updated cloud mass xrc rather than the entry mass rc(k).
+# Set per call like the closure; only LAMC_MODULES take the define, and it
+# composes with the closure, the hail image and the WRF 3.9 generation.
+LAMC_MODULES = ("thompson_aerosol_warm",)
+
+_LAMC_UPDATED_RC: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "gpuwm_thompson_lamc_updated_rc", default=False)
+
+
+@contextlib.contextmanager
+def lamc_updated_rc_scope(enabled: bool):
+    """Run the enclosed launches with lamc from the updated mass or not."""
+    token = _LAMC_UPDATED_RC.set(bool(enabled))
+    try:
+        yield bool(enabled)
+    finally:
+        _LAMC_UPDATED_RC.reset(token)
+
+
+def hail_variant_tag(rain_snow_closure: bool, lamc_updated_rc: bool) -> str:
+    """The bracketed define list that names a hail image (its module key and
+    its pre-warm label)."""
+    return ("[THOMPSON_AA_HAIL=1"
+            + ",THOMPSON_RAIN_SNOW_CLOSURE=1" * bool(rain_snow_closure)
+            + ",THOMPSON_LAMC_UPDATED_RC=1" * bool(lamc_updated_rc) + "]")
+
+
 @lru_cache(maxsize=None)
-def _hail_module(name: str):
+def _hail_module(name: str, rain_snow_closure: bool = False,
+                 lamc_updated_rc: bool = False):
     """Compile the hail image with its measured noncontracting arithmetic."""
     import cupy as cp
     from woof import nvrtc_ptx_cache
@@ -129,9 +191,14 @@ def _hail_module(name: str):
     from woof.certify.kernel_manifest import record_module
     from woof.kernel_compile_notice import observe_module_compile
     from woof.physics_params import note_compiled
-    source = module_source_int_defines(name, HAIL_DEFINES)
+    from woof.core.thompson import RAIN_SNOW_CLOSURE_DEFINES
+    from woof.core.thompson import LAMC_UPDATED_RC_DEFINES
+    defines = (HAIL_DEFINES
+               + (RAIN_SNOW_CLOSURE_DEFINES if rain_snow_closure else ())
+               + (LAMC_UPDATED_RC_DEFINES if lamc_updated_rc else ()))
+    source = module_source_int_defines(name, defines)
     options = ("-std=c++17", "--ftz=false", "--fmad=false")
-    key = f"{MODULE_KEY_ROOT}:{name}[THOMPSON_AA_HAIL=1]"
+    key = f"{MODULE_KEY_ROOT}:{name}{hail_variant_tag(rain_snow_closure, lamc_updated_rc)}"
     with observe_module_compile(key):
         image, _ = nvrtc_ptx_cache.compile_using_nvrtc(source, options, None, name + ".cu")
         module = cp.cuda.function.Module()
@@ -143,11 +210,21 @@ def _hail_module(name: str):
 
 
 def aerosol_kernel(module: str, func: str):
-    """``get_kernel(module, func)`` compiled for the active generation."""
+    """``get_kernel(module, func)`` compiled for the active generation
+    (and, on CLOSURE_MODULES, the rain-snow closure when its scope is on)."""
+    closure = _RAIN_SNOW_CLOSURE.get() and module in CLOSURE_MODULES
+    lamc = _LAMC_UPDATED_RC.get() and module in LAMC_MODULES
     if _HAIL_AWARE.get():
-        return _hail_module(module).get_function(func)
+        # One cache key per variant: always the three positional arguments.
+        return _hail_module(module, closure, lamc).get_function(func)
+    from woof.core.thompson import (
+        LAMC_UPDATED_RC_DEFINES, RAIN_SNOW_CLOSURE_DEFINES)
+    extra = ((RAIN_SNOW_CLOSURE_DEFINES if closure else ())
+             + (LAMC_UPDATED_RC_DEFINES if lamc else ()))
     if _ACTIVE_VERSION.get() == "wrf_39_noaa":
-        return get_kernel_int_defines(module, func, WRF39_DEFINES)
+        return get_kernel_int_defines(module, func, WRF39_DEFINES + extra)
+    if extra:
+        return get_kernel_int_defines(module, func, extra)
     return get_kernel(module, func)
 
 
@@ -567,6 +644,9 @@ __all__ = [
     "active_hail_aware",
     "hail_aware_scope",
     "hail_graupel_arguments",
+    "CLOSURE_MODULES",
+    "lamc_updated_rc_scope",
+    "rain_snow_closure_scope",
     "AEROSOL_COMMON_HEADER",
     "AEROSOL_KERNEL_MODULES",
     "CCN_ACTIVATION_SHAPE",

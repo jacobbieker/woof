@@ -9,7 +9,10 @@ Breakage this prevents:
   g_/a_calc_p_rho (tests/data/wrfplus/advance_w.npz, made by
   tools/wrfplus_oracle);
 - a TL/AD base state that drifts from woof's own strict primal
-  advance_w_phi (the float build must give the primal's words).
+  advance_w_phi (the float build must give the primal's words);
+- damp_opt 3's implicit w damper (dampmag > 0) dropped or mis-linearised:
+  the configurations below run it, with the heights (php), mut and the
+  reference w (WRF w_save) active.
 
 Each probe runs in a child process, as in test_grad_wrfplus_advance_uv.
 """
@@ -90,7 +93,13 @@ CONFIGS = [dict(), dict(spec_zone=1), dict(top_lid=1, moist_cq=1),
            dict(nz=12, ny=4, nx=5, base3d=0, epssm=0.5, boundary_y=1),
            dict(has_msf=1), dict(has_msf=1, spec_zone=1, top_lid=1, moist_cq=1),
            dict(has_msf=1, nz=12, ny=5, nx=6, base3d=0, boundary_x=1, boundary_y=1,
-                moist_cq=1, epssm=0.3)]
+                moist_cq=1, epssm=0.3),
+           # damp_opt 3: the top third, a mapped lidded frame, and a layer
+           # deeper than the column (every level damped)
+           dict(dampmag=0.6, zdamp=5000.0),
+           dict(dampmag=0.6, zdamp=8000.0, has_msf=1, spec_zone=1, top_lid=1, moist_cq=1),
+           dict(dampmag=0.9, zdamp=16000.0, nz=12, ny=4, nx=5, base3d=0, epssm=0.3,
+                boundary_x=1)]
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
@@ -229,11 +238,11 @@ for i, over in enumerate({CONFIGS!r}):
     args = (T["w_pp"], T["ph_pp"], tr["rw_t"], tr["rph_t"], tr["ww_pp"], tr["mu_pp"],
             tr["mu_pp_old"], tr["th_pp"], tr["th_pp_old"], tr["thp"], thb, tr["php"],
             tr["phb"], tr["alt"], tr["c2a"], tr["a"], tr["alpha"], tr["gam"], tr["mup"],
-            tr["u_pp"], tr["v_pp"], tr["w_pp"], tr["ht"], tr["rdn"], tr["rdnw"], tr["fnm"],
+            tr["u_pp"], tr["v_pp"], tr["w"], tr["ht"], tr["rdn"], tr["rdnw"], tr["fnm"],
             tr["fnp"], tr["c1h"], tr["c2h"], tr["c1f"], tr["c2f"], tr["mub2d"], tr["cqw"],
             i32(g.moist_cq)) + ((tr["msft"],) if g.has_msf else ()) + (
             T["p_pp"], T["al_pp"], f32(g.cf1), f32(g.cf2), f32(g.cf3),
-            f32(g.rdx), f32(g.rdy), f32(g.dtau), f32(g.epssm), f32(0.0), f32(0.0),
+            f32(g.rdx), f32(g.rdy), f32(g.dtau), f32(g.epssm), f32(g.dampmag), f32(g.zdamp),
             i32(g.boundary_x), i32(g.boundary_y), i32(g.spec_zone), i32(g.base3d),
             i32(g.top_lid), i32(g.nz), i32(g.ny), i32(g.nx))
     name = "advance_w_phi_msf" if g.has_msf else "advance_w_phi"
@@ -247,11 +256,11 @@ for i, over in enumerate({CONFIGS!r}):
     assert len(out) == len(CONFIGS)
 
 
-def test_refuses_the_damper():
-    """damp_opt=3's w damper is not linearised: refused, not ignored."""
+def test_damper_scalars_checked():
+    """A negative dampmag, or a damper with no layer, is refused."""
     from woof.grad.wrfplus import acoustic as A, cases as C
-    g = C.w_geometry(dampmag=0.3)
-    with pytest.raises(NotImplementedError):
-        A.advance_w_tl({}, {}, {}, {}, g)
-    with pytest.raises(NotImplementedError):
-        A.advance_w_ad({}, {}, {}, {}, g)
+    for g in (C.w_geometry(dampmag=-0.1), C.w_geometry(dampmag=0.3, zdamp=0.0)):
+        with pytest.raises(ValueError):
+            A.advance_w_tl({}, {}, {}, {}, g)
+        with pytest.raises(ValueError):
+            A.advance_w_ad({}, {}, {}, {}, g)

@@ -2,7 +2,7 @@
 from pathlib import Path
 import json,re,sys
 from extract_tables import statements,split_items
-from generate_gas_kernel import Expression,FLOAT_GLOBALS,INT_GLOBALS
+from generate_gas_kernel import Expression,FLOAT_GLOBALS,INT_GLOBALS,NVX_PREAMBLE
 
 ROUTINES=('coeff1','coeff2','coeff4','coeffl','coefft','coefft0','qcfe','qcfel','adjust','qfts','qfti',
           'cfgts0','cfgts','qccgts','tridag','qftsts','qftisf')
@@ -75,7 +75,7 @@ def translate(name,routine,routines,manifest):
             key=name+'.'+var
             arrays[var]=((f'(tables+table_offsets[{table_ids[key]}])' if key in table_ids else var),decl['dims'])
             if var not in routine['args'] and key not in table_ids:
-                capacity='*'.join('('+re.sub(r'\b(nv1|nv)\b','101',d)+')' for d in decl['dims'])
+                capacity='*'.join('('+re.sub(r'\b(nv1|nv)\b','FLG_NV1X',d)+')' for d in decl['dims'])
                 local.append(decl['kind']+' '+var+'['+capacity+'];')
         else:
             vars[var]=(var,decl['kind'])
@@ -142,7 +142,7 @@ def generate(source,manifest):
     for name in ROUTINES:
         signature,body=translate(name,routines[name],routines,manifest); signatures.append(signature+';'); bodies.append(body)
     prefix='#define FG_AD(a,b) __fadd_rn((a),(b))\n#define FG_SU(a,b) __fsub_rn((a),(b))\n#define FG_MU(a,b) __fmul_rn((a),(b))\n#define FG_DV(a,b) __fdiv_rn((a),(b))\n'
-    return '// Generated from pristine WRF FLG stream solver statements.\n'+prefix+'\n'.join(signatures)+'\n'+'\n'.join(bodies)
+    return '// Generated from pristine WRF FLG stream solver statements.\n'+NVX_PREAMBLE+prefix+'\n'.join(signatures)+'\n'+'\n'.join(bodies)
 
 if __name__=='__main__':
     Path(sys.argv[3]).write_text(generate(Path(sys.argv[1]).read_text(),json.loads(Path(sys.argv[2]).read_text())),encoding='utf-8')
