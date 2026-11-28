@@ -280,7 +280,7 @@ __device__ int compute_microS_mushy(const double *bgrid, const double *cgrid0, c
                                     const double *igrid, const double *qice, const double *sice, double hice_old,
                                     double *hbr_old, double sss, double sst, double *bTin, double *bphin,
                                     double *kperm, double *bphi_min, double *sice_rho, double *iDin, double l_sk,
-                                    double *iphin_out)
+                                    double *iphin_out, double *iTin_out)
 {
     double trtmp_s[COL_NBLYR + 1], trtmp_q[COL_NBLYR + 1];
     double bSin[NB2 + 1], bqin[NB2 + 1], brine_sal[NB2 + 1], brine_rho[NB2 + 1];
@@ -308,6 +308,7 @@ __device__ int compute_microS_mushy(const double *bgrid, const double *cgrid0, c
                    kperm, bphi_min, igrid, sss);
     calculate_drho(igrid, bgrid, brine_rho, ibrine_rho, drho);
     for (int k = 1; k <= NB1; ++k) iphin_out[k] = iphin[k];
+    for (int k = 1; k <= NB1; ++k) iTin_out[k] = iTin[k];
     for (int k = 2; k <= NB1; ++k) {
         double hb2 = M(*hbr_old, *hbr_old);
         double ikin = M(BG_K_O, bg_powi3(iphin[k]));
@@ -738,6 +739,46 @@ __device__ int zsalinity(int n, double dt, const double *cgrid0, const double *b
 #define ZP_V_ALG 10
 #define ZP_KSCAVZ 11
 #define ZP_N 12
+// alg: the vertical biochemistry's bio tracers (0-based places among the NBT, -1 none):
+// n_algae (0 without the algae), the algae's, nitrate's, ammonium's, silicate's, and its
+// flags (bit 0 solve_zbgc, bit 1 dEdd_algae)
+#define ALG_MAX 3
+#define ALG_NALG 0
+#define ALG_N0 1
+#define ALG_NIT 4
+#define ALG_AM 5
+#define ALG_SIL 6
+#define ALG_FLAGS 7
+#define ALG_LEN 8
+// ap: colpkg_init_zbgc's per-alga parameters (ALG_MAX each), then colpkg_init_parameters' scalars
+#define AP_R_SI2N 0
+#define AP_R_FE2N 3
+#define AP_R_C2N 6
+#define AP_R_CHL2N 9
+#define AP_CHLABS 12
+#define AP_ALPHA2MAX_LOW 15
+#define AP_BETA2MAX 18
+#define AP_MU_MAX 21
+#define AP_GROW_TDEP 24
+#define AP_FR_GRAZE 27
+#define AP_MORT_PRE 30
+#define AP_MORT_TDEP 33
+#define AP_K_NIT 36
+#define AP_K_AM 39
+#define AP_K_SIL 42
+#define AP_FR_RESP 45
+#define AP_ALGAL_VEL 46
+#define AP_T_MAX 47
+#define AP_FSAL 48
+#define AP_OP_DEP_MIN 49
+#define AP_FR_GRAZE_S 50
+#define AP_FR_GRAZE_E 51
+#define AP_FR_MORT2MIN 52
+#define AP_K_NITRIF 53
+#define AP_MAX_LOSS 54
+#define AP_N 55
+#define ZB_SECDAY 86400.0          // ice_constants_colpkg secday
+#define ZB_R_GC2MOLC 12.01         // ice_zbgc_shared R_gC2molC
 
 // ice_aerosol.F90 update_snow_bgc for one tracer, nslyr = 1. trc is the
 // tracer's nblyr + 3 layers (trcrn(bio_index:)): the snow's at trc[NB1] and
@@ -1104,7 +1145,142 @@ __device__ double zb_maxval(const double *x, int lo, int hi)
     return r;
 }
 
-// ice_algae.F90 z_biogeochemistry for the NBT tracers without solve_zbgc, in
+// ice_algae.F90 algal_dyn for one bio layer with the algae, nitrate and (each optional)
+// ammonium and silicate: no carbon, DON, iron or DMS, whose terms reach no reactb entry
+// and no output. ltrcrn is the layer's brine concentrations (NBT), reactb its reaction
+// terms (only the algae's and the nutrients' are written), T_bot the interface
+// temperature. gfortran's MIN of three or four is pairwise from the left. algal_dyn
+// sets conserve_N to .true. and nothing clears it, so z_biogeochemistry's stop on it
+// never comes; Nerror only feeds that check.
+__device__ void algal_dyn(double dt, const int *alg, const double *ap, double fswthru, double *reactb,
+                          const double *ltrcrn, double *grow_alg, double T_bot, double *upNOn, double *upNHn,
+                          double *Zoo)
+{
+    const int n_algae = alg[ALG_NALG], nit = alg[ALG_NIT], am = alg[ALG_AM], sil = alg[ALG_SIL];
+    const int dEdd_algae = (alg[ALG_FLAGS] >> 1) & 1;
+    const double dTemp = col_min(S(T_bot, ap[AP_T_MAX]), 0.0);
+    const double Nitin = ltrcrn[nit];
+    double Nin[ALG_MAX], op_dep = 0.0;
+    for (int k = 0; k < n_algae; ++k) {
+        Nin[k] = ltrcrn[alg[ALG_N0 + k]];
+        const double chlin = M(ap[AP_R_CHL2N + k], Nin[k]);
+        op_dep = A(op_dep, M(ap[AP_CHLABS + k], chlin));
+    }
+    const double Amin = am >= 0 ? ltrcrn[am] : 0.0;
+    const double Silin = sil >= 0 ? ltrcrn[sil] : 0.0;
+    double Iavg_loc;
+    if (op_dep > ap[AP_OP_DEP_MIN] && !dEdd_algae)
+        Iavg_loc = D(M(fswthru, S(1.0, glibc_exp(-op_dep))), op_dep);
+    else
+        Iavg_loc = fswthru;
+    double Nit_lim[ALG_MAX], Am_lim[ALG_MAX], growmax_N[ALG_MAX], grow_N[ALG_MAX];
+    double U_Am[ALG_MAX], U_Nit[ALG_MAX], U_Sil[ALG_MAX], U_Fe[ALG_MAX];
+    double U_Am_tot = 0.0, U_Nit_tot = 0.0, U_Sil_tot = 0.0, U_Fe_tot = 0.0;
+    for (int k = 0; k < n_algae; ++k) {
+        // L_lim = ... assigns the whole array each pass: its k-th element is this pass's
+        const double L_lim = M(S(1.0, glibc_exp(-M(ap[AP_ALPHA2MAX_LOW + k], Iavg_loc))),
+                               glibc_exp(-M(ap[AP_BETA2MAX + k], Iavg_loc)));
+        Nit_lim[k] = D(Nitin, A(Nitin, ap[AP_K_NIT + k]));
+        Am_lim[k] = 0.0;
+        double N_lim = Nit_lim[k];
+        if (am >= 0) {
+            Am_lim[k] = D(Amin, A(Amin, ap[AP_K_AM + k]));
+            N_lim = col_min(1.0, A(Nit_lim[k], Am_lim[k]));
+        }
+        double Sil_lim = 1.0;
+        if (sil >= 0 && ap[AP_K_SIL + k] > 0.0) Sil_lim = D(Silin, A(Silin, ap[AP_K_SIL + k]));
+        const double Fe_lim = 1.0;                                   // tr_bgc_Fe off
+        growmax_N[k] = M(M(M(D(ap[AP_MU_MAX + k], ZB_SECDAY), glibc_exp(M(ap[AP_GROW_TDEP + k], dTemp))), Nin[k]),
+                         ap[AP_FSAL]);
+        grow_N[k] = M(col_min(col_min(col_min(L_lim, N_lim), Sil_lim), Fe_lim), growmax_N[k]);
+        const double potU_Am = M(Am_lim[k], growmax_N[k]);
+        U_Am[k] = col_min(grow_N[k], potU_Am);
+        U_Nit[k] = S(grow_N[k], U_Am[k]);
+        U_Sil[k] = M(ap[AP_R_SI2N + k], grow_N[k]);
+        U_Fe[k] = M(ap[AP_R_FE2N + k], grow_N[k]);
+        U_Am_tot = A(U_Am_tot, U_Am[k]);
+        U_Nit_tot = A(U_Nit_tot, U_Nit[k]);
+        U_Sil_tot = A(U_Sil_tot, U_Sil[k]);
+        U_Fe_tot = A(U_Fe_tot, U_Fe[k]);
+    }
+    double U_Am_f[ALG_MAX], U_Nit_f[ALG_MAX], U_Sil_f[ALG_MAX], U_Fe_f[ALG_MAX];
+    for (int k = 0; k < n_algae; ++k) {
+        U_Am_f[k] = U_Am_tot > 0.0 ? D(U_Am[k], U_Am_tot) : 0.0;
+        U_Nit_f[k] = U_Nit_tot > 0.0 ? D(U_Nit[k], U_Nit_tot) : 0.0;
+        U_Sil_f[k] = U_Sil_tot > 0.0 ? D(U_Sil[k], U_Sil_tot) : 0.0;
+        U_Fe_f[k] = U_Fe_tot > 0.0 ? D(U_Fe[k], U_Fe_tot) : 0.0;
+    }
+    const double max_loss = ap[AP_MAX_LOSS];
+    if (sil >= 0) U_Sil_tot = col_min(U_Sil_tot, D(M(max_loss, Silin), dt));
+    U_Nit_tot = col_min(U_Nit_tot, D(M(max_loss, Nitin), dt));
+    U_Am_tot = col_min(U_Am_tot, D(M(max_loss, Amin), dt));
+    const double fr_resp = ap[AP_FR_RESP];
+    double N_s[ALG_MAX], N_r[ALG_MAX], graze_N = 0.0, mort_N = 0.0, resp_N = 0.0;
+    for (int k = 0; k < n_algae; ++k) {
+        U_Am[k] = M(U_Am_f[k], U_Am_tot);
+        U_Nit[k] = M(U_Nit_f[k], U_Nit_tot);
+        U_Sil[k] = M(U_Sil_f[k], U_Sil_tot);
+        U_Fe[k] = M(U_Fe_f[k], U_Fe_tot);
+        if (ap[AP_R_SI2N + k] > 0.0)
+            grow_N[k] = col_min(col_min(D(U_Sil[k], ap[AP_R_SI2N + k]), A(U_Nit[k], U_Am[k])),
+                                D(U_Fe[k], ap[AP_R_FE2N + k]));
+        else
+            grow_N[k] = col_min(A(U_Nit[k], U_Am[k]), D(U_Fe[k], ap[AP_R_FE2N + k]));
+        double fr_Am = 0.0;
+        if (am >= 0) {
+            fr_Am = 0.5;
+            if (grow_N[k] > 0.0) fr_Am = col_min(D(U_Am[k], grow_N[k]), 1.0);
+        }
+        const double fr_Nit = S(1.0, fr_Am);
+        U_Nit[k] = M(fr_Nit, grow_N[k]);
+        U_Am[k] = M(fr_Am, grow_N[k]);
+        U_Sil[k] = M(ap[AP_R_SI2N + k], grow_N[k]);
+        const double resp = M(fr_resp, grow_N[k]);
+        const double graze = M(ap[AP_FR_GRAZE + k], grow_N[k]);
+        const double mort = col_min(D(M(max_loss, Nin[k]), dt),
+                                    D(M(M(ap[AP_MORT_PRE + k], glibc_exp(M(ap[AP_MORT_TDEP + k], dTemp))), Nin[k]),
+                                      ZB_SECDAY));
+        grow_alg[k] = grow_N[k];
+        upNOn[k] = U_Nit[k];
+        upNHn[k] = U_Am[k];
+        N_s[k] = M(M(S(S(1.0, fr_resp), ap[AP_FR_GRAZE + k]), grow_N[k]), dt);
+        N_r[k] = M(mort, dt);
+        graze_N = A(graze_N, graze);
+        mort_N = A(mort_N, mort);
+        resp_N = A(resp_N, resp);
+    }
+    const double fr_graze_s = ap[AP_FR_GRAZE_S], fr_graze_e = ap[AP_FR_GRAZE_E];
+    const double Am_s_e = M(M(M(graze_N, S(1.0, fr_graze_s)), fr_graze_e), dt);
+    const double Am_s_mo = M(M(mort_N, ap[AP_FR_MORT2MIN]), dt);
+    const double Am_s_r = M(resp_N, dt);
+    const double Am_s = A(A(Am_s_r, Am_s_e), Am_s_mo);
+    double Am_r = 0.0, Nit_r = 0.0, Sil_r = 0.0;
+    for (int k = 0; k < n_algae; ++k) {
+        Am_r = A(Am_r, M(U_Am[k], dt));
+        Nit_r = A(Nit_r, M(U_Nit[k], dt));
+        Sil_r = A(Sil_r, M(U_Sil[k], dt));
+    }
+    const double nitrif = M(D(ap[AP_K_NITRIF], ZB_SECDAY), Amin);
+    Am_r = A(Am_r, M(nitrif, dt));
+    const double Nit_s = M(nitrif, dt);
+    double Zoo_s_a, Zoo_s_s, Zoo_s_m;
+    if (am >= 0) {
+        Zoo_s_a = M(M(M(graze_N, S(1.0, fr_graze_e)), S(1.0, fr_graze_s)), dt);
+        Zoo_s_s = M(M(graze_N, fr_graze_s), dt);
+        Zoo_s_m = S(M(mort_N, dt), Am_s_mo);
+    } else {
+        Zoo_s_a = M(M(graze_N, dt), S(1.0, fr_graze_s));
+        Zoo_s_s = M(M(graze_N, fr_graze_s), dt);
+        Zoo_s_m = M(mort_N, dt);
+    }
+    *Zoo = A(A(A(Zoo_s_a, Zoo_s_s), Zoo_s_m), 0.0);                 // + Zoo_s_b: no DON
+    for (int k = 0; k < n_algae; ++k) reactb[alg[ALG_N0 + k]] = S(N_s[k], N_r[k]);
+    reactb[nit] = S(Nit_s, Nit_r);
+    if (am >= 0) reactb[am] = S(Am_s, Am_r);
+    if (sil >= 0) reactb[sil] = -Sil_r;
+}
+
+// ice_algae.F90 z_biogeochemistry for the NBT tracers (with solve_zbgc algal_dyn), in
 // its order: each phase loops over the tracers before the next, so a stop is
 // the first phase's to meet one (and in it the first tracer's). trc is the
 // tracers' NBT x (nblyr + 3) layers, frac their mobile fractions, ocean_bio,
@@ -1118,7 +1294,8 @@ __device__ int z_biogeochemistry(double dt, int first_ice, double aicen, double 
                                  double hbri_old, double darcy_V, const double *bgrid, const double *igrid,
                                  const double *icgrid, double bphi_min, const double *zbgc_snow,
                                  const double *zbgc_atm, double dh_direct, double meltb, double congel,
-                                 const double *zpar)
+                                 const double *zpar, const int *alg, const double *ap, const double *iTin,
+                                 double *grow_alg, double *upNOn, double *upNHn, double *Zoo)
 {
     const double zspace = D(1.0, (double)COL_NBLYR);
     double bphin_N[NB2 + 1], iphin_N[NB1 + 1], in_init[NBT][NB1 + 1], cons[NBT][NB1 + 1];
@@ -1148,14 +1325,18 @@ __device__ int z_biogeochemistry(double dt, int first_ice, double aicen, double 
     // Sat_conc = f_s*f_a*f_v*(c1-phi_max)/V_c*S_col/P_b*N_vol*V_alg/Ng_to_mmol (f_s = f_a = 1)
     const double sat_conc = D(M(M(D(M(D(M(zpar[ZP_F_V], S(1.0, phi_max)), zpar[ZP_V_C]), zpar[ZP_S_COL]),
                                     zpar[ZP_P_B]), ZB_N_VOL), zpar[ZP_V_ALG]), ZB_NG_TO_MMOL);
-    // nlt_bgc_N(1) = 0 without algae: every tracer takes the first branch
+    // nlt_bgc_N(1) (alg[ALG_N0], -1 without the algae) has its own release and retention
+    // (tr_bgc_N is set with the algae) and its stationary part is regridded only on fast
+    // bottom melt or a small area
+    const int n1 = alg[ALG_NALG] > 0 ? alg[ALG_N0] : -1;
+    const double algal_vel_dt = M(ap[AP_ALGAL_VEL], dt);
     double rtau_rel[NBT], rtau_ret[NBT], C_top[NBT], C_bot[NBT], source[NBT], atm_add[NBT];
     const double dhtop = dh_top, dhbot = dh_bot, darcyV = darcy_V;
     const double dhflood = col_max(0.0, -dh_direct);
     const double top = A(dhtop, M(D(darcyV, bphin_N[1]), dt));
     for (int m = 0; m < NBT; ++m) {
         const double *zp = zpar + m * ZP_N;
-        if (hin_old > hin) {
+        if (m == n1 ? hin_old > A(hin, algal_vel_dt) : hin_old > hin) {
             rtau_rel[m] = D(1.0, zp[ZP_TAU_REL]);
             rtau_ret[m] = 0.0;
         } else {
@@ -1222,8 +1403,10 @@ __device__ int z_biogeochemistry(double dt, int first_ice, double aicen, double 
             for (int k = 1; k <= NB1; ++k)
                 if (low[k] < 0.0) return BG_FCT_POSITIVITY;
             compute_FCT_corr(initcons, biocons, dt, D_sbdiag, D_spdiag, ML);
-            int stop = zb_regrid_stationary(ics, hbri_old, hbri, dt, 0.0, igrid, &flux_bio[m], meltb, congel);
-            if (stop) return stop;
+            if (m != n1 || meltb > algal_vel_dt || aicen < 0.001) {
+                int stop = zb_regrid_stationary(ics, hbri_old, hbri, dt, 0.0, igrid, &flux_bio[m], meltb, congel);
+                if (stop) return stop;
+            }
             for (int k = 1; k <= NB1; ++k) cons[m][k] = A(biocons[k], ics[k]);
             double sum_new = D(M(A(biocons[1], biocons[NB1]), zspace), 2.0);
             double sum_tot = D(M(A(cons[m][1], cons[m][NB1]), zspace), 2.0);
@@ -1238,9 +1421,21 @@ __device__ int z_biogeochemistry(double dt, int first_ice, double aicen, double 
             thin_ice_flux(hbri, hbri_old, cons[m], &flux_bio[m], source[m], dt, ocean_bio[m]);
         }
     }
+    // biomat_brine, and with solve_zbgc algal_dyn's reaction terms per layer (react 0 else)
+    double brine[NB1 + 1][NBT], react[NB1 + 1][NBT];
+    for (int k = 1; k <= NB1; ++k)
+        for (int m = 0; m < NBT; ++m) {
+            brine[k][m] = D(D(cons[m][k], hbri), iphin_N[k]);
+            react[k][m] = 0.0;
+        }
+    for (int k = 0; k < NB1 * ALG_MAX; ++k) grow_alg[k] = 0.0;
+    if (alg[ALG_FLAGS] & 1)
+        for (int k = 1; k <= NB1; ++k)
+            algal_dyn(dt, alg, ap, zfswin[k - 1], react[k], brine[k], grow_alg + (k - 1) * ALG_MAX, iTin[k],
+                      upNOn + (k - 1) * ALG_MAX, upNHn + (k - 1) * ALG_MAX, &Zoo[k - 1]);
     for (int m = 0; m < NBT; ++m) {
         for (int k = 1; k <= NB1; ++k) {
-            double bio_tmp = M(A(D(D(cons[m][k], hbri), iphin_N[k]), 0.0), iphin_N[k]);    // + react = 0
+            double bio_tmp = M(A(brine[k][m], react[k][m]), iphin_N[k]);
             if (fabs(bio_tmp) < PUNY) bio_tmp = 0.0;
             else if (bio_tmp > 1.0e6) {}                                                       // a warning only
             else if (bio_tmp < 0.0) return BG_NEGATIVE_BGC;
@@ -1269,14 +1464,53 @@ __device__ void merge_bgc_fluxes(double dt, double aicen, double vicen, double v
     *zbgc_atm = A(*zbgc_atm, D(M(zbgc_atmn, aicen), dt));
 }
 
+// merge_bgc_fluxes' solve_zbgc part: per alga and layer, into the cell's sums. trc is
+// the category's NBT tracers (updated), iphin colpkg_biogeochemistry's kept one, ice_bio_net
+// the cell's running totals over its categories so far (totalChla sums those, so an
+// earlier category's chlorophyll is counted again with each later one, as v8.4.2 does;
+// chl_category, the correction total_chlorophyll: this category's integral alone)
+__device__ void merge_algae(const int *alg, const double *ap, double vicen, const double *trc, double fbri,
+                            const double *iphin, const double *grow_alg, const double *upNOn,
+                            const double *upNHn, const double *ice_bio_net, double *PP_net, double *grow_net,
+                            double *upNO, double *upNH, double *totalChla, int chl_category)
+{
+    double zsp[NB1 + 1];
+    for (int k = 1; k <= NB1; ++k) zsp[k] = D(1.0, (double)COL_NBLYR);
+    zsp[1] = D(0.5, (double)COL_NBLYR);
+    zsp[NB1] = D(0.5, (double)COL_NBLYR);
+    for (int mm = 0; mm < alg[ALG_NALG]; ++mm) {
+        const int m = alg[ALG_N0 + mm];
+        double net = ice_bio_net[m];
+        if (chl_category) {
+            net = 0.0;
+            for (int k = 1; k <= NB1; ++k) net = A(net, M(M(M(trc[m * ZT_STRIDE + k - 1], fbri), vicen), zsp[k]));
+        }
+        *totalChla = A(*totalChla, M(net, ap[AP_R_CHL2N + mm]));
+        for (int k = 1; k <= NB1; ++k) {
+            const double tmp = M(M(M(M(iphin[k], fbri), vicen), zsp[k]), ZB_SECDAY);
+            const double g = grow_alg[(k - 1) * ALG_MAX + mm];
+            *PP_net = A(*PP_net, M(M(M(M(g, tmp), S(1.0, ap[AP_FR_RESP])), ap[AP_R_C2N + mm]), ZB_R_GC2MOLC));
+            *grow_net = A(*grow_net, D(M(g, tmp), A(trc[m * ZT_STRIDE + k - 1], PUNY)));
+            *upNO = A(*upNO, M(upNOn[(k - 1) * ALG_MAX + mm], tmp));
+            *upNH = A(*upNH, M(upNHn[(k - 1) * ALG_MAX + mm], tmp));
+        }
+    }
+}
+
 // column_biogeochemistry: one thread per owned cell. flags: bit 0 tr_brine,
 // bit 1 solve_zsal, bit 2 z_tracers (with the brine height; the nonreactive
-// tracer and the z-aerosols), bit 3 the correction bgc_snow_new_category. fbri
+// tracer and the z-aerosols), bit 3 the correction bgc_snow_new_category, bit 4
+// the correction total_chlorophyll. fbri
 // is brineFraction and zsal_out verticalSalinity, ztr_conc the NBT vertical
 // tracers' layers (NBT x (nblyr + 3) per category, the tracer array's order),
 // ztr_frac mobileFraction (nzbgc per category), bio_o each tracer's 0-based
 // place in the ocean concentrations and atm_src its deposition (-1 none, 0-1
-// atm_bc's, 2-5 atm_dust's) (or dummies without them).
+// atm_bc's, 2-5 atm_dust's) (or dummies without them). alg and ap are the vertical
+// biochemistry's places and parameters (ALG_*, AP_*); zoo verticalNitrogenLosses
+// (nblyr + 3 per category, the first nblyr + 1 written), and upNO, upNH, grow_net,
+// PP_net, totalChla the cell's netNitrateUptake, netAmmoniumUptake,
+// netSpecificAlgalGrowthRate, primaryProduction and totalChlorophyll (dummies without
+// solve_zbgc).
 extern "C" __global__ void seaice_column_biogeochemistry_v842(
     int *__restrict__ status, double dt, double l_sk, int ncat, int flags, int nCellsSolve,
     const double *__restrict__ bgrid0, const double *__restrict__ igrid0, const double *__restrict__ cgrid0,
@@ -1300,7 +1534,9 @@ extern "C" __global__ void seaice_column_biogeochemistry_v842(
     const double *__restrict__ vsno_init, const double *__restrict__ fswthrul, const double *__restrict__ icgrid0,
     double *__restrict__ zfswin, double *__restrict__ flux_bio, double *__restrict__ fbio_snoice,
     double *__restrict__ fbio_atmice, double *__restrict__ ice_bio_net, double *__restrict__ snow_bio_net,
-    const int *__restrict__ atm_src)
+    const int *__restrict__ atm_src, const int *__restrict__ alg, const double *__restrict__ ap,
+    double *__restrict__ zoo, double *__restrict__ upNO, double *__restrict__ upNH, double *__restrict__ grow_net,
+    double *__restrict__ PP_net, double *__restrict__ totalChla)
 {
     const int iCell = blockIdx.x * blockDim.x + threadIdx.x;
     if (iCell >= nCellsSolve) return;
@@ -1320,6 +1556,11 @@ extern "C" __global__ void seaice_column_biogeochemistry_v842(
     // colpkg_biogeochemistry's iphin: compute_microS_mushy's, kept across categories
     double iphin_c[NB1 + 1];
     for (int k = 0; k <= NB1; ++k) iphin_c[k] = 0.0;
+    // and its iTin (compute_microS's or compute_microS_mushy's), kept the same way; after a
+    // remap stop in compute_microS_mushy v8.4.2's iTin is undefined in the first category
+    // (0 here: the cases never take that path)
+    double iTin_c[NB1 + 1];
+    for (int k = 0; k <= NB1; ++k) iTin_c[k] = 0.0;
     // atmosBioFluxes(:, iCell): 0, then the z-aerosols' deposition
     double ocean_bio[NBT], flux_bio_atm[NBT];
     for (int m = 0; m < NBT; ++m) {
@@ -1365,10 +1606,10 @@ extern "C" __global__ void seaice_column_biogeochemistry_v842(
                 double bT[NB2 + 1], bp[NB2 + 1], rho = sice_rho[c];
                 for (int k = 1; k <= NB2; ++k) { bT[k] = bTiz[(size_t)c * NB2 + k - 1]; bp[k] = bphi[(size_t)c * NB2 + k - 1]; }
                 double bSin[NB2 + 1], brine_sal[NB2 + 1], brine_rho[NB2 + 1];
-                double iTin[NB1 + 1], iphin[NB1 + 1], ibrine_rho[NB1 + 1], ibrine_sal[NB1 + 1];
+                double iphin[NB1 + 1], ibrine_rho[NB1 + 1], ibrine_sal[NB1 + 1];
                 if (solve_zsal) {
                     l_stop = compute_microS(bgrid0, cgrid0, igrid, si, qice + (size_t)c * COL_NILYR,
-                                            tsfc[c], zs, hin_old[c], &hbr_old, sss[iCell], sst[iCell], bT, iTin,
+                                            tsfc[c], zs, hin_old[c], &hbr_old, sss[iCell], sst[iCell], bT, iTin_c,
                                             bp, &kavg, &bphi_o, first_ice[n], bSin, brine_sal, brine_rho, iphin,
                                             ibrine_rho, ibrine_sal, &rho);
                     if (l_stop) { hbri[iCell] = hbri_c; status[iCell] = l_stop; return; }
@@ -1381,7 +1622,7 @@ extern "C" __global__ void seaice_column_biogeochemistry_v842(
                     // kavg = bphi_o = 0, and the next ice category's preflushing_changes clears it
                     l_stop = compute_microS_mushy(bgrid, cgrid0, bgrid0, igrid, qice + (size_t)c * COL_NILYR,
                                                   si, hin_old[c], &hbr_old, sss[iCell], sst[iCell], bT, bp, &kavg,
-                                                  &bphi_o, &rho, idi, l_sk, iphin_c);
+                                                  &bphi_o, &rho, idi, l_sk, iphin_c, iTin_c);
                     if (!l_stop) {
                         for (int k = 1; k <= NB2; ++k) { bTiz[(size_t)c * NB2 + k - 1] = bT[k]; bphi[(size_t)c * NB2 + k - 1] = bp[k]; }
                         sice_rho[c] = rho;
@@ -1407,6 +1648,7 @@ extern "C" __global__ void seaice_column_biogeochemistry_v842(
                     // z_biogeochemistry's, which clears compute_microS_mushy's
                     double *trc = ztr_conc + (size_t)c * NBT * ZT_STRIDE;
                     double zsn[NBT], zan[NBT], flux_sno[NBT], flux_bion[NBT];
+                    double grow_alg[NB1 * ALG_MAX], upNOn[NB1 * ALG_MAX], upNHn[NB1 * ALG_MAX];
                     int negative = 0;
                     for (int m = 0; m < NBT; ++m) {
                         flux_sno[m] = 0.0;
@@ -1426,7 +1668,8 @@ extern "C" __global__ void seaice_column_biogeochemistry_v842(
                                                flux_bion, bp, iphin_c, trc, ztr_frac + (size_t)c * nzbgc, idi,
                                                fswthrul + (size_t)c * (COL_NILYR + 1), zfswin + (size_t)c * NB1,
                                                dhbr_top[c], dhbr_bot[c], hbrin, hbr_old, darcy_V[c], bgrid, igrid,
-                                               icgrid, bphi_o, zsn, zan, dh_direct, meltb[c], congel[c], zpar);
+                                               icgrid, bphi_o, zsn, zan, dh_direct, meltb[c], congel[c], zpar,
+                                               alg, ap, iTin_c, grow_alg, upNOn, upNHn, zoo + (size_t)c * ZT_STRIDE);
                     for (int m = 0; m < NBT; ++m) flux_bion[m] = A(flux_bion[m], flux_sno[m]);
                     if (l_stop) { hbri[iCell] = hbri_c; status[iCell] = l_stop; return; }
                     const size_t o = (size_t)iCell * nzbgc;
@@ -1434,6 +1677,10 @@ extern "C" __global__ void seaice_column_biogeochemistry_v842(
                         merge_bgc_fluxes(dt, aicen[c], vicen[c], vsnon[c], trc + m * ZT_STRIDE, fbri[n],
                                          flux_bion[m], zsn[m], zan[m], &flux_bio[o + m], &fbio_snoice[o + m],
                                          &fbio_atmice[o + m], &ice_bio_net[o + m], &snow_bio_net[o + m]);
+                    if (alg[ALG_FLAGS] & 1)
+                        merge_algae(alg, ap, vicen[c], trc, fbri[n], iphin_c, grow_alg, upNOn, upNHn,
+                                    ice_bio_net + o, &PP_net[iCell], &grow_net[iCell], &upNO[iCell], &upNH[iCell],
+                                    &totalChla[iCell], (flags >> 4) & 1);
                 }
             }
             first_ice[n] = 0;

@@ -127,7 +127,7 @@ SOURCE_FILES = (
     "src/core_seaice/column/ice_brine.F90:17-943",
     "src/core_seaice/column/ice_zsalinity.F90:38-425,435-1023,1111-1177",
     "src/core_seaice/column/ice_zbgc_shared.F90:110-133,167-333,370-524",
-    "src/core_seaice/column/ice_algae.F90:29-340,747-1417,2159-2611,2617-2710",
+    "src/core_seaice/column/ice_algae.F90:29-340,747-1417,1425-2150,2159-2611,2617-2710",
     "src/core_seaice/column/ice_aerosol.F90:447-826",
     "src/core_seaice/column/ice_zbgc.F90:528-653",
     "src/core_seaice/column/ice_therm_shared.F90:47-73",
@@ -139,6 +139,9 @@ MAX_CATEGORIES = 64
 #: the opt-in correction (column_v842.CORRECTIONS) for update_snow_bgc's 0/0 on a
 #: category without an initial area
 SNOW_NEW_CATEGORY = "bgc_snow_new_category"
+#: the opt-in correction (column_v842.CORRECTIONS) for merge_bgc_fluxes' totalChla, which sums
+#: the cell's running totalVerticalBiologyIce once per ice category
+TOTAL_CHLOROPHYLL = "total_chlorophyll"
 STOP_LABELS = {1: "ice_brine preflushing: fbri <= c0", 2: "ice: remap_layers_bgc error",
                3: "bSin(k) > max_salin", 4: "zbgc initialization error", 5: "negative bgc",
                6: "(check_conservation_FCT's stop: v8.4.2 logs an undefined stop_label)"}
@@ -168,7 +171,7 @@ class CriticalAbort(MpasPortError):
 
 def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
     """Refuse, by name, what the brine height's port does not carry."""
-    cv.refuse_unported(configs, dims, biogeochemistry=True, z_tracers=True)
+    cv.refuse_unported(configs, dims, biogeochemistry=True, z_tracers=cv.VT_INIT_PORTED)
     if configs["config_use_column_biogeochemistry"] and not configs["config_use_brine"]:
         cv._refuse("config_use_brine", False,
                    "colpkg_biogeochemistry writes brineTopChange and brineBottomChange, which only the brine "
@@ -182,6 +185,11 @@ def refuse_unported(configs: dict, dims: dict[str, int]) -> None:
         cv._refuse("woof_v842_corrections", SNOW_NEW_CATEGORY,
                    "update_snow_bgc (the correction's routine) runs only with the vertical tracers",
                    "config_use_vertical_tracers = .true., or no bgc_snow_new_category")
+    if TOTAL_CHLOROPHYLL in cv.named_corrections(configs) and not (cv.vertical_tracers(configs)
+                                                                   and configs["config_use_vertical_biochemistry"]):
+        cv._refuse("woof_v842_corrections", TOTAL_CHLOROPHYLL,
+                   "the correction changes only the vertical biochemistry's totalChlorophyll",
+                   "config_use_vertical_biochemistry = .true. with the vertical tracers, or no total_chlorophyll")
     if SNOW_NEW_CATEGORY in cv.named_corrections(configs) and \
             configs.get("config_use_column_vertical_thermodynamics", True):
         cv._refuse("woof_v842_corrections", SNOW_NEW_CATEGORY,
@@ -251,9 +259,11 @@ def biogeochemistry(pools: dict, configs: dict, state: "cv.ColumnState") -> tupl
     solve_zsal = cv.solves_zsal(configs)
     z_tracers = cv.vertical_tracers(configs)
     snow_new_category = SNOW_NEW_CATEGORY in cv.corrections(configs)
-    flags = int(tr_brine) | int(solve_zsal) << 1 | int(z_tracers) << 2 | int(snow_new_category) << 3
+    flags = (int(tr_brine) | int(solve_zsal) << 1 | int(z_tracers) << 2 | int(snow_new_category) << 3
+             | int(TOTAL_CHLOROPHYLL in cv.corrections(configs)) << 4)
     status = cp.zeros(max(n_solve, 1), np.int32)
     ztr_args, conc = _z_tracer_args(pools, configs, state)
+    alg_args = _algae_args(pools, configs, state)
     if solve_zsal:
         zsal = need(t, "verticalSalinity", (n_cells + 1, ncat, nbl))
     else:
@@ -286,7 +296,7 @@ def biogeochemistry(pools: dict, configs: dict, state: "cv.ColumnState") -> tupl
         np.float64(configs["config_zsalinity_molecular_sublayer"]), need(t, "surfaceTemperature", cat1), zsal,
         need(bgc, "bioPermeability", (n_cells + 1, ncat, nbl + 1)), need(bgc, "totalVerticalSalinity", c1),
         need(bgc, "zSalinityFlux", c1), need(bgc, "zSalinityGDFlux", c1),
-        *ztr_args,
+        *ztr_args, *alg_args,
     )
     if n_solve:
         # atmosBioFluxes(:,:) = 0 on each cell's turn: the whole array, then that cell's
@@ -321,6 +331,73 @@ def zbgc_constants(configs: dict, tracers: "cv.TracerObject") -> np.ndarray:
                       par["init_frac"][m], float(configs["config_biogrid_bottom_molecular_sublayer"]), _F_V, _V_C,
                       _S_COL, _P_B, _V_ALG, par["kscavz"][m]] for m in range(tracers.n_bio_tracers)],
                     np.float64).reshape(-1)
+
+
+#: the algae's per-species configs (diatoms, small plankton, phaeocystis) in the kernel's
+#: ap order (AP_R_SI2N to AP_K_SIL), as colpkg_init_parameters takes them; R_C2N follows
+_ALGAE = ("diatoms", "small_plankton", "phaeocystis")
+_PER_ALGA = ("config_ratio_Si_to_N_{}", "config_ratio_Fe_to_N_{}", None, "config_ratio_chla_to_N_{}",
+             "config_chla_absorptivity_of_{}", "config_light_attenuation_{}", "config_light_inhibition_{}",
+             "config_maximum_growth_rate_{}", "config_temperature_growth_{}", "config_grazed_fraction_{}",
+             "config_mortality_{}", "config_temperature_mortality_{}", "config_nitrate_saturation_{}",
+             "config_ammonium_saturation_{}", "config_silicate_saturation_{}")
+#: then the shared ones (AP_FR_RESP to AP_MAX_LOSS)
+_SHARED = ("config_respiration_fraction_of_growth", "config_algal_maximum_velocity",
+           "config_maximum_brine_temperature", "config_salinity_dependence_of_growth",
+           "config_minimum_optical_depth", "config_slopped_grazing_fraction", "config_excreted_fraction",
+           "config_fraction_mortality_to_ammonium", "config_nitrification_rate", "config_maximum_loss_fraction")
+_ALG_MAX, _ALG_LEN = 3, 8
+
+
+def algae_constants(configs: dict, tracers: "cv.TracerObject") -> tuple[np.ndarray, np.ndarray]:
+    """The kernel's ``alg`` (n_algae, the algae's, nitrate's, ammonium's and
+    silicate's 0-based places among the bio tracers, -1 where absent, and the
+    flags: bit 0 ``solve_zbgc``, bit 1 ``dEdd_algae``) and ``ap`` (the
+    vertical biochemistry's parameters, ``colpkg_init_parameters``'). The
+    algae's carbon to nitrogen ratios are ``R_C2N`` as ``colpkg_init_zbgc``
+    leaves them: the diatoms' is the proteins' unless ``zbgc_c2n_proteins``
+    (:data:`~woof.hex.mpas_seaice.column_v842.CORRECTIONS`)."""
+    c = configs
+    places = {}
+    for m, (name, _, j) in enumerate(tracers.bio_fields):
+        places.setdefault(name, []).append(m)
+    algae = places.get("verticalAlgaeConc", [])
+    alg = np.full(_ALG_LEN, -1, np.int32)
+    alg[0] = len(algae)
+    alg[1:1 + len(algae)] = algae
+    for slot, name in ((4, "verticalNitrateConc"), (5, "verticalAmmoniumConc"), (6, "verticalSilicateConc")):
+        if name in places:
+            alg[slot] = places[name][0]
+    alg[7] = int(bool(c["config_use_vertical_biochemistry"])) | int(bool(c["config_use_shortwave_bioabsorption"])) << 1
+    if "zbgc_c2n_proteins" in cv.corrections(c):
+        c2n = [c[f"config_ratio_C_to_N_{a}"] for a in _ALGAE]
+    else:
+        c2n = [c["config_ratio_C_to_N_proteins"]] + [c[f"config_ratio_C_to_N_{a}"] for a in _ALGAE[1:]]
+    ap = []
+    for key in _PER_ALGA:
+        ap += c2n if key is None else [c[key.format(a)] for a in _ALGAE]
+    ap += [c[key] for key in _SHARED]
+    return alg, np.array(ap, np.float64)
+
+
+def _algae_args(pools: dict, configs: dict, state: "cv.ColumnState") -> tuple:
+    """The kernel's vertical biochemistry arguments: ``alg``, ``ap``,
+    ``verticalNitrogenLosses`` and the cell's uptake, growth, production
+    and chlorophyll sums (dummies without ``solve_zbgc``)."""
+    import cupy as cp
+
+    alg, ap = algae_constants(configs, state.tracers) if cv.vertical_tracers(configs) else (
+        np.array([0] + [-1] * (_ALG_LEN - 2) + [0], np.int32), np.zeros(55, np.float64))
+    if not alg[7] & 1:
+        dummy = cp.zeros(1, np.float64)
+        return (cp.asarray(alg), cp.asarray(ap), dummy, dummy, dummy, dummy, dummy, dummy)
+    d, bgc, need = state.dims, pools["biogeochemistry"], cv._need
+    n1 = (d["nCells"] + 1,)
+    return (cp.asarray(alg), cp.asarray(ap),
+            need(bgc, "verticalNitrogenLosses", (d["nCells"] + 1, d["nCategories"], d["nBioLayers"] + 3)),
+            need(bgc, "netNitrateUptake", n1), need(bgc, "netAmmoniumUptake", n1),
+            need(bgc, "netSpecificAlgalGrowthRate", n1), need(bgc, "primaryProduction", n1),
+            need(bgc, "totalChlorophyll", n1))
 
 
 def _atm_sources(tracers: "cv.TracerObject") -> list[int]:

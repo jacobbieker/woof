@@ -2,7 +2,7 @@
 
     pixi run -e default python tools/mpas_seaice_oracle/make_column_fixture.py BUILD_DIR [--out DIR]
         [--cases init|therm|itd|ridge|radiation|dedd|step|coupled|oml|bgc|carry|zsal|zsal_solve|zsal_carry|zsal_solve_carry
-                 |nonreactive|nonreactive_carry|nonreactive_step|zaero]
+                 |nonreactive|nonreactive_carry|nonreactive_step|zaero|algae]
 
 BUILD_DIR holds ``run_column_r8`` and ``run_init_thermo_r8`` from build.sh.
 Writes into ``tests/data/oracles/mpas_seaice_column`` by default:
@@ -54,7 +54,9 @@ z-aerosols through the ITD thermodynamics and the ridging
 ``--cases zaero_step`` the z-aerosols through the time steps (``BGC_ZAERO_STEP_CASES``)
 into ``tests/data/oracles/mpas_seaice_bgc_zaero_step``; ``--cases zaero_shortwave`` the
 z-aerosols' shortwave bioabsorption (``BGC_ZAERO_SW_CASES``) into
-``tests/data/oracles/mpas_seaice_bgc_zaero_shortwave``.
+``tests/data/oracles/mpas_seaice_bgc_zaero_shortwave``; ``--cases algae`` the vertical
+biochemistry's algae and nutrients in the init and column_biogeochemistry
+(``BGC_ALGAE_CASES``) into ``tests/data/oracles/mpas_seaice_bgc_algae``.
 """
 from __future__ import annotations
 
@@ -80,7 +82,7 @@ def main() -> int:
                                               "oml", "bgc", "carry", "zsal", "zsal_solve", "zsal_carry",
                                               "zsal_solve_carry", "nonreactive", "nonreactive_carry",
                                               "nonreactive_step", "zaero", "zaero_carry",
-                                              "zaero_step", "zaero_shortwave"),
+                                              "zaero_step", "zaero_shortwave", "algae"),
                         default="init")
     args = parser.parse_args()
     rows, fixture_dir = {"init": (co.CASES, co.FIXTURE_DIR), "therm": (co.VT_CASES, co.VT_FIXTURE_DIR),
@@ -108,7 +110,8 @@ def main() -> int:
                          "zaero": (co.BGC_ZAERO_CASES, co.BGC_ZAERO_FIXTURE_DIR),
                          "zaero_carry": (co.BGC_ZAERO_CARRY_CASES, co.BGC_ZAERO_CARRY_FIXTURE_DIR),
                          "zaero_step": (co.BGC_ZAERO_STEP_CASES, co.BGC_ZAERO_STEP_FIXTURE_DIR),
-                         "zaero_shortwave": (co.BGC_ZAERO_SW_CASES, co.BGC_ZAERO_SW_FIXTURE_DIR)}[args.cases]
+                         "zaero_shortwave": (co.BGC_ZAERO_SW_CASES, co.BGC_ZAERO_SW_FIXTURE_DIR),
+                         "algae": (co.BGC_ALGAE_CASES, co.BGC_ALGAE_FIXTURE_DIR)}[args.cases]
     args.out = args.out or fixture_dir
     args.out.mkdir(parents=True, exist_ok=True)
     arrays: dict[str, np.ndarray] = {}

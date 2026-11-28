@@ -448,6 +448,12 @@ CORRECTIONS = {
         "biology interface grid i_grid(1:nblyr+1) (ice_shortwave.F90:3664-3712), so the z-aerosols are remapped "
         "onto the shortwave grid from the wrong depths, and with fewer ice layers than biology layers read "
         "past the array; the correction passes interfaceBiologyGrid"),
+    "total_chlorophyll": (
+        "merge_bgc_fluxes adds ice_bio_net(nlt_bgc_N(mm))*R_chl2N(mm) to totalChla once per ice category "
+        "(ice_zbgc.F90:631-633), but ice_bio_net (totalVerticalBiologyIce) is the cell's running sum over the "
+        "categories merged so far, so the first category's algae are counted once per later ice category and "
+        "totalChlorophyll overstates the column's chlorophyll; the correction adds only this category's "
+        "integrated algae"),
 }
 
 
@@ -500,6 +506,13 @@ VT_FLAG = "config_use_vertical_tracers"
 ZAERO_FLAG = "config_use_zaerosols"
 #: the vertical tracers' flags every vertical tracer stage carries
 VT_PORTED = ("config_use_nonreactive", ZAERO_FLAG)
+#: the vertical biochemistry (solve_zbgc and tr_bgc_N: the Registry's nAlgae = 3 algae, diatoms,
+#: small plankton and phaeocystis) and the nutrients it takes up (tr_bgc_Nit, tr_bgc_Am,
+#: tr_bgc_Sil): the init and column_biogeochemistry carry them (VT_INIT_PORTED)
+ALGAE_PORTED = ("config_use_vertical_biochemistry", "config_use_nitrate", "config_use_ammonium",
+                "config_use_silicate")
+#: the vertical tracers' flags the init and column_biogeochemistry carry
+VT_INIT_PORTED = VT_PORTED + ALGAE_PORTED
 #: the shortwave bioabsorption (dEdd_algae) and the modal aerosol optics (modal_aero):
 #: only the delta-Eddington shortwave reads them, on the z-aerosols (the algae and the NCAR
 #: aerosols are refused), so every biogeochemistry stage carries them
@@ -575,8 +588,9 @@ def refuse_unported(configs: dict, dims: dict[str, int], biogeochemistry: bool =
                     f"{VT_FLAG} = .false.")
         refuse_uncarried_bgc(c, carried_bgc_flags(c, vt),
                              "of the column biogeochemistry only the brine height, the vertical salinity, the "
-                             "vertical tracers' nonreactive tracer and z-aerosols and the shortwave "
-                             "bioabsorption of the z-aerosols are ported")
+                             "vertical tracers' nonreactive tracer and z-aerosols, the shortwave bioabsorption "
+                             "of the z-aerosols and (in the init and column_biogeochemistry) the vertical "
+                             "biochemistry's algae, nitrate, ammonium and silicate are ported")
         if c[VT_FLAG]:
             _refuse_z_tracers(c, vt)
         _refuse_bio_layers(c, dims)
@@ -850,10 +864,13 @@ def tracer_object(configs: dict, dims: dict[str, int]) -> TracerObject:
             # counted and never read or written back, so only zsal_solve maps the pool field
             layout.append(("verticalSalinity", nt_bgc_s, n_bio))
     bio_index, bio_index_o, bio_fields, nt_zbgc_frac = [], [], [], 0
-    if vertical_tracers(c) and c["config_use_brine"] and any(c[flag] for flag in VT_PORTED):
-        # colpkg_init_zbgc's z_tracers (ice_colpkg.F90:1362-1371 and 1426-1490): the
-        # nonreactive tracer (tr_bgc_PON), then the nzAerosols z-aerosols (tr_zaero; the
-        # Registry fixes nzAerosols at 3: black carbon 1 and 2, the first dust).
+    if vertical_tracers(c) and c["config_use_brine"] and any(c[flag] for flag in VT_INIT_PORTED):
+        # colpkg_init_zbgc's z_tracers (ice_colpkg.F90:1227-1371 and 1426-1490), in its order:
+        # the algae (tr_bgc_N, the vertical biochemistry; the Registry's nAlgae = 3,
+        # bio_index_o mm), nitrate (tr_bgc_Nit, max_algae + 1), ammonium (tr_bgc_Am,
+        # 2*max_algae + max_doc + max_dic + 2), silicate (tr_bgc_Sil, + 3), the nonreactive
+        # tracer (tr_bgc_PON), then the nzAerosols z-aerosols (tr_zaero; the Registry fixes
+        # nzAerosols at 3: black carbon 1 and 2, the first dust).
         # colpkg_init_bgc_trcr gives each its nblyr + 1 ice layers trcr_depend nt_depend =
         # 2 + nt_fbri (ntd = 0 with the brine fraction), trcr_base (0, 1, 0) and the brine
         # fraction as their one stratum, then its two snow layers trcr_depend 2, trcr_base
@@ -864,6 +881,19 @@ def tracer_object(configs: dict, dims: dict[str, int]) -> TracerObject:
         # MPAS filled before is overwritten. MPAS's verticalAerosolsConc holds the
         # aerosols one after another, nBioLayersP3 layers each.
         nk = dims["nBioLayers"] + 1
+        if c["config_use_vertical_biochemistry"]:
+            for mm in range(dims["nAlgae"]):
+                bio_index_o.append(mm + 1)
+                bio_fields.append(("verticalAlgaeConc", mm * (nk + 2), mm))
+        if c["config_use_nitrate"]:
+            bio_index_o.append(_MAX_ALGAE + 1)
+            bio_fields.append(("verticalNitrateConc", 0, 0))
+        if c["config_use_ammonium"]:
+            bio_index_o.append(2 * _MAX_ALGAE + _MAX_DOC + _MAX_DIC + 2)
+            bio_fields.append(("verticalAmmoniumConc", 0, 0))
+        if c["config_use_silicate"]:
+            bio_index_o.append(2 * _MAX_ALGAE + _MAX_DOC + _MAX_DIC + 3)
+            bio_fields.append(("verticalSilicateConc", 0, 0))
         if c["config_use_nonreactive"]:
             bio_index_o.append(2 * _MAX_ALGAE + _MAX_DOC + _MAX_DIC + 7)
             bio_fields.append(("verticalNonreactiveConc", 0, 0))
@@ -931,13 +961,14 @@ class ColumnState:
 
 
 def init_parameters(pools: dict, configs: dict, biogeochemistry: bool = False,
-                    z_tracers: bool = False) -> ColumnState:
+                    z_tracers: bool | tuple[str, ...] = False) -> ColumnState:
     """``seaice_init_column_physics_package_parameters``: host side. The
     stand-in pointers of the packages that are off change no state the port
     reads (the absent fields stay ``None``). ``biogeochemistry`` and
     ``z_tracers``: the caller carries the column biogeochemistry and its
     vertical tracers (:func:`refuse_unported`); the init carries every
-    vertical tracer the port has (:data:`VT_PORTED`)."""
+    vertical tracer the stage carries (:data:`VT_PORTED`, or the tuple of flags
+    it passes: the init's and column_biogeochemistry's :data:`VT_INIT_PORTED`)."""
     mesh = pools["mesh"]
     dims = {k: int(mesh[k]) for k in ("nCells", "nCellsSolve", "nVertices", "nEdges", "maxEdges",
                                        "vertexDegree") if k in mesh}
@@ -1234,9 +1265,15 @@ KSCAVZ = (0.03,) * 22 + (0.03, 0.20, 0.02, 0.02, 0.01, 0.01, 0.03)
 #: the opt-in correction (CORRECTIONS) that takes each tracer's kscavz at its bio_index_o
 ZAERO_KSCAVZ = "zaero_snow_scavenging"
 #: per vertical tracer field, the transport types (mobility) colpkg_init_zbgc gives it:
-#: the nonreactive tracer nitratetype (ice_colpkg.F90:1366), the z-aerosols zaerotype(mm)
+#: the algae algaltype(mm), nitrate nitratetype, ammonium ammoniumtype, silicate silicatetype,
+#: the nonreactive tracer nitratetype too (ice_colpkg.F90:1366), the z-aerosols zaerotype(mm)
 #: (ice_colpkg.F90:1200-1205)
-_MOBILITY = {"verticalNonreactiveConc": ("config_mobility_type_nitrate",),
+_MOBILITY = {"verticalAlgaeConc": ("config_mobility_type_diatoms", "config_mobility_type_small_plankton",
+                                   "config_mobility_type_phaeocystis"),
+             "verticalNitrateConc": ("config_mobility_type_nitrate",),
+             "verticalAmmoniumConc": ("config_mobility_type_ammonium",),
+             "verticalSilicateConc": ("config_mobility_type_silicate",),
+             "verticalNonreactiveConc": ("config_mobility_type_nitrate",),
              "verticalAerosolsConc": ("config_mobility_type_black_carbon1", "config_mobility_type_black_carbon2",
                                       "config_mobility_type_dust1", "config_mobility_type_dust2",
                                       "config_mobility_type_dust3", "config_mobility_type_dust4")}
@@ -1244,7 +1281,8 @@ _MOBILITY = {"verticalNonreactiveConc": ("config_mobility_type_nitrate",),
 
 def bio_field_layers(name: str, dims: dict[str, int]) -> int:
     """A vertical tracer field's layers: nBioLayersP3 per tracer it holds."""
-    return (dims["nBioLayers"] + 3) * (dims["nzAerosols"] if name == "verticalAerosolsConc" else 1)
+    many = {"verticalAerosolsConc": "nzAerosols", "verticalAlgaeConc": "nAlgae"}
+    return (dims["nBioLayers"] + 3) * (dims[many[name]] if name in many else 1)
 
 
 def zbgc_parameters(configs: dict, tracers: TracerObject) -> dict:

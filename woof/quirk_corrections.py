@@ -222,6 +222,9 @@ CORRECTIONS: tuple[QuirkCorrection, ...] = (
     QuirkCorrection(
         "shortwave_bio_grid", "mpas_seaice", False, True, "shortwave bioabsorption of the z-aerosols",
         "the z-aerosols are remapped onto the shortwave grid from the biology interface grid"),
+    QuirkCorrection(
+        "total_chlorophyll", "mpas_seaice", False, True, "vertical biochemistry",
+        "totalChlorophyll sums each category's chlorophyll once, not the running total per category"),
     # MPAS-Seaice v8.4.2 velocity solver set-up (woof.hex.mpas_seaice.timestep_v842)
     QuirkCorrection(
         "planar_metric_terms", "mpas_seaice_velocity", False, True, "variational basis on a planar mesh",
