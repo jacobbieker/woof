@@ -1160,6 +1160,82 @@ def su_perturbation(geom, seed: int, dtype=np.float64) -> dict:
                                     dtype=dtype) for n in su_active(geom)}
 
 
+def pd_geometry(nz=7, ny=8, nx=9, **overrides):
+    """A species' positive-definite final stage; ``spec`` bounds both axes
+    with a one-point ring, as a specified domain runs it."""
+    from .pdadv import PDGeometry
+    base = dict(nz=nz, ny=ny, nx=nx, dx=3000.0, dy=2500.0, dt=12.0)
+    if overrides.get("spec"):
+        base.update(spec_zone=1)
+    base.update(overrides)
+    return PDGeometry(**base)
+
+
+def pd_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False,
+                  dry: float = 0.4, wind: float = 1.0) -> dict:
+    """Host base state of the PD stage: :func:`su_trajectory`'s, with a
+    fraction ``dry`` of near-empty time-t cells (q0 ~ 1e-5, where the
+    correction fluxes overdraw the upwind budget, so the limiter acts),
+    the stage's species a noisy copy of q0, and the carried acoustic
+    mass ``muts`` near mub + mup.  ``wind`` scales the mass fluxes: at
+    40 a share of the faces has a Courant number past 0.5, where
+    flux_upwind's clamp holds (and the flux depends on the face mass)."""
+    from .pdadv import pd_shapes
+    from .scalar import ScalarGeometry
+    sg = ScalarGeometry(geom.nz, geom.ny, geom.nx, 1.0 / geom.dx, 1.0 / geom.dy, geom.dt,
+                        vorder=geom.vorder, horder=geom.horder, open_x=geom.spec,
+                        open_y=geom.spec, spec=geom.spec, spec_zone=geom.spec_zone,
+                        has_msf=geom.has_msf, held=geom.held)
+    out = su_trajectory(sg, seed, np.float64, hybrid=hybrid)
+    rng = np.random.default_rng(seed + 7)
+    sh = pd_shapes(geom)
+    q0 = out["q0"]
+    mask = rng.random(sh["q0"]) < dry
+    q0[mask] = 1e-5 * (0.5 + rng.random(int(mask.sum())))
+    out["q"] = q0 + 1e-3 * rng.standard_normal(sh["q"])
+    if geom.held:
+        out["held"] = 1e-3 * rng.standard_normal(sh["held"])
+    out["muts"] = out["mub2d"] + out["mup"] + rng.standard_normal(sh["muts"])
+    for n in ("ru_m", "rv_m", "ww_m"):
+        out[n] = wind * out[n]
+    return {k: np.ascontiguousarray(v, dtype=dtype) for k, v in out.items()}
+
+
+def pd_perturbation(geom, seed: int, dtype=np.float64, traj=None) -> dict:
+    """:func:`su_perturbation`'s scales, ``muts`` as ``mup``, and with
+    ``traj`` the time-t species perturbed relative to itself (so a
+    small step keeps the empty cells' budgets on their branch)."""
+    from .pdadv import pd_active, pd_shapes
+    rng = np.random.default_rng(seed)
+    sh = pd_shapes(geom)
+    scales = dict(_SU_SCALES, muts=_SU_SCALES["mup"], held=1e-3)
+    out = {n: scales[n][1] * rng.standard_normal(sh[n]) if isinstance(scales[n], tuple)
+           else scales[n] * rng.standard_normal(sh[n]) for n in pd_active(geom)}
+    if traj is not None:
+        out["q0"] = 0.2 * np.asarray(traj["q0"], dtype=np.float64) * rng.standard_normal(sh["q0"])
+    return {n: np.ascontiguousarray(v, dtype=dtype) for n, v in out.items()}
+
+
+def pa_trajectory(geom, seed: int, dtype=np.float64, *, hybrid: bool = False,
+                  wind: float = 1.0) -> dict:
+    """The advection alone: :func:`pd_trajectory` with ``q0e`` the
+    time-t species (no source) and a zero tendency."""
+    tr = pd_trajectory(geom, seed, np.float64, hybrid=hybrid, wind=wind)
+    tr["q0e"] = tr.pop("q0")
+    tr["tend"] = np.zeros_like(tr["q"])
+    for n in ("mup", "held"):
+        tr.pop(n, None)
+    return {k: np.ascontiguousarray(v, dtype=dtype) for k, v in tr.items()}
+
+
+def pa_perturbation(geom, seed: int, dtype=np.float64, traj=None) -> dict:
+    from .pdadv import PA_ACTIVE
+    p = pd_perturbation(geom, seed, np.float64,
+                        traj=None if traj is None else {"q0": traj["q0e"]})
+    p["q0e"] = p.pop("q0")
+    return {n: np.ascontiguousarray(p[n], dtype=dtype) for n in PA_ACTIVE}
+
+
 def sf_geometry(nz=7, ny=8, nx=9, **overrides):
     from .scalar import SumfluxGeometry
     base = dict(nz=nz, ny=ny, nx=nx, nsub=4)

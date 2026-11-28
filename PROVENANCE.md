@@ -193,10 +193,10 @@ bytes are outside the numerical oracle.
   `cupy.cuda.compiler` line 585 (`options += ('-ftz=true',)`), after the
   caller's options, and NVRTC honours the last occurrence.
   The inventory records 15 distinct caller-supplied option tuples across the
-  357 compile sites in the shipped package, each listed here with a site
+  358 compile sites in the shipped package, each listed here with a site
   that supplies it:
   - caller options passed as a name or call the scan does not evaluate --
-    `woof/backend/__init__.py:243` (self.xp.RawModule), and 220 other
+    `woof/backend/__init__.py:243` (self.xp.RawModule), and 221 other
     site(s)
   - no caller options -- `woof/backend/facade/_ops.py:355`
     (ElementwiseKernel), and 68 other site(s)

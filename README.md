@@ -1572,7 +1572,15 @@ Notes on the 1.1.7 sync:
   qr: calc_cq, the moist pressure gradient, buoyancy and diagnosis,
   sumflux and the non-PD scalar update, and qv's boundary rows with
   flow_dep_bdy for qc and qr). The forecast path does not import any of
-  it.
+  it. With moist_adv_opt 1 (WRF's default) the last RK stage runs the
+  positive-definite scalar advection (`woof.grad.wrfplus.pdadv`, WRF
+  `advect_scalar_pd`, v_sca_adv_order 2, 3, 4 or 6). Its binary32 base
+  reproduces woof's strict PD stage word for word. It matches WRFPLUS
+  4.7.1's `g_/a_advect_scalar_pd` to about 1e-15 on non-hybrid levels,
+  and the finite differences of WRF 4.7.1's nonlinear routine on hybrid
+  ones. The TL/AD take the base state's limiter branches.
+  v_sca_adv_order 5 with PD is refused: woof's strict path there is the
+  HRRR fork's vertical arm, not WRF's.
   The step also covers WRF's diff_opt 1 / km_opt 4 horizontal mixing
   (`woof.grad.wrfplus.diffusion`, bound into the step on periodic and
   specified domains, dry or moist, word for word against

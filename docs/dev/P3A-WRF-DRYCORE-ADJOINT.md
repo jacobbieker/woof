@@ -1391,6 +1391,121 @@ Each step is one small PR, taken to merged before the next widens.
      `advance_uv`, a store in `advance_mu_t`); a first run on a busier
      card gave -1% and +4%.
 
+13. Positive-definite moist advection, `moist_adv_opt = 1` (WRF's
+    default; P3a window request 3). WRF `advect_scalar_pd` on the last
+    RK stage (`solve_em.F:1850,1876,3378`; WRFPLUS
+    `solve_em_tl.F:1711,1736,3241`).
+   - Pin: WRF and WRFPLUS 4.7.1, as for items 1-10.
+   - Code: `woof/grad/wrfplus/pdadv.py` and `kernels/pdadv.cu`.
+     - `pa_tl/pa_ad`: the advection alone (`tend` from the stage's q and
+       the folded q0e). The flux stage is woof's strict
+       `launch_pd_fluxes`; the scale and apply stage is
+       `launch_pd_renorm_apply`.
+     - `pd_tl/pd_ad`: the whole PD final stage of one species, as
+       `moist._advance_species_wrf` runs it with `pd=True`. That is the
+       source fold `q0e = (chm0 q0 + dt src) / chm0`, then the advection,
+       then the fused update `(chm0 q0e + dt msft tend) / chm`, with the
+       specified ring cleared first.
+     - Active inputs: q, q0, the sumflux mass fluxes, mup0, mup, the
+       carried acoustic column mass muts, and the held source.
+   - Step binding (`model.step_geometry`): with `moist_adv_opt = 1` each
+     species takes `PDGeometry` on rk_step 3 only. rk_steps 1 and 2 keep
+     the non-PD update, as the primal's `final` does. `_refuse` now
+     names only `moist_adv_opt` other than 0 and 1, and
+     `moist_adv_opt 1 with v_sca_adv_order 5`.
+   - Branches. The limiter is piecewise. The TL/AD take the base
+     state's branch at each switch, with WRFPLUS's rules:
+     - `abs` takes its derivative from the side where cr >= 0;
+     - the Courant clamps `min(1, .)` and `max(-1, .)` pass the
+       derivative only strictly inside;
+     - flux_out's `max(0, .)` and `min(0, .)` pass it only on the strict
+       side;
+     - the scale's derivative is kept only where `fo > ph` and the
+       ratio is > 0.
+     `pdadv.branches(traj, geom)` returns the branch words: the signs of
+     the correction and mass fluxes, and each cell's state (unlimited,
+     limited, or clipped to zero). Two states with equal words take the
+     same branches.
+   - Oracle (`tools/wrfplus_oracle/pdadv.F90`, routine `pdadv`,
+     `tests/data/wrfplus/pdadv.npz`): 8 cases. They cover periodic and
+     specified domains, map factors, h orders 3-6 and v orders 2, 4 and
+     6. Two of them are fast (wind x 40), so a share of the faces is past
+     Courant 0.5.
+     - Non-hybrid levels: WRFPLUS's `g_/a_advect_scalar_pd`. woof's base
+       matches WRF bit for bit in binary64. The TL agrees to <= 4e-16
+       and every adjoint to <= 5e-16.
+     - Hybrid levels: woof's TL agrees with fourth-order central
+       differences of WRF 4.7.1's nonlinear `advect_scalar_pd` (with
+       c1/c2) to <= 1e-10. The AD projection agrees to <= 8e-10. None
+       of the difference points (+-h, +-2h) switches a branch.
+   - Findings:
+     - WRFPLUS 4.7.1's `g_/a_advect_scalar_pd` and
+       `g_/a_rk_update_scalar_pd` linearise the pre-hybrid routine.
+       They take the column mass as `0.5 (mut + mut)` and use
+       `mub + mu_old` for `ph_low`, with no c1/c2 (the
+       `module_advect_em_tl.F` and `module_advect_em_ad.F` PD blocks).
+       WRF 4.7.1's nonlinear routine uses c1/c2. So woof's TL is graded
+       against WRFPLUS only at c1 = 1, c2 = 0, and against FD of the
+       nonlinear routine on hybrid levels.
+     - WRF's west-face Courant asymmetry: at `i == ids+1` the upwind
+       flux uses `vel = ru/mu` (`module_advect_em.F` ~6438). WRFPLUS
+       repeats it (`module_advect_em_tl.F` ~8581-8586), and woof's
+       primal and TL/AD follow it.
+     - Below Courant 0.5 the upwind flux does not depend on the face
+       mass (`mu (dx/dt) cr = vel`). The muts adjoint is then roundoff
+       noise in both WRFPLUS and woof (~1e-21 against O(1e-3) terms).
+       It matters only where the clamp holds, which the fast cases
+       exercise (agreement 4e-16 there).
+     - `flux3`/`flux5` carry `sign(1, time_step)`. The driver passes
+       time_step 1.
+     - woof's strict v_sca_adv_order 5 PD stage runs the HRRR fork's
+       vertical arm (`pd_vertical_sl.cu`), not WRF 4.7.1's
+       `advect_scalar_pd`. It is refused by name.
+   - Tests:
+     - `tests/test_grad_wrfplus_pdadv.py`, with 10 advection and 9
+       stage configurations:
+       - dot product (binary64 1e-12, binary32 1e-5);
+       - accumulation, and the adjoint in one dict;
+       - TL against FD. Each FD point's branch words are compared with
+         the base's; there must be no switch at the smallest step, and
+         at most 1% of the words may switch at 1e-3. Every case but a
+         3x2x3 periodic one has limited cells.
+       - the strict primal's words in binary32: the stage against
+         `_advance_species_wrf(pd=True)`, and the advection against
+         `launch_pd_fluxes` + `launch_pd_renorm_apply`. Each stage case
+         also differs from the non-PD update.
+       - the oracle;
+       - the step binding;
+       - geometry refusals.
+     - The step's words, dot product and FD with PD on
+       (`test_grad_wrfplus_model.py` `_pd` cases and a 3-step chain;
+       `test_grad_wrfplus_spec_step.py` moist cases 2).
+       The step FD perturbs the species relative to themselves. About
+       half the seeded qr cells are exactly zero. There the scale sits
+       on `max(0, ratio)`'s kink, and an absolute perturbation crosses
+       it at every step size: qr's TL misses its FD by ~20% at every a,
+       which is a kink, not a TL error.
+   - Not covered (refused by name or by geometry): v_sca_adv_order 5,
+     h_sca_adv_order 2, open boundaries, IEVA, and the RQVFTEN export.
+   - Cost (A6000, 40 x 120 x 120, binary32, h order 5, v order 3,
+     one species, median of 20 after 3 warm-ups, 2026-11-27). The
+     primal is the strict `_advance_species_wrf(pd=True)` for the stage,
+     and `launch_pd_fluxes` + `launch_pd_renorm_apply` for the
+     advection:
+
+     | Measurement | Primal | TL | AD |
+     |---|---|---|---|
+     | Stage, periodic | 0.258 ms | 0.727 ms (2.8x) | 1.381 ms (5.3x; 1.9x TL) |
+     | Stage, specified + msf + held | 0.258 ms | 0.734 ms (2.8x) | 1.508 ms (5.9x; 2.1x TL) |
+     | Advection, periodic | 0.136 ms | 0.355 ms (2.6x) | 0.950 ms (7.0x; 2.7x TL) |
+     | Advection, specified + msf + held | 0.135 ms | 0.331 ms (2.4x) | 0.879 ms (6.5x; 2.7x TL) |
+
+     The TL runs the base and the tangent (the base alone is the
+     primal's words). The AD recomputes the base fluxes and scales, then
+     gathers per face and per cell without atomics. It is about 5-6x the
+     stage primal, a little over G3's ~5x. Fusing the AD's face and cell
+     passes is left to a perf pass.
+
 Cost is measured from item 2 on. Kernel-level AD/forward ratios are
 reported at every merge, so a G3 cost miss shows up before item 8.
 

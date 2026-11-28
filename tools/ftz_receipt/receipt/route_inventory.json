@@ -9,11 +9,11 @@
     "cupy.ReductionKernel",
     "cupy.cuda.compiler.compile_using_nvrtc"
   ],
-  "site_count": 744,
+  "site_count": 745,
   "site_count_by_kind": {
     "cupy.ElementwiseKernel": 48,
     "cupy.RawKernel": 125,
-    "cupy.RawModule": 317,
+    "cupy.RawModule": 318,
     "cupy.ReductionKernel": 22,
     "cupy.cuda.compiler.compile_using_nvrtc": 232
   },
@@ -27,7 +27,7 @@
     "package": {
       "cupy.ElementwiseKernel": 36,
       "cupy.RawKernel": 42,
-      "cupy.RawModule": 114,
+      "cupy.RawModule": 115,
       "cupy.ReductionKernel": 9,
       "cupy.cuda.compiler.compile_using_nvrtc": 156
     },
@@ -9894,7 +9894,7 @@
     },
     {
       "file": "woof/grad/wrfplus/advect.py",
-      "line": 101,
+      "line": 102,
       "column": 13,
       "surface": "package",
       "constructor": "cp.RawModule",
@@ -9927,6 +9927,22 @@
     {
       "file": "woof/grad/wrfplus/lbc.py",
       "line": 63,
+      "column": 13,
+      "surface": "package",
+      "constructor": "cp.RawModule",
+      "constructor_kind": "cupy.RawModule",
+      "enclosing": "_device_module",
+      "takes_caller_options": true,
+      "options_argument_present": true,
+      "options_expression": "options",
+      "options": null,
+      "options_element_expressions": null,
+      "options_are_literal": false,
+      "text": "module = cp.RawModule(code=source, options=options)"
+    },
+    {
+      "file": "woof/grad/wrfplus/pdadv.py",
+      "line": 155,
       "column": 13,
       "surface": "package",
       "constructor": "cp.RawModule",

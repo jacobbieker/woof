@@ -17,7 +17,8 @@ with zero_grad_bdy, spec_bdy_final and the carried mu halo, with the
 boundary tables as active inputs), map factors, Coriolis and curvature,
 dry or moist without microphysics (qv, qc and qr: calc_cq, the moist
 pressure gradient, buoyancy, diagnosis and acoustic cq, sumflux and the
-non-positive-definite scalar update, and on a specified domain qv's
+scalar update, with ``moist_adv_opt = 1``'s positive-definite final
+stage (v_sca_adv_order 2, 3, 4 or 6), and on a specified domain qv's
 held boundary tendency and spec_bdy_final with flow_dep_bdy for qc and
 qr), on a dry state WRF's diff_opt 1 / km_opt 4 horizontal mixing (the
 deformation, smag2d_km and the u, v, w and theta rows of the time-t
@@ -61,6 +62,7 @@ from .diffusion import (DF_PASSIVE, DF_STATE, H2_PASSIVE, DFGeometry, H2Geometry
                         HDGeometry, KCGeometry, KMGeometry, df_ad, df_tl, h2_active,
                         h2_ad, h2_passive, h2_tl, hd_ad, hd_tl, k2_ad, k2_tl, k3_ad,
                         k3_tl, km_ad, km_tl, n2_ad, n2_tl)
+from .pdadv import PDGeometry, pd_ad, pd_tl
 from .scalar import (SUMFLUX, ScalarGeometry, SumfluxGeometry, su_ad, su_tl,
                      sumflux_accumulate_ad, sumflux_accumulate_tl,
                      sumflux_finish_ad, sumflux_finish_tl, sumflux_zero_ad,
@@ -322,12 +324,18 @@ def _refuse(cfg, state) -> None:
 
 def _refuse_moist(cfg, state) -> dict:
     """What the moist binding does not cover: it takes qv, qc and qr
-    (moist.SPECIES) through the non-positive-definite update, with
-    calc_cq's n_mass 1 and the buoyancy's moist_mode 1 (mp_physics 0)."""
+    (moist.SPECIES) through the scalar update (moist_adv_opt 0, or 1's
+    positive-definite final stage), with calc_cq's n_mass 1 and the
+    buoyancy's moist_mode 1 (mp_physics 0)."""
+    from woof.core.advection import vertical_orders
     from woof.core.moist import extra_moist_species
     species = tuple(getattr(state, "_scheme_base_fields", SPECIES))
+    pd = int(cfg.moist_adv_opt) == 1
     return {
-        "moist_adv_opt (the positive-definite final stage)": int(cfg.moist_adv_opt) != 0,
+        "moist_adv_opt other than 0 and 1": int(cfg.moist_adv_opt) not in (0, 1),
+        # woof's strict PD stage at order 5 runs the HRRR fork's vertical
+        # arm (pd_vertical_sl.cu), not WRF 4.7.1's flux_upwind one
+        "moist_adv_opt 1 with v_sca_adv_order 5": pd and vertical_orders(cfg)[0] == 5,
         "moist species other than qv, qc and qr": bool(
             species != SPECIES or extra_moist_species(state)
             or getattr(state, "_registered_mass_slots", ())
@@ -583,15 +591,23 @@ def step_geometry(state, cfg, *, reuse_first: bool | None = None,
             # advance_scalars_stage's dt_eff = nsub*dtau, DTYPE-rounded by
             # the update; the advection's scalars are flux_div_scalar's
             sdt = float(f32(nsub * dtau_stage))
+            # advance_scalars_stage's pd: the final stage, not open
+            pd = (istage == len(D._rk_acoustic_stages(cfg)) - 1
+                  and int(cfg.moist_adv_opt) == 1 and not (cfg.open_x or cfg.open_y))
+
+            def species_geometry(n):
+                held = int((n == "qv" and qvt) or mixq)
+                if pd:
+                    return PDGeometry(nz, ny, nx, dx, dy, sdt, vorder=vsca, horder=hsca,
+                                      spec=int(spec), spec_zone=szone, has_msf=msf,
+                                      held=held)
+                return ScalarGeometry(nz, ny, nx, rdx, rdy, sdt, vorder=vsca, horder=hsca,
+                                      open_x=bx, open_y=by, spec=int(spec),
+                                      spec_zone=szone, has_msf=msf, held=held)
             moist_parts = dict(
                 cq=CQGeometry(nz, ny, nx, n_mass=1),
                 sf=SumfluxGeometry(nz, ny, nx, int(nsub)),
-                su=tuple((n, ScalarGeometry(nz, ny, nx, rdx, rdy, sdt, vorder=vsca,
-                                            horder=hsca, open_x=bx, open_y=by,
-                                            spec=int(spec), spec_zone=szone,
-                                            has_msf=msf,
-                                            held=int((n == "qv" and qvt) or mixq)))
-                         for n in SPECIES),
+                su=tuple((n, species_geometry(n)) for n in SPECIES),
                 qv_capture=lb["qv_capture"] if (qvt and istage == 0) else None,
                 flow=FlowGeometry(nz, ny, nx, spec_zone=szone) if spec else None,
                 mix_q=tuple((r, HDGeometry(nz, ny, nx, rdx, rdy, row=r[1], boundary_x=bx,
@@ -1131,7 +1147,8 @@ def _su_view(d, name, spec):
         out["held"] = d["lbc_qv_held"]
     elif spec.q_mix:
         out["held"] = d[_q_slot(name)]
-    for n in SUMFLUX + ("mup0", "mup", "mub2d", "c1h", "c2h", "msft", "rdnw", "fnm", "fnp"):
+    for n in SUMFLUX + ("mup0", "mup", "mub2d", "c1h", "c2h", "msft", "rdnw", "fnm", "fnp",
+                        "muts"):
         out[n] = d[n]
     return out
 
@@ -1162,9 +1179,9 @@ def _scalars_tl(x, dx, spec, snap, tl=True):
         lbc_tl(st(x), st(dx), traj, act(dx), spec.qv_capture, nl=True)
     for name, g in spec.su:
         snap((name, "moist_tend"))
-        su_tl(_su_view(x, name, spec), _su_view(dx, name, spec), _su_view(x, name, spec),
-              _su_view(dx, name, spec),
-              g, nl=True)
+        (pd_tl if isinstance(g, PDGeometry) else su_tl)(
+            _su_view(x, name, spec), _su_view(dx, name, spec), _su_view(x, name, spec),
+            _su_view(dx, name, spec), g, nl=True)
     if spec.flow is not None:
         for name in _FLOW_SPECIES:
             snap((name,))
@@ -1179,7 +1196,8 @@ def _scalars_ad(ax, back, spec):
             flow_ad({"q": ax[name]}, _flow_traj(base), {}, spec.flow)
     for name, g in reversed(spec.su):
         base = back()
-        su_ad(_su_view(ax, name, spec), _su_view(base, name, spec), _su_view(ax, name, spec), g)
+        (pd_ad if isinstance(g, PDGeometry) else su_ad)(
+            _su_view(ax, name, spec), _su_view(base, name, spec), _su_view(ax, name, spec), g)
     if spec.qv_capture is not None:
         base = back()
         st, traj, act = _lb_views(base, None, "qv")

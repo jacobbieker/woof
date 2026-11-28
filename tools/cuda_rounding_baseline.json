@@ -185,6 +185,14 @@
     "call_sha256": "08b412438fea2e6dba53d679fc2ae725f2afef478998519b9395664a71b27959",
     "constructor": "RawModule",
     "factory": "_device_module",
+    "factory_sha256": "e89fb8bef62b8315dcca13a353bd3fe2bffcf44e13f62ff869bde4765a4cb533",
+    "file": "woof/grad/wrfplus/pdadv.py",
+    "status": "unresolved"
+   },
+   {
+    "call_sha256": "08b412438fea2e6dba53d679fc2ae725f2afef478998519b9395664a71b27959",
+    "constructor": "RawModule",
+    "factory": "_device_module",
     "factory_sha256": "f389f321dcc36680926bb13567f1aa3426f823a598ced0ee3e319650c1ce97f7",
     "file": "woof/grad/wrfplus/stage.py",
     "status": "unresolved"
@@ -5196,6 +5204,10 @@
     "sha256": "c9e135b125dc919dd220fe18ea83ff6fb32f3fc4d939438f83ffb41831b25cc3"
    },
    {
+    "file": "woof/grad/wrfplus/kernels/pdadv.cu",
+    "sha256": "0aaf4277c86e5b35a8ad22d609dc545899f52113166d0fbf8dcbc62ffd1016d6"
+   },
+   {
     "file": "woof/grad/wrfplus/kernels/rk_stage.cu",
     "sha256": "788f6c578355ed90eb93b46da9e13e127ab48543769ea1927ed05c23a23e886c"
    },
@@ -6147,7 +6159,7 @@
    },
    {
     "file": "woof/grad/wrfplus/advect.py",
-    "sha256": "b5df5938c4f0e7db139343ddd11961c2883cfe91381b32e48e3d9cc7889dde37"
+    "sha256": "c4b71f4b2ccc77ae7ed9563d7ad19bd13e946656870dc974bea0209353c3ce63"
    },
    {
     "file": "woof/grad/wrfplus/bigstep.py",
@@ -6156,6 +6168,10 @@
    {
     "file": "woof/grad/wrfplus/lbc.py",
     "sha256": "239c5029b70cc14982970d9004e41f0b1facffdd4ffce97ca0c2d649681c0b08"
+   },
+   {
+    "file": "woof/grad/wrfplus/pdadv.py",
+    "sha256": "323697ad06f58d9f0303091260d2db5f878cf1f5e2d1a39d067acf58a76dfc6d"
    },
    {
     "file": "woof/grad/wrfplus/stage.py",
