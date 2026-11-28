@@ -521,8 +521,10 @@ def test_two_outer_loops_on_the_tutorial_with_a_persistence_model():
 
 def test_l1_two_outer_loops_against_wrfda(tmp_path):
     """The 4D.4 L1 gate (plan section 4): ``analyse(var4d=..., max_ext_its=N)``
-    against WRFDA 4.7.1 + WRFPLUS 4.7.1 on lane L1 (adiabatic, ``diff_opt 0``,
-    ``damp_opt 0``, ``emdiv 0``, ``moist_adv_opt 0``; ``var4d_lbc`` off).
+    against WRFDA 4.7.1 + WRFPLUS 4.7.1 on lane L1 (adiabatic, ``diff_opt 0``, WRF's
+    default dynamics ``damp_opt 3``, ``emdiv 0.01``, ``moist_adv_opt 1``, ``mp_zero_out 0``;
+    ``var4d_lbc`` off).  The 4D.4 lane (``L1_NARROW=1``: ``damp_opt``, ``emdiv`` and
+    ``moist_adv_opt`` 0) passes the same tolerances.
 
     ``WOOF_WRFDA471_4DVAR_L1_DIR`` is ``tools/wrfda_oracle/run_4dvar.sh l1``'s run
     directory with ``MAX_EXT_ITS`` 1 or 2 (``namelist.input``, ``fg``,

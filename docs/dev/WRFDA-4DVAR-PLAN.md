@@ -12,8 +12,9 @@ correlate to 0.9995 (docs/var.md). It needed WRFDA's boundary-table
 perturbation (`WindowModel(lbc="wrfda")`, var4d_lbc off) and the loop's
 table update. The QC carry is measured at no effect on L1 and is not
 ported. `var_scaling(it)` defaults to 1, which is the identity. L1 is
-narrowed to `damp_opt 0`, `emdiv 0` and `moist_adv_opt 0` until P3a
-covers them. It is not word for word, because WRFPLUS's trajectory cannot
+then narrowed to `damp_opt 0`, `emdiv 0` and `moist_adv_opt 0`. Since
+P3a covers them (#884-#889), lane L1 runs WRF's default dynamics (2026-11-28;
+docs/var.md). It is not word for word, because WRFPLUS's trajectory cannot
 be read out of this build. Not done: the checkpoint policy and its G3
 receipt, and 4D.5 (L0, after P3a item 6).
 It is the
@@ -254,7 +255,7 @@ It does not depend on how closely woof's forecast reproduces WRF.
    P3a items 1-4 land.
 5. **4D.4**: outer loops (NL rerun from the updated analysis), `woof var
    --4dvar`, docs/var.md, README. Gate: L1 with `max_ext_its = 2`.
-6. **4D.5**: L0, once P3a items 5-6 land.
+6. **4D.5**: L0, once P3a items 5-6 land. Blocked on item 6 (below).
 
 **Refused throughout:**
 
@@ -265,3 +266,70 @@ It does not depend on how closely woof's forecast reproduces WRF.
   by the time step.
 
 The bin rules are WRFDA's own errors, refused with the same remedy.
+
+## 4D.5 (L0): what is missing (2026-11-28)
+
+Lane L0 is the tutorial as shipped (`run/l0`: 35 iterations, `J`
+57252.461 to 35871.246). It runs the NL model with full physics
+(`mp_physics 3`, `cu_physics 1`, `bl_pbl_physics 1`, `sf_sfclay_physics 1`,
+`sf_surface_physics 1`, `ra_lw/sw_physics 1`, `mp_zero_out 2`; namelist.output).
+`da_tl_model.inc:115-129` (WRFDA 4.7.1) switches the TL and AD models to
+WRFPLUS's simplified physics:
+
+- `mp_physics_ad = 99`;
+- `bl_pbl_physics = 98` and `cu_physics = 98` (with `cudt = 0`);
+- radiation and the surface layer off;
+- `ifsnow = 1`, `icloud = 0`.
+
+The dynamics (`diff_opt 1`/`km_opt 4`, `damp_opt 3`, `emdiv 0.01`,
+`moist_adv_opt 1`) are covered. L0 does not need the importer requests
+(`diff_opt 0`, a qv-only state), since it runs `diff_opt 1` and
+`mp_physics 3`.
+
+What the window does not have, and what lane L0 needs, by WRFPLUS 4.7.1 file
+(`wrftladj/`):
+
+1. **`mp_physics 99`, WRFPLUS's modified Kessler** (`mkesslerscheme`,
+   `frame/module_state_description.F:351`). This also needs `g_qc`/`g_qr`
+   TL state (`registry.var:639`, package `mkessler_4dvar`).
+   - TL: `module_mp_mkessler_tl.F:9` `G_MKESSLER`, with `RFALL_D`:152,
+     `AUTOCA_D`:234 and `SATADJ_D`:306.
+   - AD: `module_mp_mkessler_ad.F:14` `A_MKESSLER`.
+   - Driver: `module_microphysics_driver_tl.F` (the scheme select near
+     :468) and its `_ad`.
+   - Called from `solve_em_tl.F:3540` (`g_microphysics_driver`), between
+     `g_moist_physics_prep_em` (:3482) and `g_moist_physics_finish_em`
+     (:3733). `solve_em_ad.F` makes the matching calls at :3818, :3758 and
+     :4104.
+2. **`bl_pbl_physics 98`, surface drag** (`surfdragscheme`, :352).
+   - TL: `module_bl_surface_drag_tl.F:12` `G_SURFACE_DRAG`.
+   - AD: `module_bl_surface_drag_ad.F:11` `SURFACE_DRAG_B`.
+   - Called through `module_pbl_driver_tl.F:707` from
+     `module_first_rk_step_part1_tl.F:251`. The tendency is coupled by
+     `module_physics_addtendc_tl.F:216` `g_phy_bl_ten` (case at :724).
+3. **`cu_physics 98`, WRFPLUS's simplified cumulus** (`ducuscheme`, :353).
+   - TL: `module_cu_du_tl.F:19` `DUCU_D`, with `DUCU1D_D`:178.
+   - AD: `module_cu_du_ad.F:19` `DUCU_B`.
+   - Called through `module_cumulus_driver_tl.F:429-451` from
+     `module_first_rk_step_part1_tl.F:375`. The tendency is coupled by
+     `module_physics_addtendc_tl.F:842` `g_phy_cu_ten` (case at :1180).
+4. **Physics prep and the tendency update**, which all three share:
+   - `g_phy_prep` (`module_first_rk_step_part1_tl.F:217`);
+   - `g_phy_prep_part2` (`solve_em_tl.F:3420`);
+   - `g_update_phy_ten` (`module_first_rk_step_part2_tl.F:598`, defined at
+     `module_physics_addtendc_tl.F:28`).
+5. **`mp_zero_out 2` in the TL**: `g_microphysics_zero_outb`/`outa`
+   (`solve_em_tl.F:3658-3724`). The window has no zero-out. L1 runs
+   `mp_zero_out 0`.
+6. **The nonlinear trajectory with full physics.** WRFPLUS linearises
+   about WRF's full-physics run. In woof that is a physics forecast handed
+   to `Window.forward(trajectory=)`, which needs its states on the TL
+   window's physics configuration. `model.py` `_refuse` refuses
+   `microphysics` and `physics` today.
+
+Items 1-5 are P3a item 6 (section 3), a P3b-sized port. The three
+schemes' TL and AD files alone are 2.9 k lines (`module_mp_mkessler`,
+`module_bl_surface_drag` and `module_cu_du`, `_tl` and `_ad`). The
+drivers, the tendency coupling and woof's kernels come on top. It was not
+started, pending coordinator sign-off.
+
