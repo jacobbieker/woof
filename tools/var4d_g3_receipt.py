@@ -126,7 +126,7 @@ def window_rows(cfg, make, nsteps, sps, dtypes, repeats, metal):
             if r:
                 for k, v in row.items():
                     times[k].append(v)
-            del st
+            st = None   # release the state (not `del`: the closures above read it)
         med = {k: statistics.median(v) for k, v in times.items()}
         fwd, prim = med["forward_all"], med["primal32"]
         out[dtn] = {
@@ -136,7 +136,7 @@ def window_rows(cfg, make, nsteps, sps, dtypes, repeats, metal):
             "memory": {"state_bytes": state_bytes, "all_stored": nsteps * state_bytes,
                        "slot_stored_peak": (len(slots) - 1 + sps - 1) * state_bytes},
         }
-        del w
+        w = None   # release the window (not `del`: the lambdas above read it)
         if not metal:
             cp.get_default_memory_pool().free_all_blocks()
     return out
