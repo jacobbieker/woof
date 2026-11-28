@@ -6,8 +6,9 @@ template<int GLA, int ALB, bool LOCAL = false>
 __device__ void ng_glacier_column(
     const float *__restrict__ in, const int *__restrict__ ii,
     const float *__restrict__ zsoil_row, float dt,
-    float *__restrict__ out, int *__restrict__ io, int n, int opt_stc=1, int opt_tbot=2, const float *snow=nullptr, const float *solar=nullptr, float *grains=nullptr,
-    const float *sfcheadrt=nullptr)
+    float *__restrict__ out, int *__restrict__ io, int n, int opt_stc=1, int opt_tbot=2,
+    const float *snow=nullptr, const float *solar=nullptr, float *grains=nullptr,
+    int opt_tksno=1, const float *sfcheadrt=nullptr)
 {
     int tid = LOCAL ? 0 : blockIdx.x * blockDim.x + threadIdx.x;
     if (tid >= n) return;
@@ -86,7 +87,11 @@ __device__ void ng_glacier_column(
                                MU(NMP_CWAT, snliqv[SN(iz)]));
         }
         for (int iz = isnow + 1; iz <= 0; ++iz)                    // :653-659
-            df[GS(iz)] = MU(3.2217e-6f, r_pow(bdsnoi[SN(iz)], 2.0f));
+            // opt_tksno 2-5: noahmp_tksno_options.cuh, re-implemented from
+            // published descriptions, not bitwise to upstream.
+            df[GS(iz)] = (opt_tksno == 1)
+                ? MU(3.2217e-6f, r_pow(bdsnoi[SN(iz)], 2.0f))
+                : noahmp_tksno_selected(opt_tksno, bdsnoi[SN(iz)]);
 
         for (int iz = 1; iz <= NMP_NSOIL; ++iz) {                  // :580-587
             float zmid = MU(0.5f, dzsnso[GS(iz)]);
@@ -1670,7 +1675,7 @@ float* qfrzcxy,
 float* qmeltcxy,
 float* rainlsm,
 float* snowlsm,
-int has_output,const float* snow_optics,const float* solar,float* grains,int* errors,
+int has_output,const float* snow_optics,const float* solar,float* grains,int* errors,int tksno_option,
 // WRF built with -DWRF_HYDRO (module_sf_noahmpdrv.F, 4.7.1 e5c0859, :1210-1217): the ponded
 // head in, and the exchange planes out.  All four are null without it.
 const float* sfcheadrt,float* infxsrt,float* hydro_soldrain,float* qtiledrain){
@@ -1680,13 +1685,13 @@ const float* sfcheadrt,float* infxsrt,float* hydro_soldrain,float* qtiledrain){
  const float* h=sfcheadrt?sfcheadrt+c:nullptr;
  ng_glacier_driver_pack(temperature,p_interface,u,v,qv,dz,cosz,swdown,rainbl,glw,tmn,qsnowxy,sneqvoxy,alboldxy,cmxy,chxy,snow,snowh,tgxy,taussxy,qsfc,snicexy,snliqxy,smois,sh2o,zsnsoxy,tsnoxy,tslb,isnowxy,active,dt,n,packed,c);
  if(gla==2){
-  if(alb==3)ng_glacier_column<2,3,true>(packed,isnowxy+c,zsoil,dt,out,io,1,stc_option,tbot_option,snow_optics+(size_t)c*6,solar+(size_t)c*7,grains+(size_t)c*21,h);
-  else if(alb==1)ng_glacier_column<2,1,true>(packed,isnowxy+c,zsoil,dt,out,io,1,stc_option,tbot_option,nullptr,nullptr,nullptr,h);
-  else ng_glacier_column<2,2,true>(packed,isnowxy+c,zsoil,dt,out,io,1,stc_option,tbot_option,nullptr,nullptr,nullptr,h);
+  if(alb==3)ng_glacier_column<2,3,true>(packed,isnowxy+c,zsoil,dt,out,io,1,stc_option,tbot_option,snow_optics+(size_t)c*6,solar+(size_t)c*7,grains+(size_t)c*21,tksno_option,h);
+  else if(alb==1)ng_glacier_column<2,1,true>(packed,isnowxy+c,zsoil,dt,out,io,1,stc_option,tbot_option,nullptr,nullptr,nullptr,tksno_option,h);
+  else ng_glacier_column<2,2,true>(packed,isnowxy+c,zsoil,dt,out,io,1,stc_option,tbot_option,nullptr,nullptr,nullptr,tksno_option,h);
  }else{
-  if(alb==3)ng_glacier_column<1,3,true>(packed,isnowxy+c,zsoil,dt,out,io,1,stc_option,tbot_option,snow_optics+(size_t)c*6,solar+(size_t)c*7,grains+(size_t)c*21,h);
-  else if(alb==1)ng_glacier_column<1,1,true>(packed,isnowxy+c,zsoil,dt,out,io,1,stc_option,tbot_option,nullptr,nullptr,nullptr,h);
-  else ng_glacier_column<1,2,true>(packed,isnowxy+c,zsoil,dt,out,io,1,stc_option,tbot_option,nullptr,nullptr,nullptr,h);
+  if(alb==3)ng_glacier_column<1,3,true>(packed,isnowxy+c,zsoil,dt,out,io,1,stc_option,tbot_option,snow_optics+(size_t)c*6,solar+(size_t)c*7,grains+(size_t)c*21,tksno_option,h);
+  else if(alb==1)ng_glacier_column<1,1,true>(packed,isnowxy+c,zsoil,dt,out,io,1,stc_option,tbot_option,nullptr,nullptr,nullptr,tksno_option,h);
+  else ng_glacier_column<1,2,true>(packed,isnowxy+c,zsoil,dt,out,io,1,stc_option,tbot_option,nullptr,nullptr,nullptr,tksno_option,h);
  }
  ng_glacier_driver_write(out,io,active,rainbl,dt,n,has_drain,isnowxy,
 tsk,hfx,grdflx,snow,snowh,emiss,qsfc,tgxy,cmxy,chxy,sneqvoxy,alboldxy,qsnowxy,taussxy,t2mbxy,tradxy,edirxy,fsaxy,firaxy,chbxy,fpicexy,qsnbotxy,qmeltxy,eflxbxy,qfx,lh,smstav,smstot,canwat,canliqxy,canicexy,fvegxy,ecanxy,etranxy,rs,canhsxy,tvxy,eahxy,tahxy,fwetxy,wslakexy,waxy,lai,xsaixy,t2mvxy,rssunxy,rsshaxy,chvxy,sfcrunoff,udrunoff,albedo,snowc,smois,sh2o,tslb,tsnoxy,zsnsoxy,snicexy,snliqxy,acsnow,acsnom,pondingxy,z0,znt,q2mvxy,q2mbxy,runsfxy,runsbxy,soldrain,soilenergy,snowenergy,c);
@@ -1752,10 +1757,10 @@ extern "C" __global__ void noahmp_glacier_column_hydro(
  int c=blockIdx.x*blockDim.x+threadIdx.x;if(c>=n)return;
  const float* h=sfcheadrt+c;
  if(gla==2){
-  if(alb==1)ng_glacier_column<2,1,true>(in+(size_t)c*NG_NIN,ii+c,zsoil,dt,out+(size_t)c*NG_NOUT,io+2*c,1,stc,tbot,nullptr,nullptr,nullptr,h);
-  else ng_glacier_column<2,2,true>(in+(size_t)c*NG_NIN,ii+c,zsoil,dt,out+(size_t)c*NG_NOUT,io+2*c,1,stc,tbot,nullptr,nullptr,nullptr,h);
+  if(alb==1)ng_glacier_column<2,1,true>(in+(size_t)c*NG_NIN,ii+c,zsoil,dt,out+(size_t)c*NG_NOUT,io+2*c,1,stc,tbot,nullptr,nullptr,nullptr,1,h);
+  else ng_glacier_column<2,2,true>(in+(size_t)c*NG_NIN,ii+c,zsoil,dt,out+(size_t)c*NG_NOUT,io+2*c,1,stc,tbot,nullptr,nullptr,nullptr,1,h);
  }else{
-  if(alb==1)ng_glacier_column<1,1,true>(in+(size_t)c*NG_NIN,ii+c,zsoil,dt,out+(size_t)c*NG_NOUT,io+2*c,1,stc,tbot,nullptr,nullptr,nullptr,h);
-  else ng_glacier_column<1,2,true>(in+(size_t)c*NG_NIN,ii+c,zsoil,dt,out+(size_t)c*NG_NOUT,io+2*c,1,stc,tbot,nullptr,nullptr,nullptr,h);
+  if(alb==1)ng_glacier_column<1,1,true>(in+(size_t)c*NG_NIN,ii+c,zsoil,dt,out+(size_t)c*NG_NOUT,io+2*c,1,stc,tbot,nullptr,nullptr,nullptr,1,h);
+  else ng_glacier_column<1,2,true>(in+(size_t)c*NG_NIN,ii+c,zsoil,dt,out+(size_t)c*NG_NOUT,io+2*c,1,stc,tbot,nullptr,nullptr,nullptr,1,h);
  }
 }

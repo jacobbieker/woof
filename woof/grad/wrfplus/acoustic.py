@@ -19,6 +19,7 @@ import numpy as np
 from ._mode import tl_options
 
 KERNELS = Path(__file__).resolve().parent / "kernels"
+TRIG = Path(__file__).resolve().parents[2] / "core" / "kernels" / "glibc_trig_flt32.cuh"
 THREADS = 256
 #: Levels per thread in the adjoint's face pass: dpn is shared within a
 #: chunk; more chunks give more threads.
@@ -83,14 +84,42 @@ def _module(unit: str, real: str, defines: tuple = ()):
     return _device_module(unit, real, cp.cuda.Device().id, defines, tl_options())
 
 
+#: The units that take woof/core/kernels headers ahead of their own source
+#: (there is no #include under cupy.RawModule): the diffusion unit's float
+#: build evaluates REAL**REAL with the primal's libm words, gfk_pow, as
+#: kernels/__init__.py composes the smag2d module.  A literal, closed
+#: table; every other unit compiles its own source alone, except that
+#: :func:`_device_module` prepends :data:`TRIG` to advance_w's float build.
+_UNIT_HEADERS = {"diffusion": ("glibc_flt32.cuh",)}
+
+
+def unit_source(unit: str) -> str:
+    """The source a unit compiles: its headers (:data:`_UNIT_HEADERS`),
+    then ``kernels/<unit>.cu``."""
+    from woof.core.kernels import _KDIR
+    head = "".join((_KDIR / h).read_text(encoding="utf-8")
+                   for h in _UNIT_HEADERS.get(unit, ()))
+    return head + (KERNELS / f"{unit}.cu").read_text(encoding="utf-8")
+
+
 @lru_cache(maxsize=None)
 def _device_module(unit: str, real: str, device: int, defines: tuple = (),
                    build: tuple = ()):
     import cupy as cp
-    source = (KERNELS / f"{unit}.cu").read_text(encoding="utf-8")
-    return cp.RawModule(code=source,
-                        options=("--fmad=false", f"-DWRFPLUS_REAL={real}")
-                        + tuple(f"-D{k}={v}" for k, v in defines) + build)
+    from woof.certify.kernel_manifest import record_module
+    source = unit_source(unit)
+    if unit == "advance_w" and real == "float":
+        # The strict damper's binary32 sinf (MIT-licensed Arm
+        # optimized-routines transcription), so the float base state
+        # gives the primal's words.
+        source = (TRIG.read_text(encoding="utf-8")
+                  + "\n#define WRFPLUS_FLOAT_TRIG 1\n" + source)
+    options = (("--fmad=false", f"-DWRFPLUS_REAL={real}")
+               + tuple(f"-D{k}={v}" for k, v in defines) + build)
+    module = cp.RawModule(code=source, options=options)
+    record_module("woof.grad.wrfplus.acoustic:" + unit, source=source,
+                  options=options, module=module)
+    return module
 
 
 def _kernel(unit: str, name: str, dtype, defines: tuple = ()):
@@ -210,13 +239,14 @@ def uv_shapes(geom: UVGeometry) -> dict[str, tuple[int, ...]]:
 W_TRAJECTORY = ("rw_t", "rph_t", "ww_pp", "mu_pp", "mu_pp_old", "th_pp",
                 "th_pp_old", "thp", "php", "phb", "alt", "c2a", "a", "alpha",
                 "gam", "mup", "u_pp", "v_pp", "ht", "rdn", "rdnw", "fnm",
-                "fnp", "c1h", "c2h", "c1f", "c2f", "mub2d", "cqw", "msft")
+                "fnp", "c1h", "c2h", "c1f", "c2f", "mub2d", "cqw", "msft", "w")
 
 #: The perturbed inputs of advance_w besides the state (w_pp, ph_pp,
-#: p_pp, al_pp), in kernel order.
+#: p_pp, al_pp), in kernel order.  ``w`` is the damper's reference (WRF
+#: w_save, the strict primal's state.w), read only when dampmag > 0.
 W_ACTIVE = ("rw_t", "rph_t", "ww_pp", "mu_pp", "mu_pp_old", "th_pp",
             "th_pp_old", "thp", "php", "alt", "c2a", "a", "alpha", "gam",
-            "mup", "u_pp", "v_pp", "cqw")
+            "mup", "u_pp", "v_pp", "cqw", "w")
 
 #: advance_w's in/out state.  p_pp and al_pp are outputs on the solved
 #: columns and pass through on the frame, as in the primal.
@@ -225,11 +255,13 @@ W_STATE = ("w_pp", "ph_pp", "p_pp", "al_pp")
 
 @dataclass(frozen=True)
 class WGeometry:
-    """advance_w_phi's scalars (no damper: WRFPLUS has damp_opt 0 only;
-    ``dampmag`` other than 0 is refused).  ``has_msf`` selects
+    """advance_w_phi's scalars.  ``has_msf`` selects
     advance_w_phi_msf's map factors (WRF advance_w's msfty, with msftx =
     msfty = msft); without it ``msft`` is not read, but the trajectory
-    must still carry an (ny, nx) array."""
+    must still carry an (ny, nx) array.  ``dampmag`` > 0 is damp_opt 3's
+    implicit w damper (woof.core.acoustic.damp_magnitude, dtau*dampcoef
+    in float32) over the ``zdamp`` metres below the column top; with 0
+    the trajectory's ``w`` is not read."""
     nz: int
     ny: int
     nx: int
@@ -248,6 +280,7 @@ class WGeometry:
     boundary_y: int = 0
     dampmag: float = 0.0
     has_msf: int = 0
+    zdamp: float = 5000.0
 
     def args(self, dtype) -> tuple:
         i, r = np.int32, np.dtype(dtype).type
@@ -255,13 +288,15 @@ class WGeometry:
                 i(self.base3d), i(self.top_lid), i(self.moist_cq),
                 i(self.boundary_x), i(self.boundary_y), r(self.cf1),
                 r(self.cf2), r(self.cf3), r(self.rdx), r(self.rdy),
-                r(self.dtau), r(self.epssm), i(self.has_msf))
+                r(self.dtau), r(self.epssm), i(self.has_msf),
+                r(self.dampmag), r(self.zdamp))
 
 
 def _w_defines(geom: WGeometry) -> tuple:
-    if geom.dampmag != 0.0:
-        raise NotImplementedError("advance_w TL/AD: the damp_opt=3 w damper "
-                                  "is not linearised (WRFPLUS has none)")
+    if geom.dampmag < 0.0 or (geom.dampmag > 0.0 and not geom.zdamp > 0.0):
+        raise ValueError(f"advance_w: dampmag {geom.dampmag} with zdamp "
+                         f"{geom.zdamp} (the damper needs dampmag >= 0, "
+                         "and zdamp > 0 when it acts)")
     return (("WV_LEV", geom.nz + 1),)
 
 
@@ -331,7 +366,7 @@ def w_shapes(geom: WGeometry) -> dict[str, tuple[int, ...]]:
         "mup": col, "u_pp": (nz, ny, nx + 1), "v_pp": (nz, ny + 1, nx),
         "ht": col, "rdn": (nz,), "rdnw": (nz,), "fnm": (nz + 1,),
         "fnp": (nz + 1,), "c1h": (nz,), "c2h": (nz,), "c1f": (nz + 1,),
-        "c2f": (nz + 1,), "mub2d": col, "cqw": wlev, "msft": col,
+        "c2f": (nz + 1,), "mub2d": col, "cqw": wlev, "msft": col, "w": wlev,
     }
 
 

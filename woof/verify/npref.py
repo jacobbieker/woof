@@ -5409,8 +5409,13 @@ def _noah_sstep(sh2oin, cmc, rhstt, rhsct, dt, nsoil, smcmax, cmcmax,
             wplus = (stot - smcmax) * ddz
         else:
             wplus = 0.0
-        if stot < 0.02 or (min(stot, smcmax) - sice[k]) < 0.0:
-            flags["clamped"] = True      # the 0.02/0.0 floors create water
+        booked_floor = bool(flags.get("smc_floor_booking"))
+        if (stot < 0.02 and not booked_floor) or (max(min(stot, smcmax), 0.02) - sice[k]) < 0.0:
+            flags["clamped"] = True      # the 0.02/0.0 floors create water (booked: only the 0.0 one)
+        if flags.get("smc_floor_booking") and stot < 0.02:
+            # opt-in noah_smc_floor_booking: the layer below (or RUNOFF3)
+            # pays for the water the 0.02 floor adds
+            wplus = (stot - 0.02) * ddz
         smc[k] = max(min(stot, smcmax), 0.02)
         sh2oout[k] = max(smc[k] - sice[k], 0.0)
     runoff3 = wplus
@@ -5934,7 +5939,7 @@ def _noah_snopac(etp, prcp, prcpf, snowng, smc, smcmax, smcwlt, smcref,
 def _noah_glacial(ffrozp, dt, nsoil, sldpth, lwdn, solnet, sfcprs, prcp,
                   sfctmp, q2, th2, q2sat, dqsdt2, alb, snoalb, tbot, z0brd,
                   emissi, embrd, t1, stc, snowh, sneqv, sncovr, ch,
-                  snotime1, ribb, lvcoef):
+                  snotime1, ribb, lvcoef, rain_runoff=False):
     """SFLX_GLACIAL (WRF v4.6.1 phys/module_sf_noahlsm_glacial_only.F) in
     float64: the land-ice column the driver's ICE == -1 arm calls.  Mutates
     ``stc``; returns a dict of what the driver consumes.  kernels/noah.cu's
@@ -5967,7 +5972,7 @@ def _noah_glacial(ffrozp, dt, nsoil, sldpth, lwdn, solnet, sfcprs, prcp,
         sncond = _noah_csnow(sndens)
     else:
         prcpf = prcp
-    del prcpf  # SNOPAC's PRCP1 is computed and never read
+    # SNOPAC's PRCP1 = PRCPF*0.001 is computed and never read (:912)
     sncovr = 1.0
     albedo, emissi, snotime1 = _noah_alcalc(alb, snoalb, embrd, 1.0, dt,
                                             snowng, snotime1, lvcoef)
@@ -6097,12 +6102,17 @@ def _noah_glacial(ffrozp, dt, nsoil, sldpth, lwdn, solnet, sfcprs, prcp,
     esnow = esnow * _NLSUBS
     etp = etp * _NLSUBS
     eta = esnow if etp > 0.0 else etp
+    runoff1 = snomlt / dt
+    if rain_runoff:
+        # RunConfig.noah_land_ice_rain_runoff (FQ8): the liquid precipitation
+        # WRF discards (:286-288, :912) leaves as surface runoff
+        runoff1 = runoff1 + prcpf * 0.001
     return dict(t1=t1, sneqv=sneqv, snowh=snowh, sncovr=sncovr,
                 albedo=albedo, emissi=emissi, z0=z0, snotime1=snotime1,
                 eta=eta, sheat=sheat, eta_kinematic=eta_kinematic,
                 fdown=fdown, esnow=esnow, dew=dew, etp=etp,
                 ssoil=-1.0 * ssoil, flx1=flx1, flx2=flx2, flx3=flx3,
-                snomlt=snomlt, runoff1=snomlt / dt, q1=q1)
+                snomlt=snomlt, runoff1=runoff1, q1=q1)
 
 
 def _noah_sflx(ffrozp, dt, nsoil, sldpth, lwdn, soldn, solnet, sfcprs,
@@ -6303,6 +6313,10 @@ def _noah_sflx(ffrozp, dt, nsoil, sldpth, lwdn, soldn, solnet, sfcprs,
         frcsoi = dsoil / dtot
         df1h = (sncond * df1) / (frcsoi * sncond + frcsno * df1)
         df1a = frcsno * sncond + frcsoi * df1
+        if flags.get("snow_series_conductivity"):
+            # RunConfig.noah_snow_series_conductivity (FQ9): the series
+            # DF1H WRF computes and never reads (:649) replaces DF1A (:656)
+            df1a = df1h
         df1 = df1a * sncovr + df1 * (1.0 - sncovr)
         ssoil = df1 * (t1 - stc[0]) / dtot
 
@@ -6473,7 +6487,9 @@ def _noah_sflx(ffrozp, dt, nsoil, sldpth, lwdn, soldn, solnet, sfcprs,
 
 def np_noah_column(col, params, dt, dzs, isurban=None, isice=None,
                    xice_threshold=0.5, frpcpn=False, usemonalb=False,
-                   rdlai2d=False, opt_thcnd=1, ua_phys=False):
+                   rdlai2d=False, opt_thcnd=1, ua_phys=False,
+                   smc_floor_booking=False, land_ice_rain_runoff=False,
+                   snow_series_conductivity=False):
     """Float64 mirror of one Noah column step: the WRF v4.6.1 driver
     ``lsm`` prep + ``SFLX`` + post-update, for a single (i, j).
 
@@ -6485,6 +6501,12 @@ def np_noah_column(col, params, dt, dzs, isurban=None, isice=None,
     2 SNOPAC melting unclipped, 3 SNOPAC clipped), ``reslin`` (the
     branch-exact discrete energy-identity residual, W/m^2),
     ``near_branch``/``clamped`` flags, and the WRF ``noahres``.
+    ``smc_floor_booking`` is RunConfig.noah_smc_floor_booking (default
+    off: WRF's word-exact floor).  ``land_ice_rain_runoff`` is
+    RunConfig.noah_land_ice_rain_runoff (default off: WRF drops the rain
+    that falls on land ice).  ``snow_series_conductivity`` is
+    RunConfig.noah_snow_series_conductivity (default off: WRF blends the
+    arithmetic DF1A, not its series DF1H, over snow).
     """
     if isurban is None or isice is None:
         # the dataset's own ISURBAN/ISICE, as launch_noah resolves them
@@ -6494,7 +6516,8 @@ def np_noah_column(col, params, dt, dzs, isurban=None, isice=None,
         isice = dataset_isice if isice is None else isice
     tresh, a2, a3, a4 = 0.95, 17.67, 273.15, 29.65
     a23m4 = a2 * (a3 - a4)
-    flags = dict(near_branch=False, clamped=False)
+    flags = dict(near_branch=False, clamped=False, smc_floor_booking=bool(smc_floor_booking),
+                 snow_series_conductivity=bool(snow_series_conductivity))
     out = {k: (np.array(v, np.float64) if k in ("smois", "tslb", "sh2o")
                else v) for k, v in col.items()}
     out.update(skip=0, ebal_case=-1, reslin=0.0, noahres=0.0,
@@ -6598,7 +6621,8 @@ def np_noah_column(col, params, dt, dzs, isurban=None, isice=None,
                           prcp, sfctmp, q2k, th2, q2sat, dqsdt2, albbrd,
                           snoalb1, tbot, z0brd, emissi, embrd, t1, stc,
                           snowhk, sneqv, sncovr, chk, snotime1, ribb,
-                          params.gen[GEN["lvcoef"]])
+                          params.gen[GEN["lvcoef"]],
+                          rain_runoff=bool(land_ice_rain_runoff))
         out["lai"] = 0.01
         out["canwat"] = cmc * 1000.0
         out["snow"] = g["sneqv"] * 1000.0

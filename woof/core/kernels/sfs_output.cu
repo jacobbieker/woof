@@ -67,8 +67,8 @@ void wrf_stress_output(const real* u,const real* v,const real* w,
         fnm,fnp,dn,dnw,rdx,rdy,dx,dy,cf1,cf2,cf3,nz,ny,nx,phb3d,
         boundary_x,boundary_y,moist);
     size_t at=I3S(k,j,i,ny,nx);
-    bool inner_x=!boundary_x || i>0;
-    bool inner_y=!boundary_y || j>0;
+    bool inner_x=!q.boundary_x || i>0;
+    bool inner_y=!q.boundary_y || j>0;
     if(vertical && k==0) {
         int ic=wrf_ix(q,i), im=wrf_ix(q,i-1);
         int jc=wrf_iy(q,j), jm=wrf_iy(q,j-1);

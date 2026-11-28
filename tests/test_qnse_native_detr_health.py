@@ -38,7 +38,7 @@ def test_gpu_native_detr_contract_and_first_failure():
                                   field_provider=lambda:[field])
     result=validator.validate(phase='native-detr-test')
     assert not result.ok and result.first_bad_flat_index==1
-    assert bool(cp.isposinf(values[0]))
+    assert np.isposinf(float(values[0]))
 
 
 @pytest.mark.parametrize('device',[False,pytest.param(True, marks=[requires_gpu, pytest.mark.gpu])])

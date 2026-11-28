@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from woof.hex import regional_door as door
+from woof.hex import mesh_point, regional_door as door
 from woof.hex.cli import build_parser
 from woof.hex.errors import MpasPortError
 
@@ -114,6 +114,10 @@ def test_mesh_grading_rides_to_the_mesh_door_only_when_given(tmp_path, monkeypat
     assert (parsed.transition_factor, parsed.ring_factor, parsed.cull_pad_scale) == (18.0, 1.0, 2.5)
     with pytest.raises(door.RegionalRefusal, match="--transition-factor 0.0 is not positive"):
         _gfs_region(tmp_path, "2026-10-27T18", 3, 12, "--transition-factor", "0")
+    # The door hands the grading on with --geometry 1, and the mesh door reads the same geometry from it.
+    assert parsed.geometry == 1 and mesh_point.request_from_arguments(parsed).ask is None
+    with pytest.raises(door.RegionalRefusal, match="geometry 2 lays no rings"):
+        _gfs_region(tmp_path, "2026-10-27T18", 3, 12, "--ring-factor", "1", "--geometry", "2")
     raster = tmp_path / "terrain.nc"
     raster.write_bytes(b"")  # the generator reads the file; the door only resolves and forwards it
     value, parsed = mesh_argv("--density-raster", str(raster))
@@ -184,8 +188,8 @@ def test_table_regions_take_the_finest_step_the_source_posts(tmp_path):
     and end boundaries."""
     assert _gfs_region(tmp_path, "2026-10-07T18", 0, 6)["boundary_interval_hours"] == 1
     assert _gfs_region(tmp_path, "2026-10-07T18", 0, 7)["boundary_interval_hours"] == 1
-    for source in ("ifs", "gefs"):
-        assert _gfs_region(tmp_path, "2026-10-07T18", 0, 6, source=source)["boundary_interval_hours"] == 3, source
+    for source, extra in (("ifs", ()), ("gefs", ("--member", "0"))):
+        assert _gfs_region(tmp_path, "2026-10-07T18", 0, 6, *extra, source=source)["boundary_interval_hours"] == 3, source
     # IFS 0.1 degree starts at its first preparable cycle (2026-10-20 12Z, fix/hex-ifs-0p1-first-cycle).
     assert _gfs_region(tmp_path, "2026-10-21T00", 0, 6, source="ifs-0p1")["boundary_interval_hours"] == 3
     # GFS past 120 h and IFS past 144 h (00/12 UTC) post more coarsely; a window across the change takes the
@@ -199,8 +203,11 @@ def test_boundary_interval_knob_picks_a_posted_coarser_step_or_is_refused_by_nam
         "boundary_interval_hours"] == 6
     assert _gfs_region(tmp_path, "2026-10-07T18", 3, 12, "--boundary-interval-hours", "3")[
         "boundary_interval_hours"] == 3
-    with pytest.raises(door.RegionalRefusal, match="--boundary-interval-hours 4"):
-        _gfs_region(tmp_path, "2026-10-07T18", 0, 6, "--boundary-interval-hours", "4")
+    # A step that does not divide the run reads the posted hour past its end (test_region_offstep_ends): 0, 4, 8.
+    four = _gfs_region(tmp_path, "2026-10-07T18", 0, 6, "--boundary-interval-hours", "4")
+    assert (four["boundary_interval_hours"], four["boundary_hours"]) == (4, 8)
+    with pytest.raises(door.RegionalRefusal, match="--boundary-interval-hours 2"):
+        _gfs_region(tmp_path, "2026-10-07T18", 120, 6, "--boundary-interval-hours", "2")
     with pytest.raises(door.RegionalRefusal, match="--boundary-interval-hours 1"):
         _gfs_region(tmp_path, "2026-10-07T18", 0, 6, "--boundary-interval-hours", "1", source="ifs")
     with pytest.raises(door.RegionalRefusal, match="would be ignored"):
@@ -214,6 +221,19 @@ def _hrrrv5_plan(tmp_path, source="gfs"):
         "regional", "--point", "45.75,-75.75", "--cycle", "2026-10-07T18", "--hours", "6",
         "--source", source, "--work-dir", str(tmp_path / "run"), "--forecast-arg=--physics-suite=hrrrv5"])
     return args, door.plan(args)
+
+
+def test_a_producer_suite_refuses_a_vertical_spec_it_would_ignore(tmp_path):
+    """hrrrv5 builds its start on its producer's L60 grid: a region given --vertical-spec ran on L60 and said nothing
+    (LEFT-BEHIND 13 Nov). It is now refused by name at the plan, before any fetch; the default suite keeps it."""
+
+    spec = tmp_path / "levels.json"
+    spec.write_text("{}")
+    base = ["regional", "--point", "45.75,-75.75", "--cycle", "2026-10-07T18", "--hours", "6", "--source", "gfs",
+            "--work-dir", str(tmp_path / "run"), "--vertical-spec", str(spec)]
+    with pytest.raises(door.RegionalRefusal, match="cannot apply to the hrrrv5 suite"):
+        door.plan(build_parser().parse_args([*base, "--forecast-arg=--physics-suite=hrrrv5"]))
+    assert door.plan(build_parser().parse_args(base))["paths"]["vertical_spec"] == str(spec.resolve())
 
 
 def test_a_producer_suite_takes_its_producers_boundaries_and_the_measured_levels(tmp_path, monkeypatch):

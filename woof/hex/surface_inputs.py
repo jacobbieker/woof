@@ -302,6 +302,56 @@ _GROUNDWATER = _unstaged(
     "Noah-MP MMF groundwater statics on the mesh (opt_run = 5)")
 
 
+def _slope_derive(which: int):
+    def derive(cfg, context):
+        from .slope_statics import derive as slope_derive
+        return slope_derive(cfg, context, which)
+    return derive
+
+
+_TOPO_SLOPE = SurfaceInput(
+    "topo_slope", "SLOPE", "derived", "float32", True,
+    "slope_rad's SLOPE (radians) from the least-squares terrain plane through each cell's "
+    "cellsOnCell neighbours (woof.hex.slope_statics), in place of WRF's grid stencil",
+    bounds=(0.0, float(np.nextafter(np.float32(np.pi / 2), np.float32(0)))),
+    derive=_slope_derive(0))
+_TOPO_SLOPE_AZIMUTH = SurfaceInput(
+    "topo_slope_azimuth", "SLP_AZI", "derived", "float32", True,
+    "slope_rad's SLP_AZI (radians clockwise from north, the downslope-facing direction) from the "
+    "same plane (woof.hex.slope_statics)", bounds=(0.0, 6.2831855), derive=_slope_derive(1))
+
+
+def _shadow_derive(which: int):
+    def derive(cfg, context):
+        from .topo_shading import derive as shadow_derive
+        return shadow_derive(cfg, context, which)
+    return derive
+
+
+_TOPO_SHADOW_CELLS = SurfaceInput(
+    "topo_shadow_cells", "CELLSONCELL", "derived", "int32", True,
+    "topo_shading's march over the mesh: each cell's zero-based cellsOnCell in MPAS's counter-clockwise "
+    "order, -1 past nEdgesOnCell, -2 outside a limited-area mesh (woof.hex.topo_shading), in place of "
+    "WRF's grid rows", derive=_shadow_derive(0), frames=1)
+_TOPO_SHADOW_GEOMETRY = SurfaceInput(
+    "topo_shadow_geometry", "CELL_POSITION", "derived", "float32", True,
+    "topo_shading's march over the mesh: each cell centre in metres as float32 high and low words, then "
+    "its mean neighbour distance, WRF's dx (woof.hex.topo_shading)", derive=_shadow_derive(1), frames=1)
+
+
+def _slope_rad_inputs(cfg) -> tuple[SurfaceInput, ...]:
+    inputs = (_TOPO_SLOPE, _TOPO_SLOPE_AZIMUTH)
+    if int(_value(cfg, "topo_shading")) == 1:
+        inputs += (_TOPO_SHADOW_CELLS, _TOPO_SHADOW_GEOMETRY)
+    return inputs
+
+
+def _slope_rad_active(cfg) -> bool:
+    from woof.core.topo_radiation import topo_shortwave_active
+
+    return int(_value(cfg, "slope_rad")) == 1 and topo_shortwave_active(cfg)
+
+
 #: Every WRF column scheme that reads per-cell inputs beyond the dozen the hex
 #: forecast always passes.  Order is the receipt's.
 CONTRACT: tuple[SchemeInputs, ...] = (
@@ -342,6 +392,9 @@ CONTRACT: tuple[SchemeInputs, ...] = (
                  lambda cfg: int(_value(cfg, "sf_surface_physics")) == 4
                  and int(_value(cfg, "opt_crop")) > 0,
                  lambda cfg: (_CROP,)),
+    SchemeInputs("slope_rad", "slope_rad=1",
+                 _slope_rad_active,
+                 _slope_rad_inputs),
     SchemeInputs("noahmp_groundwater", "sf_surface_physics=4 with opt_run=5",
                  lambda cfg: int(_value(cfg, "sf_surface_physics")) == 4
                  and int(_value(cfg, "opt_run", 1)) == 5,
@@ -847,7 +900,7 @@ def _probe_configs(row: SchemeInputs):
     yield SimpleNamespace(use_lakedepth=1, mosaic_lu=1, mosaic_soil=1,
                           sf_urban_physics=1, use_wudapt_lcz=0, aer_opt=2,
                           aer_aod550_opt=2, aer_angexp_opt=2, aer_ssa_opt=2,
-                          aer_asy_opt=2)
+                          aer_asy_opt=2, topo_shading=1)
     if row.scheme == "urban":
         yield SimpleNamespace(sf_urban_physics=1, use_wudapt_lcz=1)
 

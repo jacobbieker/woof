@@ -21,7 +21,6 @@ What this file pins:
 * a v2 file carries bit-identical observations to the v1 file written from
   the same merge -- checked field by field through the whole-domain view,
   with a guard that the windows really were smaller than the domain;
-* the adapter produces bit-identical LETKF batches from either;
 * fail closed: a window that under-covers its radar, or falls off the
   grid, is refused by the writer and by the reader.
 """

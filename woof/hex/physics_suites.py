@@ -337,6 +337,7 @@ class PhysicsSelectionRefusal(ConfigurationRefusal):
     def __init__(self, refusals: Iterable[OptionRefusal], *, context: str) -> None:
         self.refusals = tuple(refusals)
         self._selection_context = context
+        self.context = context
         first = self.refusals[0]
         lines = "; ".join(item.line() for item in self.refusals)
         super().__init__(
@@ -400,6 +401,47 @@ def _setting_is_refused(row: Mapping[str, Any], value: Any) -> bool:
     off = [str(item).casefold() for item in row["inactive_values"]]
     return not any(text == item or (number(text) is not None and number(text) == number(item))
                    for item in off)
+
+
+def _as_flag(value: Any) -> bool | None:
+    text = str(value).strip().strip(".").casefold()
+    return True if text in ("1", "true", "t") else False if text in ("0", "false", "f") else None
+
+
+def wrf_dynamics_problems(overrides: Mapping[str, Any] | None, *, horiz_mixing: str,
+                          les_model: str = "off",
+                          dynamics: Mapping[str, Any] | None = None) -> list[str]:
+    """The WRF dynamics values refused_settings passes as MPAS's own operator,
+    held to the dycore options the run actually sets.
+
+    ``diff_opt=0`` is no explicit diffusion, which is only ``--horiz-mixing
+    off``; ``mix_full_fields=true`` is MPAS's ``config_mix_full=true``;
+    ``khdif=0``/``kvdif=0`` ask for no constant K.  Each is refused here when
+    the run's own mixing contradicts it: the receipt would record a WRF
+    setting that is not the operator that ran.
+    """
+
+    given = dict(overrides or {})
+    dycore = dict(dynamics or {})
+    problems: list[str] = []
+    if "diff_opt" in given and (horiz_mixing != "off" or les_model != "off"):
+        problems.append(
+            f"diff_opt={given['diff_opt']} asks for no explicit diffusion, and this run mixes "
+            f"(--horiz-mixing {horiz_mixing}, --les-model {les_model}); pass --horiz-mixing off, "
+            "or drop diff_opt")
+    if "mix_full_fields" in given and _as_flag(dycore.get("config_mix_full", True)) is False:
+        problems.append(
+            "mix_full_fields=true mixes the full fields, and this run sets config_mix_full=false "
+            "(MPAS's departure from the initial state); drop one")
+    for key, knobs in (("khdif", ("config_h_mom_eddy_visc2", "config_h_theta_eddy_visc2")),
+                       ("kvdif", ("config_v_mom_eddy_visc2", "config_v_theta_eddy_visc2"))):
+        if key not in given:
+            continue
+        nonzero = sorted(knob for knob in knobs if float(dycore.get(knob, 0.0) or 0.0) != 0.0)
+        if nonzero:
+            problems.append(
+                f"{key}=0 asks for no constant K, and this run sets {nonzero} nonzero; drop {key}")
+    return problems
 
 
 def engine_selector_aliases() -> Mapping[str, str]:
@@ -854,8 +896,8 @@ def resolve_physics(
 #: (or ``--convection``) decides it, so a selection carrying one of these
 #: is judged here with the scheme that reads it; the bind hands the engine
 #: the cumulus it actually decided (cuda_suite_physics_v841's
-#: ``_from_generic_mapping``), and the engine's validator refuses the
-#: setting there if that cumulus does not read it.
+#: ``_from_generic_mapping``); where that cumulus does not read the
+#: setting it is inert (woof.quirk_corrections.run_reads).
 CUMULUS_SCOPED_SETTINGS = {"gf_deep_rain_evaporation_booking": 3}
 
 

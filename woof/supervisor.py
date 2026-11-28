@@ -1278,8 +1278,95 @@ def parse_compute_apps_output(output: str) -> tuple[GPUProcess, ...]:
     return tuple(processes)
 
 
+#: nvidia-smi's process-type letters: C compute, G graphics, M MPS client.
+#: pmon/compute-apps join them with ``+`` (C, G, C+G, M, M+C, M+G, M+C+G).
+_PMON_TYPE_LETTERS = frozenset("CGM")
+
+
+def _valid_pmon_type(process_type: str) -> bool:
+    letters = process_type.split("+")
+    return (all(len(letter) == 1 and letter in _PMON_TYPE_LETTERS
+                for letter in letters)
+            and len(set(letters)) == len(letters))
+
+
+def _pmon_is_pure_compute(process_type: str | None) -> bool:
+    """True for a compute context with no graphics part: ``C`` or ``M+C``.
+
+    ``C+G`` rows are WDDM desktop contexts and are permitted; ``M+C`` is a
+    compute process running as an MPS client, which is exactly as much a
+    CUDA co-tenant as a plain ``C``.
+    """
+    if process_type is None or not _valid_pmon_type(process_type):
+        return False
+    letters = set(process_type.split("+"))
+    return "C" in letters and "G" not in letters
+
+
+MPS_SERVER_NAME = "nvidia-cuda-mps"
+
+
+#: Per-multi-run token ``woof multi-run --mps`` stamps into every child it
+#: launches (and so every client priced by its packed admission).
+MPS_PACK_TOKEN_ENV = "WOOF_MPS_PACK_TOKEN"
+#: Set to ``1`` in those children only when the multi-run itself started
+#: the MPS daemon (not an adopted external one).
+MPS_OWNED_DAEMON_ENV = "WOOF_MPS_DAEMON_OWNED"
+
+
+def _process_environ_value(pid: int, name: str) -> str | None:
+    """One variable from /proc/<pid>/environ, None when unreadable/absent."""
+    try:
+        raw = Path(f"/proc/{pid}/environ").read_bytes()
+    except OSError:
+        return None
+    prefix = name.encode() + b"="
+    for entry in raw.split(b"\0"):
+        if entry.startswith(prefix):
+            return os.fsdecode(entry[len(prefix):])
+    return None
+
+
+def _process_mps_pipe_directory(pid: int) -> str | None:
+    """The ``CUDA_MPS_PIPE_DIRECTORY`` a process was started with, if readable."""
+    return _process_environ_value(pid, "CUDA_MPS_PIPE_DIRECTORY")
+
+
+def _own_mps_sibling(process: "GPUProcess") -> bool:
+    """True only for what this packed multi-run launched and priced.
+
+    * An MPS client (``M`` in its type) is a sibling when its environment
+      carries this process's :data:`MPS_PACK_TOKEN_ENV` and the same pipe
+      directory.  A client of the same daemon without the token (another
+      user's job on an adopted or system daemon) is a co-tenant.
+    * ``nvidia-cuda-mps-server`` is exempt only when this multi-run started
+      the daemon (:data:`MPS_OWNED_DAEMON_ENV`) and the server runs under
+      this pipe directory; the server of an adopted daemon stays priced.
+
+    Anything unreadable or unmatched is NOT ours.
+    """
+    own = os.environ.get("CUDA_MPS_PIPE_DIRECTORY")
+    token = os.environ.get(MPS_PACK_TOKEN_ENV)
+    if not own or not token:
+        return False
+    is_client = (process.process_type is not None
+                 and "M" in process.process_type.split("+"))
+    is_server = MPS_SERVER_NAME in (process.process_name or "")
+    if not (is_client or is_server):
+        return False
+    theirs = _process_mps_pipe_directory(process.pid)
+    if theirs is None or os.path.realpath(theirs) != os.path.realpath(own):
+        return False
+    if is_client:
+        return _process_environ_value(process.pid, MPS_PACK_TOKEN_ENV) == token
+    return os.environ.get(MPS_OWNED_DAEMON_ENV) == "1"
+
+
 def _parse_pmon_output(output: str) -> dict[int, tuple[str, int | None]]:
-    """Return PID -> (C/C+G type, framebuffer MiB) from one pmon sample."""
+    """Return PID -> (type, framebuffer MiB) from one pmon sample.
+
+    Types are any ``+``-joined combination of C, G and M.
+    """
     result: dict[int, tuple[str, int | None]] = {}
     for line in output.splitlines():
         stripped = line.strip()
@@ -1300,7 +1387,7 @@ def _parse_pmon_output(output: str) -> dict[int, tuple[str, int | None]]:
             raise GPUPreflightError(
                 f"GPU preflight failed closed: malformed pmon PID {line!r}") from exc
         process_type = parts[2]
-        if process_type not in {"C", "G", "C+G"}:
+        if not _valid_pmon_type(process_type):
             raise GPUPreflightError(
                 f"GPU preflight failed closed: unknown pmon type {process_type!r}")
         result[pid] = process_type, _memory_mib(parts[9])
@@ -1525,7 +1612,8 @@ def preflight_exclusive_gpu(gpu_uuid: str, *,
     conflicts = [
         process for process in query_compute_processes(gpu_uuid)
         if (process.pid not in approved
-            and process.process_type == "C"
+            and _pmon_is_pure_compute(process.process_type)
+            and not _own_mps_sibling(process)
             and (process.used_gpu_memory_mib in (None, 0)
                  or process.used_gpu_memory_mib > memory_threshold_mib))
     ]

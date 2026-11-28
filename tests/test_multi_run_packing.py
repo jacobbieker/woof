@@ -732,6 +732,45 @@ def test_mps_environment_reaches_every_child_and_daemon_stops(
     assert mps["started_here"] and mps["active_thread_percentage"] == 40
 
 
+def _stamped_envs(tmp_path, monkeypatch, *, external):
+    class _FakeDaemon(MpsDaemon):
+        def start(self):
+            self.started = True
+            self.owned = not self.external
+            return self
+
+        def stop(self):
+            self.owned = False
+
+    if external:
+        monkeypatch.setenv("CUDA_MPS_PIPE_DIRECTORY", str(tmp_path / "ext"))
+    else:
+        monkeypatch.delenv("CUDA_MPS_PIPE_DIRECTORY", raising=False)
+    monkeypatch.setattr(multi_run, "MpsDaemon", _FakeDaemon)
+    plan, _meter, runners = _packed(
+        tmp_path, monkeypatch, cards={"GPU-alpha": FakeCard(24)},
+        need={"run_a": 4, "run_b": 4}, devices=(0, 0),
+        table="runs_per_gpu = 2\nmps = true")
+    assert _main(plan, mps_dir=tmp_path / "mps") == 0
+    assert len(runners.launched) == 2
+    return [kwargs["env"] for _name, kwargs in runners.launched]
+
+
+def test_children_carry_one_fresh_token_and_owned_daemon_flag(
+        tmp_path, monkeypatch):
+    from woof.supervisor import MPS_OWNED_DAEMON_ENV, MPS_PACK_TOKEN_ENV
+
+    owned = _stamped_envs(tmp_path / "a", monkeypatch, external=False)
+    tokens = {env[MPS_PACK_TOKEN_ENV] for env in owned}
+    assert len(tokens) == 1 and len(next(iter(tokens))) == 32
+    assert all(env[MPS_OWNED_DAEMON_ENV] == "1" for env in owned)
+
+    external = _stamped_envs(tmp_path / "b", monkeypatch, external=True)
+    ext_tokens = {env[MPS_PACK_TOKEN_ENV] for env in external}
+    assert len(ext_tokens) == 1 and ext_tokens != tokens  # fresh per run
+    assert all(MPS_OWNED_DAEMON_ENV not in env for env in external)
+
+
 def test_mps_refusal_is_named(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", str(tmp_path / "empty-bin"))
     monkeypatch.delenv("CUDA_MPS_PIPE_DIRECTORY", raising=False)

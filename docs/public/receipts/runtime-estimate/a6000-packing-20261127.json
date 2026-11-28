@@ -1,0 +1,53 @@
+{
+  "schema": "woof.runtime-estimate.receipt.v1",
+  "id": "a6000-packing-20261127",
+  "recorded_utc": "2026-11-27T12:05:00Z",
+  "what": "runs sharing one RTX A6000 under `woof multi-run --runs-per-gpu N [--mps|--no-mps]`, every run from one prepared bundle (module woof.prepared_single_domain_forecast, --io-mode history); per-run slowdown = the run's mean step wall (step_wall_seconds from progress.jsonl, the first 5 steps dropped) over the same mean alone",
+  "code": "feat/runtime-estimate 3cf49df54 (forecast code identical to main dc091b436)",
+  "host": {"card": "NVIDIA RTX A6000", "card_memory_mib": 49140, "driver": "610.57.04", "host_cpus": 32, "os": "Linux"},
+  "contention": {
+    "method": "nvidia-smi utilization, memory and compute apps, and /proc/loadavg, every 5 s (each case's contention.log)",
+    "card": "no compute process other than the case's own runs (and the MPS control server with MPS on) in any sample",
+    "host": "load average 4.8 to 20.5 from other users' work"
+  },
+  "cases": {
+    "large": {
+      "configuration": "woof domain --point 14.6,121 --root-dx 3 --clock fixed --source gfs --cycle 2026-11-07T00: 450 x 360 x 49 (162,000 columns), dx 3 km, dt 7.5 s; Morrison, RTE+RRTMGP, YSU, Noah, no cumulus",
+      "run_seconds": 3600, "steps_per_run": 480,
+      "alone_mean_step_s": 0.2034, "alone_wall_s": 126.2,
+      "rows": [
+        {"runs": 2, "mps": false, "wall_s": 252.3, "mean_step_s": 0.4559, "per_run_slowdown": 2.241},
+        {"runs": 3, "mps": false, "wall_s": 366.4, "mean_step_s": 0.6853, "per_run_slowdown": 3.369},
+        {"runs": 4, "mps": false, "wall_s": 484.1, "mean_step_s": 0.9156, "per_run_slowdown": 4.501},
+        {"runs": 2, "mps": true, "wall_s": 220.7, "mean_step_s": 0.3976, "per_run_slowdown": 1.955},
+        {"runs": 3, "mps": true, "wall_s": 325.8, "mean_step_s": 0.5962, "per_run_slowdown": 2.931},
+        {"runs": 4, "mps": true, "launched": 4, "refused_by_preflight": [1, 2], "note": "two attempts; 1 then 2 of the 4 runs exited in about 3.7 s with GPUPreflightError: unknown pmon type 'M+C'; the first attempt's three survivors ran 0.5979 s/step (a replicate of three)"}
+      ],
+      "serial": {"plan": "four one-run multi-run plans in sequence", "wall_s": 489.6, "runs_wall_s": [120.3, 124.0, 123.5, 121.8]}
+    },
+    "small": {
+      "configuration": "woof domain --point 14.6,121 --root-dx 12 --point-extent-km 1800 --clock fixed --source gfs --cycle 2026-11-07T00 --hours 6: 150 x 120 x 49 (18,000 columns), dx 12 km, dt 30 s, same suite",
+      "run_seconds": 21600, "steps_per_run": 720,
+      "alone_mean_step_s": 0.0274, "alone_wall_s": 34.7,
+      "rows": [
+        {"runs": 2, "mps": false, "wall_s": 63.5, "mean_step_s": 0.06135, "per_run_slowdown": 2.239},
+        {"runs": 4, "mps": false, "wall_s": 111.7, "mean_step_s": 0.12345, "per_run_slowdown": 4.505},
+        {"runs": 8, "mps": false, "wall_s": 210.8, "mean_step_s": 0.2480, "per_run_slowdown": 9.051},
+        {"runs": 2, "mps": true, "wall_s": 54.2, "mean_step_s": 0.0480, "per_run_slowdown": 1.752},
+        {"runs": 3, "mps": true, "launched": 4, "refused_by_preflight": 1, "mean_step_s": 0.06927, "per_run_slowdown": 2.528},
+        {"runs": 5, "mps": true, "launched": 8, "refused_by_preflight": 3, "mean_step_s": 0.11418, "per_run_slowdown": 4.167}
+      ],
+      "recommended_plan": {"plan": "8 runs, --runs-per-gpu 4 --no-mps", "wall_s": 221.1}
+    }
+  },
+  "findings": [
+    "Without MPS each run ran slower than its share of the card (2.24x for two, 4.5x for four, 9.05x for eight), at 18,000 and at 162,000 columns: the card time-slices the contexts and packing gains only the overlap of the runs' start-up (4 large runs: 484.1 s packed against 489.6 s one at a time).",
+    "MPS cut the per-run step time 13 % at two and at three large runs (0.3976 against 0.4559 s, 0.5962 against 0.6853 s) and 22 % at two small runs (0.0480 against 0.06135 s); the small three- and five-run MPS rows have no matching no-MPS count (compared with the interpolated off rows, about 25 %).",
+    "woof.supervisor's GPU preflight fails closed on the pmon type an MPS client reports ('M+C'): with three or more runs launched under --mps, some runs exited before their first step."
+  ],
+  "predicted_by_pack_plan": {
+    "command": "woof pack-plan CONFIG --copies N --card a6000 --prepared [--max-slots 4]",
+    "large_4": {"one_at_a_time_s": [381.4, 961.3], "measured_s": 489.6, "4_per_card_s": [429.2, 893.5], "measured_4_per_card_s": 484.1, "recommended": "1 per card"},
+    "small_8": {"one_at_a_time_s": [193.1, 1026.6], "4_per_card_s": [217.5, 779.2], "measured_4_per_card_s": 221.1, "8_per_card_s": [218.5, 728.4], "measured_8_per_card_s": 210.8, "recommended": "4 per card, MPS off"}
+  }
+}

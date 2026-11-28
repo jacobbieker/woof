@@ -421,12 +421,78 @@ def _require_same_shape(fields: Mapping[str, object], names) -> tuple[int, int]:
     return shape
 
 
-def _interp_nodes(nodes, zsource, ztarget):
+def _wrf_source_depths(zsource) -> np.ndarray:
+    """The REAL depths real.exe holds for the input soil levels.
+
+    ``init_soil_2_real`` sets ``zhave = st_levels_input / 100.`` from whole
+    centimetres (module_soil_pre.F), one float32 division per level.
+    """
+    f32 = np.float32
     out = []
-    for z in ztarget:
-        lower = int(np.searchsorted(zsource, z) - 1)
-        weight = (z - zsource[lower]) / (zsource[lower + 1] - zsource[lower])
-        out.append(nodes[lower] + weight * (nodes[lower + 1] - nodes[lower]))
+    for z in np.asarray(zsource, dtype=np.float64):
+        cm = z * 100.0
+        if abs(cm - round(cm)) < 1.0e-6:
+            out.append(f32(round(cm)) / f32(100.0))
+        else:
+            out.append(f32(z))
+    return np.asarray(out, dtype=f32)
+
+
+def _wrf_target_depths(ztarget) -> np.ndarray:
+    """The REAL layer-centre depths ``ZS`` real.exe holds for the target layers.
+
+    WRF builds ``zs(1) = 0.5*dzs(1)`` and ``zs(l) = zs(l-1) + 0.5*dzs(l-1) +
+    0.5*dzs(l)`` in float32 from the layer thicknesses, so the third Noah
+    centre is 0.70000005, not float32(0.7).  Centres that do not tile from
+    the surface keep their own float32 value.
+    """
+    f32 = np.float32
+    if np.asarray(ztarget).dtype == f32:
+        return np.asarray(ztarget)
+    centres = np.asarray(ztarget, dtype=np.float64)
+    top = 0.0
+    thickness = []
+    for centre in centres:
+        dz = 2.0 * (centre - top)
+        if dz <= 0.0:
+            return centres.astype(f32)
+        thickness.append(f32(dz))
+        top += dz
+    zs = np.empty(len(thickness), dtype=f32)
+    zs[0] = f32(0.5) * thickness[0]
+    for level in range(1, len(thickness)):
+        zs[level] = (zs[level - 1] + f32(0.5) * thickness[level - 1]
+                     + f32(0.5) * thickness[level])
+    return zs
+
+
+def _interp_nodes(nodes, zsource, ztarget):
+    """``init_soil_2_real``'s linear blend in real.exe's own REAL arithmetic.
+
+    module_soil_pre.F takes the FIRST bracket with ``zhave(l) <= zs <=
+    zhave(l+1)`` and forms ``(v(l)*(zhave(l+1)-zs) + v(l+1)*(zs-zhave(l)))
+    / (zhave(l+1)-zhave(l))``, each operation rounded to float32.  The old
+    float64 blend rounded once at the end and left 1,270 of 9,404 land SMOIS
+    words one unit off native WRF on the January 2000 tutorial case.
+    """
+    f32 = np.float32
+    zh = _wrf_source_depths(zsource)
+    zs = _wrf_target_depths(ztarget)
+    values = np.asarray(nodes, dtype=f32)
+    out = []
+    for z in zs:
+        lower = None
+        for level in range(len(zh) - 1):
+            if zh[level] <= z <= zh[level + 1]:
+                lower = level
+                break
+        if lower is None:
+            lower = int(min(max(np.searchsorted(zh, z) - 1, 0), len(zh) - 2))
+        upper_gap = zh[lower + 1] - z
+        lower_gap = z - zh[lower]
+        span = zh[lower + 1] - zh[lower]
+        out.append(((values[lower] * upper_gap
+                     + values[lower + 1] * lower_gap) / span).astype(f32))
     return np.stack(out)
 
 
@@ -608,17 +674,22 @@ _SNOW_DEPTH_CEILING_M = 1.0e2
 #: ice, which is how interpolation smears an ice-sheet store over the
 #: target's ice margin.  Anywhere else it is still the factor of 1000
 #: above, and still refused.  Admission is not acceptance:
-#: :func:`cap_snow_water` then puts every value above 5000 kg m-2 on that
+#: :func:`cap_snow_water` then puts every value above 2000 kg m-2 on that
 #: cap and says so.
 _ICE_SHEET_SNOW_WATER_CEILING_KG_M2 = 2.0e5
 
 #: The snow water equivalent the initial state carries at most, kg m-2:
-#: WRF's Noah-MP initialisation (``module_sf_noahmpdrv.F``,
-#: ``NOAHMP_INIT``: "cap SWE at 5000mm ... cap SNOW at 5000, maintain
-#: density"), which is also Noah-MP's own glacier equilibrium in
-#: ``SNOWWATER`` (woof/core/noahmp_snow.py).  ``rw_mpas_init`` applies the
-#: same ceiling on the hex path (tools/rustwx/crates/rw-mpas/src/init/caps.rs).
-SNOW_WATER_CAP_KG_M2 = 5000.0
+#: Noah-MP's initialisation caps SNOW at 2000 mm and scales SNOWH by the
+#: same factor, "cap SNOW at 2000, maintain density".  WRF 4.7.1
+#: ``phys/noahmp/drivers/wrf/module_sf_noahmpdrv.F`` lines 2027-2038
+#: (``NOAHMP_INIT``); WRF 4.8.1 ``phys/noahmp/drivers/wrf/NoahmpInitMainMod.F90``
+#: lines 58-71; MPAS 8.4.2 ``src/core_atmosphere/physics/physics_noahmp/
+#: drivers/mpas/NoahmpInitMainMod.F90`` lines 51-64.  This is NOT Noah-MP's
+#: in-model glacier limit (5000 mm, ``SWEMAXGLA``), which is a separate
+#: constant, ``woof.core.noahmp_snow.SWEMAXGLA_KG_M2``.  ``rw_mpas_init``
+#: applies the same ceiling on the hex path
+#: (tools/rustwx/crates/rw-mpas/src/init/caps.rs).
+SNOW_WATER_CAP_KG_M2 = 2000.0
 
 #: ``SOILPARM.TBL``'s land-ice soil category, which real.exe assigns with
 #: sea ice turned land (``module_soil_pre.F:adjust_for_seaice_pre``) and
@@ -719,8 +790,8 @@ def _admitted_snow_field(name: str, value: np.ndarray, shape,
 def cap_snow_water(snow, snowh):
     """Cap snow water equivalent at :data:`SNOW_WATER_CAP_KG_M2`, density kept.
 
-    ``NOAHMP_INIT``'s rule, at every cell: where ``SNOW > 5000`` the snow
-    depth is multiplied by ``5000 / SNOW`` and ``SNOW`` is set to 5000, so
+    ``NOAHMP_INIT``'s rule, at every cell: where ``SNOW > 2000`` the snow
+    depth is multiplied by ``2000 / SNOW`` and ``SNOW`` is set to 2000, so
     the snowpack keeps its density.  Values at or below the cap are
     untouched, and when none is above it both inputs are returned as they
     came with an empty receipt.  Otherwise the receipt holds the cap, the
@@ -742,8 +813,8 @@ def cap_snow_water(snow, snowh):
         "cells": int(snow.size),
         "source_max_kg_m2": float(np.max(snow)),
         "source_max_snow_depth_m": float(np.max(snowh)),
-        "rule": ("SNOW > 5000 kg m-2: SNOWH = SNOWH * 5000 / SNOW, SNOW = "
-                 "5000 (WRF module_sf_noahmpdrv.F NOAHMP_INIT, density "
+        "rule": ("SNOW > 2000 kg m-2: SNOWH = SNOWH * 2000 / SNOW, SNOW = "
+                 "2000 (WRF module_sf_noahmpdrv.F NOAHMP_INIT, density "
                  "kept)"),
         "bounding_box": _grid_box(over),
     }

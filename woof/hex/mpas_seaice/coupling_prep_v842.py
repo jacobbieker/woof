@@ -150,17 +150,11 @@ def check_config(configs: dict) -> None:
         # ocean*Flux field, mpas_seaice_column.F:3998-3999), as it skips the black carbons'
         # (23-24, :4016); the first dust's (25) goes into oceanDustIronFlux (:4018-4021)
         # the shortwave bioabsorption and the modal optics touch no ocean flux
-        carried = cv.BGC_PORTED + (cv.ZSAL_FLAG,) + cv.SW_BIO_PORTED
         if cv.vertical_tracers(c):
             cv._refuse_z_tracers(c)
-            carried += (cv.VT_FLAG,) + cv.VT_PORTED
-        for flag in cv._BGC_FLAGS:
-            if flag not in carried and c[flag]:
-                raise ConfigurationRefusal(
-                    knob=flag, value=True,
-                    reason="the column biogeochemistry's ocean fluxes are ported for the brine height, the "
-                           "vertical salinity, the nonreactive vertical tracer and the z-aerosols only",
-                    declaration=f"{flag} = .false.")
+        cv.refuse_uncarried_bgc(c, cv.carried_bgc_flags(c),
+                                "the column biogeochemistry's ocean fluxes are ported for the brine height, "
+                                "the vertical salinity, the nonreactive vertical tracer and the z-aerosols only")
 
 
 #: the ocean biogeochemical fluxes seaice_column_coupling_prep maps from the column

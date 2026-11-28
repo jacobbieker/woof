@@ -429,11 +429,15 @@ def test_observation_nudging_keys_ride_to_the_forecast_door(tmp_path):
     assert cfg.obs_inputfile == str(tmp_path / "OBS_DOMAIN101")
 
 
-def test_observation_nudging_without_physics_keys_is_refused_before_preparation(tmp_path):
-    """No physics key takes the hex default MPAS suite, where the forecast door refuses --obs-nudging."""
-    config = _write(tmp_path, domain_extra="obs_nudge_opt = 1\nobs_rinxy = 50.0")
-    with pytest.raises(go_hex.HexGoRefusal, match="HEX_OBS_NUDGING_ROUTE"):
-        go_hex.plan(_args(str(config)))
+def test_observation_nudging_without_physics_keys_runs_on_the_mpas_suite(tmp_path):
+    """No physics key takes the hex default MPAS suite, which carries observation nudging too."""
+    config = _write(tmp_path, domain_extra="obs_nudge_opt = 1\nobs_rinxy = 50.0\nobs_coef_wind = 6.0e-4\n"
+                                           "obs_nudge_wind = 1\nobs_twindo = 0.5\nfdda_end = 60.0",
+                    shared="[shared]\nmax_obs = 300\n")
+    value = go_hex.plan(_args(str(config)))
+    assert not value["physics"]
+    table = tmp_path / "hexgo-go" / go_hex.OBS_NUDGING_CONFIG
+    assert f"--forecast-arg=--obs-nudging={table}" in value["regional_argv"]
 
 
 def test_observation_nudging_unknown_key_is_refused_at_the_plan(tmp_path):

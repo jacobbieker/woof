@@ -10,6 +10,8 @@
 //                        (toposhad_init, iteration 1)
 //   topo_shadow_scan     phys/module_radiation_driver.F:4610-4862
 //                        (toposhad, iteration 1 on one patch)
+//   topo_shadow_scan_mesh  toposhad_init + toposhad's test on a hex mesh
+//                        (the march adapted to Voronoi cells, see there)
 //   topo_diffuse_frac    phys/module_radiation_driver.F:2894-2927
 //                        (Ruiz-Arias split for a shortwave scheme without
 //                        its own direct beam, then DIFFUSE_FRAC)
@@ -371,6 +373,53 @@ __device__ __forceinline__ void tr_scan(
 }
 
 // ---------------------------------------------------------------------------
+// toposhad's sun at one mass point (module_radiation_driver.F:4652-4680):
+// the cosine of the zenith angle at the scan's hour angle (the radiation
+// interval's midpoint) and the solar azimuth, clockwise from the grid's +j
+// axis (geographic north on a grid with sina = 0, cosa = 1).  False when
+// csza < 1.e-2, where WRF computes no mask.  Shared by the grid scan and the
+// hex mesh scan so both read one sun.
+// ---------------------------------------------------------------------------
+__device__ __forceinline__ bool tr_shadow_sun(
+    float xlat_deg, float xlong_deg, float sina, float cosa, float xtime,
+    float gmt, float radfrq, float declin, float* csza_out, float* azi_out)
+{
+    const float degrad = tr_degrad();
+    // XT24=MOD(XTIME+RADFRQ*0.5,1440.)
+    const float xt24 = fmodf(__fadd_rn(xtime, __fmul_rn(radfrq, 0.5f)),
+                             1440.0f);
+    const float pi = tr_pi();
+    // TLOCTM=GMT+XT24/60.+XLONG(i,j)/15.
+    const float tloctm = __fadd_rn(__fadd_rn(gmt, __fdiv_rn(xt24, 60.0f)),
+                                   __fdiv_rn(xlong_deg, 15.0f));
+    const float hrang = __fmul_rn(__fmul_rn(15.0f, __fsub_rn(tloctm, 12.0f)),
+                                  degrad);
+    const float xxlat = __fmul_rn(xlat_deg, degrad);
+    const float csza = __fadd_rn(__fmul_rn(tr_sin(xxlat), tr_sin(declin)),
+                                 __fmul_rn(__fmul_rn(tr_cos(xxlat),
+                                                     tr_cos(declin)),
+                                           tr_cos(hrang)));
+    *csza_out = csza;
+    if (csza < 1.e-2f) return false;   // shadow mask does not need to be computed
+    // Solar azimuth angle
+    float argu = __fdiv_rn(
+        __fsub_rn(__fmul_rn(csza, tr_sin(xxlat)), tr_sin(declin)),
+        __fmul_rn(tr_sin(tr_acos(csza)), tr_cos(xxlat)));
+    if (argu > 1.0f) argu = 1.0f;
+    if (argu < -1.0f) argu = -1.0f;
+    // sign(acos(argu),sin(HRANG))+pi: gfortran's SIGN is copysign
+    float sol_azi = __fadd_rn(copysignf(fabsf(tr_acos(argu)), tr_sin(hrang)),
+                              pi);
+    if (cosa >= 0.0f) {
+        sol_azi = __fadd_rn(sol_azi, tr_asin(sina));
+    } else {
+        sol_azi = __fsub_rn(__fadd_rn(sol_azi, pi), tr_asin(sina));
+    }
+    *azi_out = sol_azi;
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // toposhad, iteration 1 (module_radiation_driver.F:4640-4758).
 // ---------------------------------------------------------------------------
 extern "C" __global__ void topo_shadow_scan(
@@ -384,45 +433,18 @@ extern "C" __global__ void topo_shadow_scan(
     if (idx >= nx * ny) return;
     const int i = idx % nx + 1;
     const int j = idx / nx + 1;
-    const float degrad = tr_degrad();
-    // XT24=MOD(XTIME+RADFRQ*0.5,1440.)
-    const float xt24 = fmodf(__fadd_rn(xtime, __fmul_rn(radfrq, 0.5f)),
-                             1440.0f);
     const float pi = tr_pi();
     const int gpshad = (int)__fadd_rn(__fdiv_rn(shadlen, dx), 1.0f);
 
     int mask = shadowmask[TR_M(i, j)];
     float shad = ht_shad[TR_M(i, j)];
-    // TLOCTM=GMT+XT24/60.+XLONG(i,j)/15.
-    const float tloctm = __fadd_rn(__fadd_rn(gmt, __fdiv_rn(xt24, 60.0f)),
-                                   __fdiv_rn(xlong[TR_M(i, j)], 15.0f));
-    const float hrang = __fmul_rn(__fmul_rn(15.0f, __fsub_rn(tloctm, 12.0f)),
-                                  degrad);
-    const float xxlat = __fmul_rn(xlat[TR_M(i, j)], degrad);
-    const float csza = __fadd_rn(__fmul_rn(tr_sin(xxlat), tr_sin(declin)),
-                                 __fmul_rn(__fmul_rn(tr_cos(xxlat),
-                                                     tr_cos(declin)),
-                                           tr_cos(hrang)));
-    if (csza < 1.e-2f) {
-        // shadow mask does not need to be computed
+    float csza, sol_azi;
+    if (!tr_shadow_sun(xlat[TR_M(i, j)], xlong[TR_M(i, j)], sina[TR_M(i, j)],
+                       cosa[TR_M(i, j)], xtime, gmt, radfrq, declin, &csza,
+                       &sol_azi)) {
         shadowmask[TR_M(i, j)] = 0;
         ht_shad[TR_M(i, j)] = __fsub_rn(ht_loc[TR_W(i, j)], 0.001f);
         return;
-    }
-    // Solar azimuth angle
-    float argu = __fdiv_rn(
-        __fsub_rn(__fmul_rn(csza, tr_sin(xxlat)), tr_sin(declin)),
-        __fmul_rn(tr_sin(tr_acos(csza)), tr_cos(xxlat)));
-    if (argu > 1.0f) argu = 1.0f;
-    if (argu < -1.0f) argu = -1.0f;
-    // sign(acos(argu),sin(HRANG))+pi: gfortran's SIGN is copysign
-    float sol_azi = __fadd_rn(copysignf(fabsf(tr_acos(argu)), tr_sin(hrang)),
-                              pi);
-    if (cosa[TR_M(i, j)] >= 0.0f) {
-        sol_azi = __fadd_rn(sol_azi, tr_asin(sina[TR_M(i, j)]));
-    } else {
-        sol_azi = __fsub_rn(__fadd_rn(sol_azi, pi),
-                            tr_asin(sina[TR_M(i, j)]));
     }
     // Scan for higher surrounding topography
     const float pi_quarter = __fmul_rn(0.25f, pi);
@@ -447,6 +469,188 @@ extern "C" __global__ void topo_shadow_scan(
     }
     shadowmask[TR_M(i, j)] = mask;
     ht_shad[TR_M(i, j)] = shad;
+}
+
+// ---------------------------------------------------------------------------
+// toposhad_init + toposhad on a hex (Voronoi) mesh, one thread per cell
+// (woof.core.topo_radiation.mesh_terrain_shadow; the statics are built by
+// woof.hex.topo_shading).  A root domain: the mask starts at 0 and HT_SHAD
+// at HT - 0.001, as toposhad_init leaves a domain without a parent.
+//
+// The sun is WRF's (tr_shadow_sun, with the cell's own geographic north:
+// sina = 0, cosa = 1).  The scan is WRF's test on a march that the mesh can
+// make: WRF steps one grid row along the axis nearest the sun and
+// interpolates HT linearly between the two grid points the ray crosses; here
+// the k-th sample lies k * dxc metres from the cell along the sun azimuth
+// (dxc the cell's mean centre-to-neighbour distance, WRF's dx; the same
+// gpshad = INT(shadlen/dxc + 1) samples), in the cell's local tangent plane,
+// and HT there is the barycentric (linear) interpolant on the Delaunay
+// triangle (the cell and two consecutive cellsOnCell neighbours) that holds
+// it.  The sample's distance is its horizontal distance from the cell
+// (WRF's dxabs).  A sample outside the mesh ends the scan, as leaving the
+// domain ends WRF's: on a limited-area mesh, a sample whose nearest cell
+// touches the outer edge is read only from that cell's triangles whose three
+// cells are on the mesh, and ends the scan when none of them holds it (so a
+// cell on the edge still scans inward, and along the edge).
+//
+// The frame: offsets are the chord between centres projected on the cell's
+// tangent plane, and the samples lie in that plane.  Against the arc along
+// the sphere that is a relative length error of (d/R)^2/6, under 3e-6 (7 cm)
+// at shadlen = 25 km, and it moves every centre the same way, so it is below
+// the float32 words the march computes in.  WRF's grid march ignores the
+// curvature too (HT is height above the sphere, distances are map metres).
+//
+// The nearest-cell walk is greedy over cellsOnCell from the last sample's
+// cell.  Each hop strictly lowers the distance to the sample, so no cell is
+// visited twice and n hops bound it; on a Delaunay graph it ends at the
+// nearest centre (a cell that is not the nearest has a neighbour nearer the
+// sample).  A step of dxc is about one hop on a uniform mesh, and about
+// dxc / (the local spacing) where the mesh refines.
+//
+// geom is [7][n]: the cell centre in metres on the sphere as float32
+// hi + lo words (x, y, z hi then x, y, z lo; their sum is the float64
+// position), then dxc.  cells is [max_edges][n]: zero-based cellsOnCell in
+// MPAS's counter-clockwise order, -1 past nEdgesOnCell, -2 outside a
+// limited-area mesh.  Single precision throughout (no double on Metal); the
+// hi/lo difference keeps the local offsets to a millimetre.
+// ---------------------------------------------------------------------------
+__device__ __forceinline__ void tr_mesh_local(
+    const float* __restrict__ geom, int n, int o, int m, float ex, float ey,
+    float nx_, float ny_, float nz_, float* e_out, float* n_out)
+{
+    const float dx = __fadd_rn(__fsub_rn(geom[m], geom[o]),
+                               __fsub_rn(geom[3 * n + m], geom[3 * n + o]));
+    const float dy = __fadd_rn(__fsub_rn(geom[n + m], geom[n + o]),
+                               __fsub_rn(geom[4 * n + m], geom[4 * n + o]));
+    const float dz = __fadd_rn(__fsub_rn(geom[2 * n + m], geom[2 * n + o]),
+                               __fsub_rn(geom[5 * n + m], geom[5 * n + o]));
+    *e_out = __fadd_rn(__fmul_rn(dx, ex), __fmul_rn(dy, ey));
+    *n_out = __fadd_rn(__fadd_rn(__fmul_rn(dx, nx_), __fmul_rn(dy, ny_)),
+                       __fmul_rn(dz, nz_));
+}
+
+__device__ __forceinline__ float tr_mesh_dist2(float ae, float an, float be,
+                                               float bn)
+{
+    const float de = __fsub_rn(ae, be);
+    const float dn = __fsub_rn(an, bn);
+    return __fadd_rn(__fmul_rn(de, de), __fmul_rn(dn, dn));
+}
+
+extern "C" __global__ void topo_shadow_scan_mesh(
+    const float* __restrict__ ht, const float* __restrict__ xlat,
+    const float* __restrict__ xlong, const int* __restrict__ cells,
+    const float* __restrict__ geom, float xtime, float gmt, float radfrq,
+    float declin, float shadlen, int n, int max_edges,
+    int* __restrict__ shadowmask, float* __restrict__ ht_shad)
+{
+    const int o = blockIdx.x * blockDim.x + threadIdx.x;
+    if (o >= n) return;
+    const float h0 = ht[o];
+    int mask = 0;
+    float shad = __fsub_rn(h0, 0.001f);
+    float csza, sol_azi;
+    if (!tr_shadow_sun(xlat[o], xlong[o], 0.0f, 1.0f, xtime, gmt, radfrq,
+                       declin, &csza, &sol_azi)) {
+        shadowmask[o] = 0;
+        ht_shad[o] = shad;
+        return;
+    }
+    const float degrad = tr_degrad();
+    const float lat = __fmul_rn(xlat[o], degrad);
+    const float lon = __fmul_rn(xlong[o], degrad);
+    const float slat = tr_sin(lat), clat = tr_cos(lat);
+    const float slon = tr_sin(lon), clon = tr_cos(lon);
+    // local east and north unit vectors at the cell
+    const float ex = -slon, ey = clon;
+    const float nx_ = -__fmul_rn(slat, clon), ny_ = -__fmul_rn(slat, slon);
+    const float nz_ = clat;
+    const float de = tr_sin(sol_azi), dn = tr_cos(sol_azi);
+    const float dxc = geom[6 * n + o];
+    const int gpshad = (int)__fadd_rn(__fdiv_rn(shadlen, dxc), 1.0f);
+    const float tan_sun = tr_tan(tr_asin(csza));
+    int c = o;
+    for (int k = 1; k <= gpshad; ++k) {
+        const float dist = __fmul_rn((float)k, dxc);
+        const float te = __fmul_rn(dist, de), tn = __fmul_rn(dist, dn);
+        // the sample's nearest cell: a greedy walk over cellsOnCell from the
+        // last sample's (on a Delaunay graph it ends at the nearest centre)
+        float ce, cn;
+        tr_mesh_local(geom, n, o, c, ex, ey, nx_, ny_, nz_, &ce, &cn);
+        float best = tr_mesh_dist2(ce, cn, te, tn);
+        for (int hop = 0; hop < n; ++hop) {
+            int next = c;
+            for (int s = 0; s < max_edges; ++s) {
+                const int m = cells[s * n + c];
+                if (m < 0) continue;
+                float me, mn;
+                tr_mesh_local(geom, n, o, m, ex, ey, nx_, ny_, nz_, &me, &mn);
+                const float d = tr_mesh_dist2(me, mn, te, tn);
+                if (d < best) { best = d; next = m; }
+            }
+            if (next == c) break;
+            c = next;
+        }
+        int edges = 0;
+        bool outside = false;
+        for (int s = 0; s < max_edges; ++s) {
+            const int m = cells[s * n + c];
+            if (m == -2) outside = true;
+            if (m != -1) edges = s + 1;
+        }
+        if (edges < 3) break;
+        tr_mesh_local(geom, n, o, c, ex, ey, nx_, ny_, nz_, &ce, &cn);
+        // the triangle (c, a, b) that holds the sample; where none does (a
+        // sample at a triangle's edge in rounding), the one it is nearest to
+        // inside, its weights clamped to the triangle.  A triangle with a
+        // corner outside the mesh is not read.
+        float w0 = 1.0f, w1 = 0.0f, w2 = 0.0f, worst = -3.4e38f;
+        int ta = c, tb = c;
+        for (int s = 0; s < edges; ++s) {
+            const int a = cells[s * n + c];
+            const int b = cells[((s + 1) % edges) * n + c];
+            if (a < 0 || b < 0) continue;
+            float ae, an, be, bn;
+            tr_mesh_local(geom, n, o, a, ex, ey, nx_, ny_, nz_, &ae, &an);
+            tr_mesh_local(geom, n, o, b, ex, ey, nx_, ny_, nz_, &be, &bn);
+            const float ue = __fsub_rn(ae, ce), un = __fsub_rn(an, cn);
+            const float ve = __fsub_rn(be, ce), vn = __fsub_rn(bn, cn);
+            const float qe = __fsub_rn(te, ce), qn = __fsub_rn(tn, cn);
+            const float den = __fsub_rn(__fmul_rn(ue, vn), __fmul_rn(un, ve));
+            if (den == 0.0f) continue;
+            const float u = __fdiv_rn(__fsub_rn(__fmul_rn(qe, vn),
+                                                __fmul_rn(qn, ve)), den);
+            const float v = __fdiv_rn(__fsub_rn(__fmul_rn(ue, qn),
+                                                __fmul_rn(un, qe)), den);
+            const float w = __fsub_rn(__fsub_rn(1.0f, u), v);
+            const float least = fminf(w, fminf(u, v));
+            if (least > worst) {
+                worst = least; w0 = w; w1 = u; w2 = v; ta = a; tb = b;
+                if (least >= 0.0f) break;
+            }
+        }
+        // on the mesh's edge, a sample no on-mesh triangle holds (beyond
+        // rounding) is outside the mesh
+        if (outside && worst < -1.0e-4f) break;
+        if (worst < 0.0f) {
+            w0 = fmaxf(w0, 0.0f); w1 = fmaxf(w1, 0.0f); w2 = fmaxf(w2, 0.0f);
+            const float sum = __fadd_rn(__fadd_rn(w0, w1), w2);
+            w0 = __fdiv_rn(w0, sum); w1 = __fdiv_rn(w1, sum);
+            w2 = __fdiv_rn(w2, sum);
+        }
+        const float h = __fadd_rn(__fadd_rn(__fmul_rn(w0, ht[c]),
+                                            __fmul_rn(w1, ht[ta])),
+                                  __fmul_rn(w2, ht[tb]));
+        // WRF's test, as tr_scan makes it
+        const float topoelev = tr_atan(__fdiv_rn(__fsub_rn(h, h0), dist));
+        if (tr_sin(topoelev) >= csza) {
+            mask = 1;
+            shad = fmaxf(shad, __fadd_rn(h0, __fmul_rn(dist, __fsub_rn(
+                tr_tan(topoelev), tan_sun))));
+        }
+    }
+    shadowmask[o] = mask;
+    ht_shad[o] = shad;
 }
 
 // ---------------------------------------------------------------------------

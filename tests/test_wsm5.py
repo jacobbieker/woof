@@ -153,6 +153,7 @@ def test_the_table_row_admits_wsm5_with_its_species():
         "glibc_flt32.cuh", "glibc_flt64.cuh")
     assert UNFLUSHED_OPTIONS == ("-std=c++17", "--fmad=false", "--ftz=false")
     assert row.level_tier(2) == 64 and row.level_tier(80) == 80
+    assert row.level_tier(81) == 128 and row.level_tier(256) == 256
     with pytest.raises(ValueError):
         row.level_tier(1)
 

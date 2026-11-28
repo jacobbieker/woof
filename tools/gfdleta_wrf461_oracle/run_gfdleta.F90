@@ -18,7 +18,7 @@ program run_gfdleta
  call get_command_argument(1,arg); read(arg,*) n
  call get_command_argument(2,arg); read(arg,*) arm
  call get_command_argument(3,prefix)
- if (n < 8 .or. n > 80 .or. (arm/=0 .and. arm/=1)) error stop 'bad oracle arguments'
+ if (n < 8 .or. n > 256 .or. (arm/=0 .and. arm/=1)) error stop 'bad oracle arguments'
  allocate(sf(n+1),sh(n+1),p(nx,n+1,1),pw(nx,n+1,1),t(nx,n+1,1),pi3(nx,n+1,1), &
  dz(nx,n+1,1),rho(nx,n+1,1),qv(nx,n+1,1),qw(nx,n+1,1),qi(nx,n+1,1),qs(nx,n+1,1), &
  rt(nx,n+1,1),lw(nx,n+1,1),sw(nx,n+1,1),cf(nx,n+1,1))

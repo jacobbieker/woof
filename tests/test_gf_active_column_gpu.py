@@ -16,6 +16,7 @@ import pytest
 cp = pytest.importorskip("cupy")
 
 from woof.core import gf as gf_module  # noqa: E402
+from woof.core import gfl as gfl_module  # noqa: E402
 from woof.core import mpas_column_batch as mcb  # noqa: E402
 
 import test_mpas_column_batch_gpu as base  # noqa: E402
@@ -24,17 +25,28 @@ STEPS = 3
 
 
 def _record_gf(monkeypatch):
-    """Record every GF result (rthcuten, rqvcuten, rainc) the seam gets."""
+    """Record every GF result (rthcuten, rqvcuten, rainc) the seam gets.
+
+    Both cu_physics=3 callables are recorded: since the 1.1.7 sync the seam's
+    ``cumulus_scheme="gf"`` builds WRF v4.8.0's GFL (GrellFreitasLi, the
+    cu_gf_version default), and before it GF 4.6.1 (GrellFreitas). Recording
+    only the latter left these tests seeing no call at all.
+    """
     calls = []
-    original = gf_module.GrellFreitas.__call__
 
-    def wrapped(self, **kwargs):
-        result = original(self, **kwargs)
-        calls.append({name: cp.asnumpy(getattr(result, name)).copy()
-                      for name in ("rthcuten", "rqvcuten", "rainc")})
-        return result
+    def record(cls):
+        original = cls.__call__
 
-    monkeypatch.setattr(gf_module.GrellFreitas, "__call__", wrapped)
+        def wrapped(self, **kwargs):
+            result = original(self, **kwargs)
+            calls.append({name: cp.asnumpy(getattr(result, name)).copy()
+                          for name in ("rthcuten", "rqvcuten", "rainc")})
+            return result
+
+        monkeypatch.setattr(cls, "__call__", wrapped)
+
+    record(gf_module.GrellFreitas)
+    record(gfl_module.GrellFreitasLi)
     return calls
 
 

@@ -167,6 +167,17 @@ BASELINE_PINNED: dict[str, str] = {
     "rrtmgk_lw": "887e276ea96ee776f0a32a70e38e76ab1bba4e7bac70a4ea4e992dfdfb1b1ecf",
     "rrtmgk_prep": "2df3ca5b115cc58d9a68bfb914321db666c54d23a483838957ac79f75999b5b6",
     "rrtmgk_sw": "a56b6b3b2254967ca4a767dd99766df1c7bce186b35bc9a69fd3031ee7574ab0",
+    # WRF-480 L12: WRF v4.8.0 dynamic lightning (module_ltng_lpi / charge),
+    # replayed 0 different against the native 4.8.0 strict referee
+    # (20,148,480 words).
+    "dyn_lightning": "165d37168e5a92462600d3feab781f9d56514643653cdb2d66f5c3142944ff34",
+    # WRF-480 L04: WRF v4.8.0 MYNN-SFC b66187f5, replayed 0 different against
+    # the native 4.8.0 strict referee on A195 captures (648,000 words).
+    "mynnsfc_b66187f": "71e67a30afe5a9fd9672bb5ee52f5669987b274eeb066b4bd26bdc59640c62a1",
+    # WRF-480 L10: WRF v4.8.0 module_wind_fitch.F, both branches with THRUST;
+    # replayed word for word against the native 4.8.0 strict referee
+    # (tools/wind_mav_wrf471_oracle/replay_fitch_480.py, 455,520 words each).
+    "wind_fitch_480": "120961c5e3709441720d41e86ffe03019646788c810862fcdb7cfa1cf87e1b40",
     "gbmpbl": "20fb754c8290e50e8962e2be2786956b7b3ae3fdb0e875860854c8b979811a57",
     # HRRR initial helper: all 3456 native output words, both selectors.
     "gsd_initial_reflectivity": '9f9af95b259d978647dca1992f2b14e4bafaea5c781d269e53dca93fbb2a3419',
@@ -285,10 +296,11 @@ BASELINE_PINNED: dict[str, str] = {
     # tendency words (tests/test_smag2d_uv_faces.py, CUDA and Metal, fast and
     # strict numerics, GPUWM_WRF_EXACT=0 and 1).
     "smag2d_uv_faces": "dc9828ca72bc7c7b6acb02b382c7326f33fd3f9eb16ab365e7f3e19a400dabfd",
-    # wrf_tke_rhs on stored defor13/defor23 faces (composes smag2d.cu, which
-    # keeps its bytes): the same TKE source words (tests/test_smag2d_tke_faces.py,
-    # CUDA and Metal, GPUWM_WRF_EXACT=0 and 1).
-    "smag2d_tke_faces": "421c718311e7724d3fd5ba733bfd3c59eca0cf828a753d284bac6e3142128f59",
+    # wrf_tke_rhs on stored defor13/defor23 faces (composes smag2d.cu): the
+    # same TKE source words (tests/test_smag2d_tke_faces.py, CUDA and Metal,
+    # GPUWM_WRF_EXACT=0 and 1).  RE-PINNED by FQ12 (diff_metrics_seam_slope):
+    # smag2d.cu's boundary flag 2 and this unit's bounded-bit test.
+    "smag2d_tke_faces": "36b322176076c25c1d14bb2512af740c635fe21a820495be183c39642f067d8e",
     # The opt-in porous immersed obstacles (obstacle_opt = 1, woof's own,
     # beyond WRF): a new unit, launched only when a domain has buildings
     # (tests/test_obstacles.py; off and zero-obstacle runs never load it).
@@ -660,7 +672,7 @@ BASELINE_PINNED: dict[str, str] = {
     # now compiled per run at a power-of-two tier of nz); the preprocessor
     # drops comments, so no compiled binary moves.  Previously af8c732f.
     "sase":
-        "c1d5aeb507bdf53d812ed1df3e04450e01c32cb190b956e782d971e8f5e1d942",
+        "9c7181d1dd156bd84bd6400ad9b2abeaae404fb80044c0a43ca851476ce5efef",
     # a084e0aeb fix(shinhong): the ULP table moved because the kernel compiler did, so it is
     # RE-PINNED 2026-09-30 by the default-pieces speed lane (878435c39):
     # the column arrays move from a 17,160 B per-thread local frame into a
@@ -713,6 +725,12 @@ BASELINE_PINNED: dict[str, str] = {
     # 58dfd599c feat(shinhong): CUDA mirror on the RTX 5090 -- dtheta bitwise, br DAZ counte
     "shinhong_validation":
         "e3714616c403a3f272600499164cf9b0215879d567dadcda31287dd33c600b87",
+    # WRF 4.8.0 Shin-Hong (physics_mmm bl_shinhong.F90, shinhong_version =
+    # "wrf_480"), a new unit: 0 of 543,816 words different from the native
+    # 4.8.0 strict objects (TKE copy-in labelled patch) on the 1,161-column
+    # corpus of tools/shinhong480_oracle, strict build.
+    "shinhong_480":
+        '7b05d0b412eae48e2fbd6ddddb44766b905eb2bad8af187475ac93b30f4263ff',
     # c1563f187 fix(release-scan): the gate reads by content, and sees an escaped path
     # RE-PINNED 2026-09-24 by the WRF v4.6.1 real-column repairs.  What
     # moved is WRF's own rule in each case, cited to module_mp_thompson.F
@@ -764,8 +782,9 @@ BASELINE_PINNED: dict[str, str] = {
     # 25 oracle CSVs and both-mode state/tendency hashes reproduced at 2f349b417.
     # Integrated 2026-11-01 at 82024a1f6c8b:
     # Native MP38 hail-number/volume arms and ordered arithmetic; batch005 hail GPU and restart checks
+    # RE-PINNED 2026-11-23 (FQ5 thompson_rain_snow_closure): #ifdef THOMPSON_RAIN_SNOW_CLOSURE blocks only; without the define the unit's program is unchanged (tests/test_thompson_rain_snow_closure.py).
     "thompson_aerosol_cold":
-        'ac6af93c55763d6fc1b42697ad5b93be447547e931a2010e6ba2ba4ed90d4743',
+        '62371be761d96c91d3788f4d84db6efb190d90245b6c933c5461df8209937e43',
     # 0ebda6608 snapshot(mp28): the recovered aerosol-aware Thompson port, re-parented to it
     "thompson_aerosol_probe":
         'a4db6f915e5393c2a809f40c0b793ccba5e9bba51a672f7d5ea99a04c1a18274',
@@ -944,8 +963,10 @@ BASELINE_PINNED: dict[str, str] = {
     # Hail pin retains E classic scheduling; obsolete one-slab offset removed.
     # Conditional number/volume, density bins, fallout and diagnostics;
     # 25 oracle CSVs and both-mode state/tendency hashes reproduced at 2f349b417.
+    # RE-PINNED 2026-11-23 (FQ5 thompson_rain_snow_closure): #ifdef THOMPSON_RAIN_SNOW_CLOSURE blocks only; without the define the unit's program is unchanged (tests/test_thompson_rain_snow_closure.py).
+    # RE-PINNED 2026-11-23 (FQ7 thompson_lamc_updated_rc): #ifdef THOMPSON_LAMC_UPDATED_RC block only; without the define the unit's program is unchanged (tests/test_thompson_lamc_updated_rc.py).
     "thompson_aerosol_warm":
-        'c3e55b92419e88dbeccb77fdceac77f5e0db5497e8bcc4b381c06de0812efe16',
+        '6339fdd602cdf97b86ac2219e90c7d8ef7880872bf11d69c672633ff8767b467',
     # 02cfd5301 feat(les): km_opt=2 restart carrier, lateral-boundary arm, TKE budget
     "tke_budget":
         "c7f6dc37f15b25fccbea50deef0c6d595c08b2ee4762f14eef169b654d54fccb",
@@ -1096,6 +1117,14 @@ BASELINE_PINNED: dict[str, str] = {
     # glibc_flt32.cuh and glibc_flt64.cuh prepended.
     "fire_spread":
         "d6dd5c154a9ae3f54e0698b131120f9d2f82025510a150885c073520b97b41b7",
+    # port/wrf-480-L08: gwd_opt = 1 as WRF v4.8.0 runs it (the revised KIM
+    # drag: ELVMAX blocking levels, kgwdmax cap, gwd_dx_factor,
+    # gwd_if_nonhyd, per-level limiters), compiled after terrain_drag.cu in
+    # its own unit (woof/core/terrain_drag.py _gwdo480_module).  0 of
+    # 139,841,832 words differ from the native WRF v4.8.0 strict referee's
+    # objects (tests/test_gwdo_kim_wrf480_parity.py).
+    "terrain_drag_gwdo480":
+        '1fe0f01ccf3b9258a403fb52ac2062f64bc23d7916fa8b234063bc1a42507fe6',
 
     # ebcf4edd2 development branch: the BEP column (sf_urban_physics=2)
     # (tests/test_urban_bep_wrf471_parity.py)
@@ -1198,7 +1227,12 @@ BASELINE_PINNED: dict[str, str] = {
         # 2.9.0 round 2: golden/ports-mp's Ferrier consumer edit (024c62024)
         # plus golden/ports-rad's appended rp_cldfra2, each pinned on its lane;
         # the combined bytes are both changes and nothing else.
-        'bb6fb8f5194954d6208f66069b3259b02881d2220f22ec4437b66c9544ab7563',
+        # RE-PINNED by RunConfig.rrtmg_lw_model_top (correct-mode FQ6): an
+        # #ifdef RRTMG_LW_MODEL_TOP / #else arm in the LW profile match keeps
+        # tlev(kte+1) and tlay(kte); without the define the compiled program
+        # is the previous one byte for byte (tests/test_rrtmg_lw_model_top.py
+        # strips the arm and checks the previous digest bb6fb8f5).
+        '7935ca36e19bd18411d6340aec88547687a64e8aa3c76525e80e69694a38bcc8',
     # levels256/rrtmg-lw: regenerated from rrtmg_lw_chain.cu after its
     # RLW_MAXLAY became an #ifndef default (the per-run layer tier); the
     # shipped-tier unit's PTX is byte-identical to the base's.
@@ -1269,14 +1303,38 @@ BASELINE_PINNED: dict[str, str] = {
     # became correctly rounded.  Measured on W1 (RTX PRO 6000, NVRTC
     # 12.9.86): 0 of 425,468 chain values differ from WRF v4.6.1 on glibc
     # 2.43, strict and default arithmetic.
+    # Re-pinned by hex topo_shading (2026-11-26): toposhad's sun moved into
+    # tr_shadow_sun, inlined into topo_shadow_scan with the same statements
+    # in the same order, and the hex mesh scan (topo_shadow_scan_mesh)
+    # added; tests/test_topo_radiation.py's grid oracles hold bitwise on
+    # Metal and CUDA.  Re-pinned again (2026-11-27) for the mesh scan only:
+    # a cell on a limited-area mesh's edge reads its on-mesh triangles
+    # instead of ending its scan, and the nearest-cell walk is bounded by n.
     "topo_radiation":
-        'eed766ccaa9cd8e856423c407750cffb829a9e8e01c0b28c5ef91b9d16861de8',
+        'f2a5614df0125b271b093ae5c637dffc9786e60d1f5c4f4aafc21d82467f8a23',
     # Noah mosaic (sf_surface_mosaic = 1): WRF v4.7.1 lsm_mosaic and its
     # ordinary and glacial SFLX subtrees, bitwise against the byte-unmodified
     # WRF column oracle at every non-FTZ word
     # (tests/test_noah_mosaic_wrf471_parity.py).
     "noah_mosaic":
-        'd8739ffa18b0f3f594871cd88a7be274697ba3fb583bf788b4ed49209bdc7e19',
+        # RE-PINNED 2026-11-22 by the opt-in noah_smc_floor_booking (default off): a
+        # NOAH_SMC_FLOOR_BOOKING #ifdef block in SSTEP takes the water the 0.02
+        # floor adds from the layer below (WPLUS < 0) or RUNOFF3; without the
+        # define the preprocessed program is the previous one byte for byte
+        # (tests/test_noah_smc_floor_booking.py strips the block and checks the
+        # previous digest).  Previously d8739ffa.
+        # RE-PINNED 2026-11-23 by the correct-mode noah_land_ice_rain_runoff (FQ8): a
+        # NOAH_LAND_ICE_RAIN_RUNOFF #ifdef block in the glacial tile adds the
+        # rain SFLX_GLACIAL drops to RUNOFF1; without the define the program is
+        # the previous one byte for byte (tests/test_noah_land_ice_rain_runoff.py
+        # strips the block and checks the previous digest).  Previously 5c09214c.
+        # RE-PINNED 2026-11-26 by the correct-mode noah_snow_series_conductivity (FQ9): a
+        # NOAH_SNOW_SERIES_CONDUCTIVITY #ifdef block in the snow soil-heat-flux
+        # blend swaps DF1A for the series DF1H WRF computes and never reads
+        # (module_sf_noahlsm.F:649, :656); without the define the program is
+        # the previous one byte for byte (tests/test_noah_snow_series_conductivity.py
+        # strips the block and checks the previous digest).  Previously 6c208d40.
+        'aeb8c2de7a04c73f2c828c0bf6581e8d414f9c2f75cd398d6e59bda2f87e381c',
     # development branch (smoke, aerosol and air-quality program).  chem_bdy:
     # WRF-Chem's outer-domain flow_dep_bdy_chem, bit-identical to the
     # Fortran on 24 oracle cases (tests/test_chem_bdy_wrf471_parity.py).
@@ -1465,8 +1523,10 @@ BASELINE_PINNED: dict[str, str] = {
     # Previously d13b914a.
     "rrtmgp_gas_default": "66557cb1680e4ee29c86845f408dbf0cf3108ae0e158e830554e5b15b5b2c3ba",
     "rrtmgp_rte_default": "731bd84717398320a1710b2c151a466b9e5bf1a30b633d858fd31d7162dbd173",
-    "thompson_classic": 'efc122d5dcdc19763584ed856dc7800b20621fd1b7dd80defefe82583b6152bd',
-    "thompson_fork": "c7313ce62d863bdeb9478b7a503c8faffae6d17c8a20cbb1b6d458c216e4c947",
+    # RE-PINNED 2026-11-23 (FQ5 thompson_rain_snow_closure): #ifdef THOMPSON_RAIN_SNOW_CLOSURE blocks only; without the define the unit's program is unchanged (tests/test_thompson_rain_snow_closure.py).
+    "thompson_classic": '060b73dd839faf37a330bc180dcc2acc429bbd22bd0018a18179512cf7107426',
+    # RE-PINNED 2026-11-23 (FQ7 thompson_lamc_updated_rc): #ifdef THOMPSON_LAMC_UPDATED_RC block only; without the define the unit's program is unchanged (tests/test_thompson_lamc_updated_rc.py).
+    "thompson_fork": "3f3c7f12faa3f42d125b442c6ee72906c70baf642e55c66ca9a7c1f3f2fed4be",
     # RE-PINNED at the 1.1.0 upstream merge: YSU_KMAX 256 (the fork's ceiling, via the rename of ysu.cu).
     # Previously f56e3ec7.
     "ysu_default": "7192b5b10c683718a9395682bde12a7145c2ca20318047d5a7998b1e87b1fbf2",
@@ -1492,7 +1552,9 @@ BASELINE_PINNED: dict[str, str] = {
     'afwa_severe': 'cfdef0a7e6f812ec37f438313d40c692b398f999997b595c990590e4094ede28',
     'misc_diag_print': 'a71ad9fc19c27755d351c57ecd31999d6b6b0ec14703e66543d54962aa356cf4',
     'noahmp_output': 'ef24fdd73a747b8dec610e8d6420e33f5e5f3a0850447275f11f736aa0243442',
-    'snow_papers': '6910e7580f9d4dcf6c7ee9b53f349ee3c982f075d4d7f2b8cf924ee19ffa6ad6',
+    'snow_papers': '1352163f7a42109d3bfcd3ae8f96eced72153034bd597f811fda9548572f2923',
+    # clean-snicar-lap: snow light-absorbing particles (snicar_lap_opt), opt-in.
+    'snow_lap': '5dfb404296ef4d2d503a8a8b9ebebe7640865f7219e8f5ecbd82570825b2c387',
     # r290 exact-chain intake: source identity, numerical gates separate.
     'etanew': 'c4aaeb0613aac95fd3cdef789dbdd24bf899a56b557775a5e8af80499584a477',
     'idealscmsfclay': '52bc878fab77015d31c79d1c1be7b0af3ee32b9885323f5d7214358c3ee927d6',
@@ -1506,11 +1568,15 @@ BASELINE_PINNED: dict[str, str] = {
     'noah_ua': 'f120ee901eeffec221629ff5dc27b9aabdd8560410822408b2708a7a28291526',
     'noah_ua_sfcdiags': '590b288396d8075e76e880c589c09b151a755ad354a024fb2e026c1ebc0a1549',
     'sfclay_dx2d': '50de22fd147357b3531809dc33f59acfb7ab0bf519d36423c0258b550d83fd8e',
+    # WRF v4.8.0 kim_tofd unit (port/wrf-480 L07): sfclay.cu + GPUWM_SFCLAY_TOFD.
+    'sfclay_tofd': 'cc082df0074b78841c58b2d66ae7ed368da1c1ed5b8e45220bb7529a9a0ea87a',
     # r290 exact-chain intake: source identity, numerical gates separate.
     'rcon': '3d4d3e1b6584c7ea558a75adac9ddf0839d3b6058027b6dae9a9b9d5d0a60e5b',
     'udm': 'bdb41754f151bcfa329e21b3e12c673a0bb9f23f5e3c719baabc088d22d9371a',
     # r290 exact-chain intake: source identity, numerical gates separate.
-    'sfs_output': 'f8df238d672aae46bfbe83e71fdd322feced36a8bda503544f9a9c2701236da9',
+    # RE-PINNED by RunConfig.diff_metrics_seam_slope (FQ12): its inner-axis
+    # test reads the boundary flag's bounded bit (flag 2 is periodic).
+    'sfs_output': 'ccd9df3122703ac600d46a1840120e18581e98b090959f14d1a82fa6518f61bc',
 }
 
 _FROZEN = _frozen_module()
@@ -1546,7 +1612,9 @@ PINNED_HEADERS = {
     "../../data/gfs_pbl/gfs_pbl_constants.cuh":
         "a43cc63a6ae846be573e4f550c9a9c40512ced02b8140def12fac08d27dbc9ef",
     # Existing fork radar transcription, reused unchanged by the initial helper.
-    "thompson_fork.cu": "c7313ce62d863bdeb9478b7a503c8faffae6d17c8a20cbb1b6d458c216e4c947",
+    # RE-PINNED 2026-11-23 (FQ5 thompson_rain_snow_closure): #ifdef THOMPSON_RAIN_SNOW_CLOSURE blocks only; without the define the unit's program is unchanged (tests/test_thompson_rain_snow_closure.py).
+    # RE-PINNED 2026-11-23 (FQ7 thompson_lamc_updated_rc): #ifdef THOMPSON_LAMC_UPDATED_RC block only; without the define the unit's program is unchanged (tests/test_thompson_lamc_updated_rc.py).
+    "thompson_fork.cu": "3f3c7f12faa3f42d125b442c6ee72906c70baf642e55c66ca9a7c1f3f2fed4be",
 
     # New Goddard band and sounding tables (lane ra5-goddard), prepended to
     # the goddard unit only (kernels._EXTRA_HEADERS).
@@ -1566,11 +1634,15 @@ PINNED_HEADERS = {
     # if-then brace, so 187 trailing blanks left the regenerated header (the
     # 2.8.9 cut's export whitespace check refused them). Only line-end bytes
     # changed; every statement and table literal is the same.
-    "thompson_column_generated.cuh": "f07dd881fbec30952ba3d17b16012693e4ea689f50dcefde350c0222473fb552",
+    # RE-PINNED 2026-11-23 (FQ5 thompson_rain_snow_closure): #ifdef THOMPSON_RAIN_SNOW_CLOSURE blocks only; without the define the unit's program is unchanged (tests/test_thompson_rain_snow_closure.py).
+    "thompson_column_generated.cuh": "739a44fb3c4826ab031a516d4194884b8ca67ca837b8aef1a98d36737da30c2a",
 
     "urban_ucm480_support.cuh": "6b5db2885a7e00d5c8ec65f7e3857efc9cf30c2264c9e5512020373e891089d6",
     "urban_ucm480.cuh": "bcb062c9ad2854e54ae2205ad898f26aa6153a8144729491577a631ebcc5cfaa",
     "urban_ucm.cu": "be7d1058e4578338a46713e3725862c4b8c82ccf617857d0820d9832b86431f7",
+    # shinhong.cu prepended to the WRF 4.8.0 Shin-Hong unit (shinhong_480);
+    # the same bytes as its own module pin above.
+    "shinhong.cu": "ba175a81c042ec02e19f819887369a3204e8e1880d7c224c5fe2f3e3da09d221",
     # Lake lower bounds, REAL kinds and division rounding are part of the
     # column contract; test_lake_contract regenerates the WRF statements.
     # ABS sign clearing includes negative zero, subnormals and signed NaNs;
@@ -1739,9 +1811,12 @@ PINNED_HEADERS = {
     # r290 exact-chain intake: source identity, numerical gates separate.
     'column_r8.cuh': 'cddbef58db0879c9175766f069cb70d3d14c275009f016e5f3509063abcd498c',
     'cu_osas_table_seeds.cuh': '848e0e566611e26b83b8d741232af42f717aa7221c681f224c4b4500b0dfb80f',
-    'flg_gases_generated.cuh': '22ed32e3a410cf8db4ad49d692300aba45dec5bfac6dd99e3e910afc2247a569',
-    'flg_streams_generated.cuh': '303b233c645a50bcd42ce4bbae868a59195bc9a0814198e53d9ef5bfea845fab',
-    'flg_workspace_generated.cuh': '02f57d888349249c4ad7825c568e02fa3002220da5c9d497bc6eed4ba78a5563',
+    # FLG: re-pinned for the FLG_NVX level tier. The macro (default: stock
+    # nvx=100) replaces level literals only; default-tier SASS is identical
+    # (docs/kernel_local_memory_bounds.md, FLG section).
+    'flg_gases_generated.cuh': '851db6ec73aeab6bfcd54914d93686b20fc5c254e220897ce3b2f79623983691',
+    'flg_streams_generated.cuh': 'df34ad2544bceaf6190be23b1a6828108ff28ea1f475858345937f1cdb3efcb0',
+    'flg_workspace_generated.cuh': 'a6d6bc36d7739b1e0d0be6aef6de816a86128cfb7267b26762400b52117f0d58',
     'flt32_log10_tanh.cuh': 'd2f5ba8b49577e28a97f80816373aed05da64fd26e561b24aa455d7f71d84cf2',
     'gfdleta_co2_init.cuh': 'b6568fbc35ca2c5332aa80520dd109fa63cb56334ed3f55d4fc93424f8b6e66c',
     'gfdleta_column.cuh': '5bbb62d7c4d53a730935f154395d78ac34e60acee2ef28f5938e45e04fccd881',
@@ -1758,11 +1833,12 @@ PINNED_HEADERS = {
     'km5_math.cuh': 'd3c096f002a8bca46a3fe4dcf762256f3b80fbb29ec7aa3fe72dd4b0b50fbcab',
     'lin_support.cuh': 'b75aa705f7598bc7131e3891c2f6ff6c81e5b99e5ce06c6303fb7924cdbb395c',
     'lin_wrf.cuh': '3954ddbef0420d1f88f0eba3ae81e5db9df3918a58f60779d1b5055e9ee8c2d0',
-    'mynn_pbl.cu': '0a3cc76ddc7fbdfc9b59d8db1c1365746cc4fd649a1bd7b7ae30c6e455643ba0',
+    'mynn_pbl.cu': '17c4f8c5abb445b2213382c609bfa96ddae9d1c965b28d237b607d9b8b95c58c',
     'nsas_constants.cuh': 'e50bd02c62e11ec3c4bf5619bab6e30805832401df930c1235a136db2fb4c907',
     'radar_backscatter_common.cuh': '7564e059e3e99be94134b97c625d85a9a74fdee872bba193197ade7196d9fd72',
     'refl.cu': '1e2c45699a721b4b042769f9f868d85d8a6eb4960fc547ce9affb59b69f43f66',
-    'smag2d.cu': '379c2013faaaa3df1ae7fbdbc68cc15cf9f6334d55bf2511083287d126b88b0f',
+    # RE-PINNED by FQ12 (diff_metrics_seam_slope): boundary flag 2.
+    'smag2d.cu': '854ee250c242baa7d9fd6aba459d6e5f460261f51070d61a420fc9442c6d9dc1',
     'swint.cu': '9a79b7e43cb92553ae454975a943acedc3d8510b5c7eae59ec2c5bb8c8b47c5b',
     'temf_log10_flt32.cuh': '61c2596ef9b7456c1328eb5b9064c84b72f15acad698b084b87a831c478bb69f',
     'wdm_common.cuh': '77590100c6d6066bda9bb347caa318839a107104fceaf1c7690ba184779b01f8',
@@ -1781,14 +1857,17 @@ PINNED_HEADERS = {
     'deng_support.cuh': 'c4a417c8377f8464ef8e7746992f380bb171b06e825c353d0bb2f96e8ae26133',
     'mskf_aerosol.cuh': '91fefcce94ec7bc775ba526b2d4a95eb4d4c7946ffd95da11f53474a2811bfa9',
     'mynn_scalar_mix.cu': 'abc61827d645ce7af664a7294ecfd289834de5cc57b485bff20e20d27ed17c1f',
-    'noah_mosaic.cu': 'd8739ffa18b0f3f594871cd88a7be274697ba3fb583bf788b4ed49209bdc7e19',
+    # noah_smc_floor_booking's #ifdef block (default program unchanged).
+    'noah_mosaic.cu': 'aeb8c2de7a04c73f2c828c0bf6581e8d414f9c2f75cd398d6e59bda2f87e381c',
     'noah_seaice_options.cuh': '033fec7afc7129e3455aba955f748e6eb49213aeab12e1ad82801b8c2dfd4b7b',
     'noah_ua.cuh': '6ffe8841f48994d15eb1e6dfeb1d2c0667e1ea0ad4b56a2f50c45ca24d07dba1',
     'noah_ua_plain.cuh': '40746bf3560c1922b28a6341a50753c4ec4946842bfa613c5c1f8b8b826f1108',
     'nwp_hail_bins.cuh': '00402f3ea6502e6ddd211b70a3fde41d7aa13fb9e657d4f6528c7d8c8b2481d7',
     'rrtmg_aer3.cu': '0ab8dab99a9b49c93699c0e3ce6778d63a6e8e1eb39966a1db49d4847db10dd3',
     'scalar_atan.cuh': '47e93ec8e1f6aa039191962a2add455dec0508f45cf715ec33cc9b65ae97f804',
-    'sfclay.cu': '2110f93e4f5ca9fcdee9c2b41844f81082b333af6081133c7078d8d02c82cbb6',
+    # port/wrf-480 L07: kim_tofd under #ifdef GPUWM_SFCLAY_TOFD (previously 2110f93e).
+    'sfclay.cu': '29be8e5edf5feac9af91b2bc6702ff09fed7be5f0f5414840b4fa5d539fdcca2',
+    'sfclay_tofd.cuh': '91ff0cd9e40eca8f14303bec92e469e1acf9f94ea00c4573ef5b8f49ce9acc73',
     'sfclay_dx2d.cuh': '23210fb4a5482098c8e7c51ad89bdb0cbc086cff54780e29def306d73bd96cc1',
     'thompson_collision_constants.cuh': '01225b95f51e08a3127cd7703ce6915529ac0df7863d104af6193eeb20014e98',
     'uwshcu_cam.cuh': '919657834432f286ee4966dd7626bc9e11d5318397fbf3887b65899aa4d0b962',
@@ -1806,8 +1885,8 @@ PINNED_HEADERS = {
 #: tools/transcribe_urban_bem.py and compiled by woof/core/urban_bem.py
 #: (04118fa24) into the BEP+BEM unit.
 COMPOSED_HEADERS = {
-    # GSFC SW production fast image, port-ra2-gsfcsw d15d6f3. Numerical checks are separate.
-    'gsfcsw_fast.cuh': 'e6f663eaeaa24a205d74a287983ef7d9ecdc118c0b7b94d6d7a901db6d788dc2',
+    # GSFC SW production fast image, port-ra2-gsfcsw d15d6f3; re-pinned for the GSFC_KMAX arena macros (128 expands to the old literals; word identity in tests/test_gsfcsw_256_levels.py and the oracle replay). Numerical checks are separate.
+    'gsfcsw_fast.cuh': 'e7899fc52c5d29127acbe23472fd4392b2e2f7f9341f29f8b153a0f753d5d183',
     # LF-normalized at golden/wrf-fixes: the lane blob ended in one stray CR after
     # its final #endif; the oracle-only helper is otherwise byte-identical.
     "urban_root_uptake_480.cuh": "30d091b0ce27830798128f1bb0228c6c8101435c1bf3e530320a723386b237f8",
@@ -1990,4 +2069,10 @@ def test_mosaic_ucm_composed_source_is_pinned():
     # d04c1a03.
     from woof.core.noah_mosaic import mosaic_ucm_source
     assert hashlib.sha256(mosaic_ucm_source().encode()).hexdigest() == (
-        'ebf5a3d14b34e8d8a1f40245033db71dda9733fb385e926fdf27fc45480fc7df')
+        # noah_smc_floor_booking's #ifdef block in noah_mosaic.cu, unread
+        # without the define.  Previously ebf5a3d1.
+        # RE-PINNED 2026-11-23 by noah_land_ice_rain_runoff's #ifdef block in
+        # the same file (FQ8), likewise unread.  Previously 5138ec78.
+        # RE-PINNED 2026-11-26 by noah_snow_series_conductivity's #ifdef block in
+        # the same file (FQ9), likewise unread.  Previously 48f6b2fb.
+        '9dd67a4488f07e934d12ba56b31994bf807bdfbeb0d39d069836d80e207ec008')

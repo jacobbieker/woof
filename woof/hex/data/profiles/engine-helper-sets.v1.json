@@ -166,8 +166,8 @@
       }
     },
     {
-      "id": "recast-woof-1.1.6",
-      "engine_commit": "dc3753350b907007cefa558b69095efde070d3c7",
+      "id": "recast-woof-1.1.7",
+      "engine_commit": "6137973e1fec4a616345d98280425cbf88ce347d",
       "sources": {
         "woof/core/kernels/rrtmg_sw.cu": "43134d6d6d2be4b3e668c7ab92d5850f1f992a09812dd09c9536fce5d9ab791e",
         "woof/core/rrtmg_legacy_prep.py": "708df127ad31fb63f34b0f3b3fa9380a1ce7df16531b72fc8af4780c450ac19c",
@@ -176,20 +176,20 @@
         "woof/core/rrtmg_sw.py": "bb28d6433b24b74bd1bb49f690ebbf87373314c19bb938dcaa98cc9f40b8c048",
         "woof/ingest/wrf_ozone.py": "6eebfaa389801460885a66844cd020ad8847c69a9af42d4c1b07f3e294fc8b2c"
       },
-      "description": "Recast WOOF 1.1.6: the radiation helpers of the engine this distribution was assembled from (dc3753350b90) as it ships them (moved to woof/ and their comments and messages reworded by the assembly; no code token differs); byte-equal in source to the hex row engine-2.9.12-source. Admission establishes source identity only."
+      "description": "Recast WOOF 1.1.7: the radiation helpers of the engine this distribution was assembled from (6137973e1fec) as it ships them (moved to woof/ and their comments and messages reworded by the assembly; no code token differs); byte-equal in source to the hex row engine-2.9.12-source. Admission establishes source identity only."
     },
     {
-      "id": "recast-woof-1.1.6-fork-merge",
+      "id": "recast-woof-1.1.7-fork-merge",
       "engine_commit": null,
       "sources": {
         "woof/core/kernels/rrtmg_sw.cu": "502dfc9b15481742ff5d56a7730c372502904dd4abe37dd131a953e4a35f8122",
-        "woof/core/rrtmg_legacy_prep.py": "79e755641dfc16dadb0c25fcd3e97782054dcaa6436db10d99f92d574346fa67",
+        "woof/core/rrtmg_legacy_prep.py": "c5509817fb0142b17889cf82b25b2f6bab8f0bca00acca7342c94401908fc356",
         "woof/core/rrtmg_lw.py": "0e32220aa7c66cf19374d440259b125035e84a45e7a0cb74ec149b9fc55510df",
         "woof/core/rrtmg_mcica.py": "d4b74af4a8b05e2807a806c78ef1c3270c43aa58c1afd0e7b2247f232b2bd54e",
         "woof/core/rrtmg_sw.py": "4ebda148df1f6c659ff7e1c303ea632a40f6f58b3250b122d2842c52be8a8836",
         "woof/ingest/wrf_ozone.py": "f3cb710640562cfffdd8e544547ab898309800b0d7aa2dff6209600b4b6c0c5d"
       },
-      "description": "Recast WOOF 1.1.6 merged with the fork's engine changes (the per-run RRTMG LW layer tier, the surface-solar carriers, the 256-level radiation ceilings and the per-band / per-g-point RRTMG flux outputs, whose spectral-output part comes from the SW scratch, and the RRTMG-K taumol_post hook, which runs nothing unless RRTMG-K passes it, and the solar_ssi_opt band_factor on adjflux, None by default, which leaves every output bitwise unchanged, and rsw_spcvmc_gpt_b's direct-beam transmittance products carried in registers, the same words): the radiation helpers as this tree carries them. Admission establishes source identity only."
+      "description": "Recast WOOF 1.1.7 (as 1.1.6 before it) merged with the fork's engine changes (the per-run RRTMG LW layer tier, the surface-solar carriers, the 256-level radiation ceilings and the per-band / per-g-point RRTMG flux outputs, whose spectral-output part comes from the SW scratch, and the RRTMG-K taumol_post hook, which runs nothing unless RRTMG-K passes it, and the solar_ssi_opt band_factor on adjflux, None by default, which leaves every output bitwise unchanged, and rsw_spcvmc_gpt_b's direct-beam transmittance products carried in registers, the same words): the radiation helpers as this tree carries them. Admission establishes source identity only."
     }
   ]
 }

@@ -1134,6 +1134,20 @@ __device__ __forceinline__ void thompson_aa_warm_level_wrf461(
     thompson_aa_wrf_frozen_block(&L, dt, odts, T);
     // HOST READBACK ANCHOR: the warm level's frozen block is complete.
     thompson_aa_wrf_conserve(&L, odts);
+#ifdef THOMPSON_RAIN_SNOW_CLOSURE
+    // RunConfig.thompson_rain_snow_closure (FQ5): WRF re-pairs the
+    // rain-snow transfer only where twet > T_0 (:2946-2950).  Below it the
+    // graupel gain keeps its pre-limiter value while the rain and snow
+    // limiters shrink the losses; the gain becomes what they lose, floored
+    // at zero (snow then takes only what rain lost).
+    if (L.twet < AAF_T0) {
+        L.prg_rcs = -(L.prr_rcs + L.prs_rcs);
+        if (L.prg_rcs < 0.0) {
+            L.prs_rcs = -L.prr_rcs;
+            L.prg_rcs = 0.0;
+        }
+    }
+#endif
     // HOST READBACK ANCHOR: every warm-level rate final.
 
     // The two held branch decisions the fallout reads.
@@ -2059,6 +2073,26 @@ extern "C" __global__ void thompson_aa_warm_source_network(
         thompson_aa_reenforce_pair(&rain_snow_rain_rate,
                                    &rain_snow_snow_rate);
     }
+#ifdef THOMPSON_RAIN_SNOW_CLOSURE
+    // RunConfig.thompson_rain_snow_closure (FQ5): the hail-aware / WRF 3.9
+    // source network re-pairs the rain-snow transfer only above 0 C, so
+    // below it the graupel gain (and its volume pbg_rcs, derived from it
+    // below) keeps its pre-limiter value while the rain and snow limiters
+    // shrink the losses.  The gain becomes what they lose, floored at zero
+    // (snow then takes only what rain lost).
+#if defined(THOMPSON_AA_WRF39)
+    if (temp0 < 273.15f) {
+#else
+    if (wet_bulb < 273.15f) {
+#endif
+        rain_snow_graupel_rate =
+            -(rain_snow_rain_rate + rain_snow_snow_rate);
+        if (rain_snow_graupel_rate < 0.0) {
+            rain_snow_snow_rate = -rain_snow_rain_rate;
+            rain_snow_graupel_rate = 0.0;
+        }
+    }
+#endif
 
 
     // Preserve WRF's two independent post-conservation branch decisions.
@@ -2432,6 +2466,29 @@ extern "C" __global__ void thompson_aa_ncten_balance(
                     THOMPSON_AA_OCG1[nu_c]),
                 rc),
             THOMPSON_AA_OBMR);
+#ifdef THOMPSON_LAMC_UPDATED_RC
+        // RunConfig.thompson_lamc_updated_rc (FQ7): WRF forms lamc from the
+        // ENTRY cloud mass rc(k) (:3003, a copy of :1833) although the
+        // balance's mass is the updated xrc; the correction divides by xrc,
+        // the same mass the clamp branches below rediagnose xnc from.
+        // The comments elsewhere in this unit that call the rc / xrc split
+        // "load-bearing" or "deliberate" describe WRF's program, which exact
+        // mode keeps; this block is the one place the correction departs.
+        // qcten holds only sinks, so xrc <= rc: the entry mass gives a mean
+        // size xDc that is too large, never too small, so the stale form
+        // clamps spuriously at 2*D0r or misses the D0c clamp.  (The
+        // condensation rate prw_vcd joins qcten only after this balance, at
+        // WRF :3480; the balance sees the sinks alone.)
+        lamc = (double)thompson_aa_powf(
+            thompson_aa_div(
+                thompson_aa_mul(
+                    thompson_aa_mul(
+                        thompson_aa_mul(xnc, am_r),
+                        THOMPSON_AA_CCG2[nu_c]),
+                    THOMPSON_AA_OCG1[nu_c]),
+                xrc),
+            THOMPSON_AA_OBMR);
+#endif
         const float xdc = (float)(
             (double)((THOMPSON_AA_BM_R + (float)nu_c) + 1.0f) / lamc);
         bool clamped = false;
