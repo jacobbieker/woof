@@ -6607,11 +6607,11 @@
    },
    {
     "file": "woof/hex/mpas_seaice/column_v842.py",
-    "sha256": "1099875216631fccc52df699251beea9fb085fd44f9717fdc3ee2892468f5edf"
+    "sha256": "9ce1c3ffab691c026980dc3788e4fb4c0a438fd3efc5032e4fb07927e3c076c3"
    },
    {
     "file": "woof/hex/mpas_seaice/coupling_prep_v842.py",
-    "sha256": "f0dc2eb0fbbd60c6901bb0c5b7f707079780b7ed7318e245c2e3d85e30a9f467"
+    "sha256": "29d5abc021967fa2b0a8514a08428729fd666ca788c936b99bef20f11953c4f3"
    },
    {
     "file": "woof/hex/mpas_seaice/evp_v842.py",
