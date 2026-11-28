@@ -103,7 +103,7 @@ def test_kpp_inputs_on_the_wrong_time_level_are_caught(monkeypatch):
     real = tend_tracer_v842.tend_tracer
 
     def tend_tracer(**kw):
-        real(**dict(kw, tracers_level1=None))
+        real(**dict(kw, tracers_level1=kw["tracers"]))  # time level 2 for the surface fluxes
     monkeypatch.setattr(tend_tracer_v842, "tend_tracer", tend_tracer)
     case = next(c for c in oo.cases("r8") if c["name"] == "kpp_forward_variable_jm_bulk")
     got = oo.run_gpu(case)

@@ -104,7 +104,7 @@ def test_a_mutated_step_is_caught(monkeypatch, mutation, field):
 
     def tend_tracer(**kw):
         if mutation == "kpp_inputs_on_level_2":
-            kw["tracers_level1"] = None
+            kw["tracers_level1"] = kw["tracers"]  # time level 2 for the surface fluxes
         else:
             kw["configs"] = dict(kw["configs"], config_disable_tr_nonlocalflux=True)
         real(**kw)
