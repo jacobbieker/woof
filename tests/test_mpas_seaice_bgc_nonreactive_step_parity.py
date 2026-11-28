@@ -153,6 +153,8 @@ def test_coupling_prep_and_the_step_s_stages_carry_the_same_flags(flag):
     stage = _refused_knob(lambda: cv.refuse_unported(config, case["dims"], biogeochemistry=True, z_tracers=True))
     prep = _refused_knob(lambda: cpl.check_config(config))
     assert (stage == flag) == (prep == flag), (stage, prep)
+    if flag not in cv.carried_bgc_flags(case["config"]):
+        assert stage == prep == flag, (stage, prep)
 
 
 @pytest.mark.parametrize("name, correction, refuse", [
