@@ -155,9 +155,10 @@ def test_the_docs_list_every_correction():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     config = (ROOT / "docs" / "public" / "CONFIGURATION.md").read_text(encoding="utf-8")
     start = readme.index("woof_quirk_corrections")
-    umbrella_readme = readme[start:start + 4000]
+    # the window spans the umbrella's paragraphs: 6000 characters, as the MPAS-Seaice list grows
+    umbrella_readme = readme[start:start + 6000]
     start = config.index("`woof_quirk_corrections` (default")
-    umbrella_config = config[start:start + 4000]
+    umbrella_config = config[start:start + 6000]
     for c in qc.CORRECTIONS:
         name = "--undriven-species-boundary" if c.key == "undriven_species_boundary" else c.key
         for text in (umbrella_readme, umbrella_config):
