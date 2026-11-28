@@ -991,12 +991,16 @@ def k3_ad(adj_state, traj, adj, geom: KCGeometry):
     base = (tuple(traj[k] for k in DF_STATE + ("u", "v", "w"))
             + (T["zx"], T["zy"], T["rdz"], T["rdzw"], traj["bn2"], traj["msft"], traj["msfu"],
                traj["msfv"]))
-    # the pieces' adjoints (h2_km3_lin, then h2_km3_slot), then the gather
+    # the base deformation at its slots (h2_km3_dfor), the pieces' adjoints
+    # (h2_km3_lin, then h2_km3_slot), then the gather
+    Dv = cp.empty(_slots(geom), dtype=dtype)
+    _kernel("h2_km3_dfor", dtype)(_blocks(_slots(geom)), (THREADS,),
+                                  base + (Dv,) + geom.args(dtype))
     P = _pieces(geom, 16, dtype)
     Dm = cp.empty(2 * m, dtype=dtype)
     _kernel("h2_km3_lin", dtype)(
         _blocks(m), (THREADS,),
-        tuple(adj_state[k] for k in K3_STATE) + base + (P, Dm) + geom.args(dtype))
+        tuple(adj_state[k] for k in K3_STATE) + (Dv,) + base + (P, Dm) + geom.args(dtype))
     _kernel("h2_km3_slot", dtype)(_blocks(_slots(geom)), (THREADS,),
                                   (Dm,) + base + (P,) + geom.args(dtype))
     _kernel("h2_km3_ad", dtype)(
