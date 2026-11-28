@@ -5667,7 +5667,7 @@
    },
    {
     "file": "woof/core/bandwidth_glue.py",
-    "sha256": "2fbe64a3bd3a6db92657fa70ddca4b07d11e8fb45dbb2c40c2ac070de6891259"
+    "sha256": "63ce7f140ce2cd1bf6207dccfa4eca870279722b994523708f9e19e0c658769a"
    },
    {
     "file": "woof/core/cam3_fast.py",
