@@ -4237,7 +4237,7 @@
    },
    {
     "file": "woof/core/kernels/pd_advection.cu",
-    "sha256": "952e0f085ab73a69d8c3c6c9136fa5b6878b2689c4ac3dfba24ef72bc013ed76"
+    "sha256": "c83b45cc0f34de9c7c015136912677d9d025a477ac443f90e945ef5d70437027"
    },
    {
     "file": "woof/core/kernels/pd_vertical_sl.cu",
@@ -5205,7 +5205,7 @@
    },
    {
     "file": "woof/grad/wrfplus/kernels/pdadv.cu",
-    "sha256": "0aaf4277c86e5b35a8ad22d609dc545899f52113166d0fbf8dcbc62ffd1016d6"
+    "sha256": "092df757a3d710d0b82f4d5c5a0041014f136dff2a254fc8f1572d374f015091"
    },
    {
     "file": "woof/grad/wrfplus/kernels/rk_stage.cu",
@@ -5779,7 +5779,7 @@
    },
    {
     "file": "woof/core/moist.py",
-    "sha256": "aa56c03c4a76a6ad8e0cca34f0664e036fd16815e46728c78dec77d9cf7327d4"
+    "sha256": "2fea95f8c1eeda23322f1c2113f8967f4d4ab1839c0c3d5904755760ac2621b6"
    },
    {
     "file": "woof/core/morrison.py",
@@ -6091,7 +6091,7 @@
    },
    {
     "file": "woof/ensemble/batch_moist.py",
-    "sha256": "e2d8fb00d20be96bd10c4fc3534074d88d44936892b82ac929e59c054110d4bf"
+    "sha256": "8b63984e5a271c3a405237d7e29f5dfdc0a2743f8399aeaf73129864eb1a9e52"
    },
    {
     "file": "woof/ensemble/batch_nesting.py",
@@ -6171,7 +6171,7 @@
    },
    {
     "file": "woof/grad/wrfplus/pdadv.py",
-    "sha256": "323697ad06f58d9f0303091260d2db5f878cf1f5e2d1a39d067acf58a76dfc6d"
+    "sha256": "44c9ae88c64e1d7eb712f603b04261698fab830bfebd2b69c44cce6eb856ad10"
    },
    {
     "file": "woof/grad/wrfplus/stage.py",
@@ -22343,13 +22343,13 @@
    },
    "errors": {},
    "native_dataflow_differences": {
-    "sha256": "94f56b9f27d642e4e1b78d6c3c92dfbc55c9a18fe89a3678801e17323ae8c91f",
+    "sha256": "90ab4ef10450280a7f1d3ce48fa82b0cfbe04a032ff69b587345ad16874b62f0",
     "sites": {
      "100": 91
     }
    },
    "native_differences": {
-    "sha256": "eabcfd2c185d05890796625e832cb0377f2d4f5443e9fd081c6b33774e5818a9",
+    "sha256": "02e9423d41da12a24a3cbcd313b000044d04b48afe6f3435e739e21b05d92da3",
     "sites": {
      "100": 10
     }
@@ -22371,7 +22371,7 @@
      "-arch=compute_120"
     ]
    },
-   "source_sha256": "6db2d481e14fcdde22252a414dca1f7524df057fd9214815767d0f6691ea9246"
+   "source_sha256": "099938066f79eec28a34ad75c7997fae8c47ce032cdb7838a07f23123d8c718c"
   },
   "kernels:pd_vertical_sl": {
    "assessment": "static_diagnostic_only",
