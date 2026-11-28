@@ -55,7 +55,7 @@ def test_connected_spp_consumers_step_through_rk3(monkeypatch):
     from woof.ensemble.stochastic import StochasticTimestepHook
     original_config = fixture.RunConfig
     monkeypatch.setattr(fixture, "RunConfig", lambda **kw: original_config(
-        **kw, cu_physics=3, spp_conv=1, spp_pbl=1, spp_lsm=1))
+        **kw, cu_physics=3, cu_gf_version="wrf_461", spp_conv=1, spp_pbl=1, spp_lsm=1))
     state,cfg,driver = fixture._build(nx=16,ny=12,nz=40,
                                      sf_sfclay_physics=5,bl_pbl_physics=5)
     hook = StochasticTimestepHook((13,17), dx=cfg.dx,dy=cfg.dy,dt=cfg.dt,
@@ -111,7 +111,7 @@ def test_disabled_spp_provider_n1_is_byte_identical_to_bare_forecast(monkeypatch
     from woof.core.dycore import step
     from woof.ensemble.stochastic import StochasticTimestepHook
     original_config = fixture.RunConfig
-    monkeypatch.setattr(fixture,"RunConfig",lambda **kw: original_config(**kw,cu_physics=3))
+    monkeypatch.setattr(fixture,"RunConfig",lambda **kw: original_config(**kw,cu_physics=3, cu_gf_version="wrf_461"))
     plain = fixture._build(nx=8,ny=6,nz=40,sf_sfclay_physics=5,bl_pbl_physics=5)
     member = fixture._build(nx=8,ny=6,nz=40,sf_sfclay_physics=5,bl_pbl_physics=5)
     state,cfg,driver = member
@@ -146,9 +146,9 @@ def test_spp_compiled_sources_have_no_constant_division_rewrites():
     from tools.literal_division_census import production_units, census_unit, rewrite_sites
     selected = [unit for unit in production_units(reference.DATA.parents[2])
                 if unit.key.startswith("spp:") or unit.key == "kernels:ruc_spp"]
-    # the four SPP units, RUC's, and the opt-in GF booking and MYNN
-    # surface-layer units
-    assert len(selected) == 7
+    # the four SPP units, RUC's, the opt-in GF booking and the MYNN
+    # surface-layer units (zt/L, and the Q2 land cap alone and with zt/L)
+    assert len(selected) == 9
     for unit in selected:
         assert census_unit(unit)["constant_divisor_sites"] == [], unit.key
         assert rewrite_sites(unit)["rewritten_sites"] == [], unit.key

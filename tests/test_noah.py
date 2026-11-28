@@ -230,13 +230,27 @@ def test_tables_genparm_values():
     assert t.czil == 0.1 and t.lvcoef == 0.5
 
 
+def _layer_frh2o(soil, soil_type, params):
+    """frh2o on each start layer's own REAL temperature and moisture.
+
+    real.exe blends the column in float32, so a uniform ingest column is not
+    exactly uniform on every Noah layer; each layer is partitioned from what
+    it holds.
+    """
+    out = np.empty_like(np.asarray(soil.liquid_moisture, dtype=np.float64))
+    for k in range(out.shape[0]):
+        t = float(soil.soil_temperature[k, 0, 0])
+        m = float(soil.soil_moisture[k, 0, 0])
+        _, guess, bx, smcmax, psisat = _lsminit_first_guess(t, m, soil_type, params)
+        out[k] = noah_frh2o(t, m, guess, smcmax, bx, psisat)
+    return out.astype(np.asarray(soil.liquid_moisture).dtype)
+
+
 def test_lsminit_partitions_subfreezing_ingest_column_via_frh2o(params):
     tslb, smois, soil_type = 268.15, 0.30, 6
     soil = _ingest_soil_column(tslb, smois, soil_type)
-    _, guess, bx, smcmax, psisat = _lsminit_first_guess(
-        tslb, smois, soil_type, params)
-    expected = noah_frh2o(tslb, smois, guess, smcmax, bx, psisat)
-    np.testing.assert_array_equal(soil.liquid_moisture, expected)
+    np.testing.assert_array_equal(soil.liquid_moisture,
+                                  _layer_frh2o(soil, soil_type, params))
     assert np.all(soil.liquid_moisture < soil.soil_moisture)
 
 
@@ -264,9 +278,9 @@ def test_lsminit_floors_first_guess_before_clip_and_frh2o(params):
         tslb, smois, soil_type, params)
     assert raw < 0.02
     assert guess == 0.02
-    expected = noah_frh2o(tslb, smois, guess, smcmax, bx, psisat)
     soil = _ingest_soil_column(tslb, smois, soil_type)
-    np.testing.assert_array_equal(soil.liquid_moisture, expected)
+    np.testing.assert_array_equal(soil.liquid_moisture,
+                                  _layer_frh2o(soil, soil_type, params))
 
 
 @requires_bundle
@@ -761,11 +775,11 @@ def test_bounded_snow_overshoot_is_repaired_at_zero_not_refused():
     fields, soil_type = _snow_case([44.5, -0.0487, 0.0])
     soil = preprocess_noah_soil(fields, soil_type=soil_type)
     # The 44.5 m maximum is 8900 kg m-2 at real.exe's 5:1 ratio, above the
-    # 5000 kg m-2 snow-water cap (woof.ingest.soil.cap_snow_water, WRF
-    # NOAHMP_INIT's ceiling), so it starts at 5000 kg m-2 and 25 m: the
+    # 2000 kg m-2 snow-water cap (woof.ingest.soil.cap_snow_water, WRF
+    # NOAHMP_INIT's ceiling), so it starts at 2000 kg m-2 and 10 m: the
     # cap scales the depth with the water and keeps the density.  It was
     # 44.5 m before the cap existed; the repaired cell is what this pins.
-    np.testing.assert_array_equal(soil.snow_depth, [[25.0, 0.0, 0.0]])
+    np.testing.assert_array_equal(soil.snow_depth, [[10.0, 0.0, 0.0]])
     assert soil.init_caps["snow"]["cells_capped"] == 1
     # SNOW follows SNOWH through real.exe's 5:1 ratio, and follows the
     # repair with it rather than carrying the negative onward.
@@ -773,9 +787,9 @@ def test_bounded_snow_overshoot_is_repaired_at_zero_not_refused():
 
     # A non-negative field below the cap is untouched: every previously
     # passing case the cap does not reach is byte-identical.
-    fields, soil_type = _snow_case([20.0, 0.0, 1.25])
+    fields, soil_type = _snow_case([8.0, 0.0, 1.25])
     soil = preprocess_noah_soil(fields, soil_type=soil_type)
-    np.testing.assert_array_equal(soil.snow_depth, [[20.0, 0.0, 1.25]])
+    np.testing.assert_array_equal(soil.snow_depth, [[8.0, 0.0, 1.25]])
     assert dict(soil.init_caps) == {}
 
 

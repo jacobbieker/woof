@@ -483,7 +483,11 @@ class SpaceAnalysis:
                     bucket = self.cast_spaces.setdefault(self._instance, {}).setdefault(key, set())
                     if space not in (None, NULL):
                         bucket.add(space)
-            if kind == K.BINARY_OPERATOR and _indirection(node.type) == "ptr":
+            # a template's `a[c] = p` on `T* a[NCAT]` is typed DEPENDENT in the pattern (p3)
+            if kind == K.BINARY_OPERATOR and (_indirection(node.type) == "ptr" or (
+                    node.type.get_canonical().kind.name == "DEPENDENT"
+                    and (lhs := next(iter(node.get_children()), None)) is not None
+                    and _pointer_array_element(lhs))):
                 kids = list(node.get_children())
                 if len(kids) == 2 and kids[0].kind == K.DECL_REF_EXPR and kids[0].referenced is not None \
                         and kids[0].referenced.kind.name == "VAR_DECL":
@@ -537,7 +541,10 @@ class SpaceAnalysis:
             elif kind == K.RETURN_STMT and collect_returns:
                 children = list(node.get_children())
                 if children:
-                    s = self.space(children[0], env, lvalue=True)
+                    # a returned reference names an object (its space); a returned
+                    # pointer is a value: the space it points into (``return (char*)q.p``
+                    # on a struct whose field names its space)
+                    s = self.space(children[0], env, lvalue=_indirection(fn.result_type) != "ptr")
                     if s not in (None, NULL):
                         returned.add(s)
             stack.extend(reversed(list(node.get_children())))
@@ -1019,6 +1026,10 @@ class SpaceAnalysis:
                 return DEVICE           # *table: its first entry
             if lvalue and _operator(e, children) in ("-", "+", "!", "~"):
                 return THREAD           # a prvalue: a temporary binds the reference
+            if children and _operator(e, children) == "*" and _pointer_field(children[0]):
+                # `*p` on a pointer field (implicit this->p): the field's pointee space,
+                # not the space of the object holding it
+                return self.space(children[0], env)
             return self.space(children[0], env, lvalue=True) if children else None
         if kind == "BINARY_OPERATOR":
             if e.type.get_canonical().kind.name == "DEPENDENT" and not lvalue \
@@ -1058,6 +1069,14 @@ class SpaceAnalysis:
             if ref is not None and self._generic_method(ref):
                 # `a(i)` on a space-generic struct: a reference into its data
                 return self.gspace(self._call_object(e), env)
+            if len(children) == 2:
+                # `*q` in a template where an operator* is in scope (GFReal's): clang keeps the
+                # dereference an unresolved operator call whose children are the operand and
+                # the overloaded operator* reference (libclang lists the operand first); a raw
+                # pointer operand dereferences to the memory it points into
+                operand = [c for c in children if c.referenced is None or c.referenced.spelling != "operator*"]
+                if len(operand) == 1 and _indirection(operand[0].type) == "ptr":
+                    return self.space(operand[0], env)
             info = self.resolve_call(e)
             if info is not None and info.returns:
                 args = _call_arguments(e)
@@ -1098,9 +1117,22 @@ def _local_pointer_array(e):
     if d is None or d.kind.name != "VAR_DECL":
         return None
     c = d.type.get_canonical()
-    if c.kind.name != "CONSTANTARRAY" or c.element_type.get_canonical().kind.name != "POINTER":
+    # DEPENDENTSIZEDARRAY: `T* a[NCAT]` in a template on NCAT (p3's qi_/ni_)
+    if c.kind.name not in ("CONSTANTARRAY", "DEPENDENTSIZEDARRAY") \
+            or c.element_type.get_canonical().kind.name != "POINTER":
         return None
     return d
+
+
+def _pointer_array_element(e) -> bool:
+    """``a[i]`` itself, one subscript of a local ``T* a[N]`` (not ``a[i][j]``,
+    the float it points at)."""
+    if e.kind.name != "ARRAY_SUBSCRIPT_EXPR":
+        return False
+    base = next(iter(e.get_children()), None)
+    while base is not None and base.kind.name in ("UNEXPOSED_EXPR", "PAREN_EXPR"):
+        base = next(iter(base.get_children()), None)
+    return base is not None and base.kind.name == "DECL_REF_EXPR" and _local_pointer_array(base) is not None
 
 
 def field_key(field):
@@ -1108,6 +1140,17 @@ def field_key(field):
     (whose FIELD_DECLs have their own USRs): owner name and field name."""
     parent = field.semantic_parent
     return ((parent.spelling.split("<", 1)[0] if parent is not None else ""), field.spelling)
+
+
+def _pointer_field(e):
+    """``e`` (through parentheses and implicit conversions) names a pointer field."""
+    while e.kind.name in ("UNEXPOSED_EXPR", "PAREN_EXPR", "IMPLICIT_CAST_EXPR"):
+        kids = list(e.get_children())
+        if len(kids) != 1:
+            return False
+        e = kids[0]
+    ref = e.referenced if e.kind.name == "MEMBER_REF_EXPR" else None
+    return ref is not None and ref.kind.name == "FIELD_DECL" and _indirection(ref.type) == "ptr"
 
 
 def _operator(e, children):

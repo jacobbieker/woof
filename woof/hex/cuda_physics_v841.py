@@ -106,13 +106,13 @@ _AUTHORITY_DOCUMENT = {
         "execution_provenance",
     ],
     "execution_provenance": (
-        "immutable exact pinned WOOF aggregate execution identity, with optional "
+        "immutable exact pinned WOOF-ArWen aggregate execution identity, with optional "
         "external YSU-GWDO execution/composition identity and four-byte validation"
     ),
     "post_rk_wsm6": [],
     "wsm6_sr_roundoff": {
         "source": (
-            "pinned WOOF woof/core/physics.py:_wsm6_sr_roundoff_limit and "
+            "pinned WOOF-ArWen woof/core/physics.py:_wsm6_sr_roundoff_limit and "
             "woof/core/kernels/wsm6.cu"
         ),
         "meaning": (
@@ -172,7 +172,7 @@ CUDA_PHYSICS_V841_CONTRACT_SHA256 = sha256(
 #: (the assembly's reword_identity.py verify proves it key for key).  As
 #: 1.0.0 froze it: 332899f6.
 _FROZEN_WSM6_PHYSICS_CONTRACT_SHA256 = (
-    "3266241aea0d2481093bf7f1ed7617ca83301937dc89fa2229a6dcf30de11b69"
+    "63bee3eb7619876e423005401a4389f23563776dd94067c23667ece61e6567d5"
 )
 if CUDA_PHYSICS_V841_CONTRACT_SHA256 != _FROZEN_WSM6_PHYSICS_CONTRACT_SHA256:
     raise AssertionError(
@@ -1300,6 +1300,10 @@ def clamp_wsm6_scalars_in_place_v841(
     return transfer
 
 
+#: Schemes whose SR WRF forms outside [0, 1] (see recover_post_rk_wsm6_state_v841).
+SR_UNBOUNDED_MP_PHYSICS = frozenset({11})
+
+
 def recover_post_rk_wsm6_state_v841(
     state: Any,
     update: CudaPostRkWsm6UpdateV841,
@@ -1402,6 +1406,13 @@ def recover_post_rk_wsm6_state_v841(
     signed_fallout = cp.asarray(np.asarray(
         [item.signed_fallout for item in row.surface_accumulators],
         dtype=np.int32))
+    # CAM-MG (11) forms SR outside [0, 1] in WRF itself: snowncv/(rainncv +
+    # 1e-12) of unclipped signed steps (module_mp_cammgmp_driver.F:1392), and
+    # the engine exempts it from its range law (woof.core.physics, the
+    # mp_physics not in (11, 18) gate).  Its SR is held to finiteness instead.
+    check_sr = sr_field is not None and int(row.mp_physics) not in SR_UNBOUNDED_MP_PHYSICS
+    if sr_field is not None and not check_sr and int(cp.count_nonzero(~cp.isfinite(sr_field))):
+        raise FloatingPointError(f"post-RK {row.scheme_name} sr contains a non-finite value")
     _launch(
         kernel_cache,
         "validate_wsm6_surface_v841_f32",
@@ -1409,7 +1420,7 @@ def recover_post_rk_wsm6_state_v841(
         (
             np.int32(n_cells),
             np.int32(len(bucket_names)),
-            np.int32(0 if sr_field is None else 1),
+            np.int32(1 if check_sr else 0),
             sr_upper,
             acc_table,
             inc_table,

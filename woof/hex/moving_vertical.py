@@ -9,13 +9,10 @@ from __future__ import annotations
 import os
 import numpy as np
 
-#: The deepest source column a map takes.  ``sample_layer`` stores a source
-#: LAYER INDEX (0..ns-1) in one byte, and the CUDA kernels read it as
-#: ``const unsigned char *layer``, so the bound is the number of byte values,
-#: 256, not the largest byte, 255.  The guard used to refuse ``ns > 255``,
-#: one short of the hex column ceiling
-#: (:data:`woof.hex.vertical_spec.HEX_MAX_COLUMN_LEVELS`), so no 256-level
-#: run could be remapped.
+#: The deepest source column a map takes.  ``sample_layer`` stores a source LAYER INDEX (0..ns-1) in one byte, and
+#: the CUDA kernels read it as ``const unsigned char *layer``, so the bound is the number of byte values, 256, not
+#: the largest byte, 255.  The guard refused ``ns > 255``, so a 256-level column could not be remapped (fork
+#: jacobbieker/woof PR 137).
 MAX_SOURCE_LAYERS = int(np.iinfo(np.uint8).max) + 1
 
 

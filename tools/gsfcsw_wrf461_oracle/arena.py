@@ -106,3 +106,62 @@ def single_column_fast(source):
              scalar_flux(body[sum_start:sum_end]) + '\n}\n\t\t')
     body = body[:first] + fused + body[last:]
     return result[:begin] + body + result[end:]
+
+
+# Per-level array extents of the generated text, as (a, b) in a*NP+b words.
+# NP is WRF's np, the deepest column's interface count, GSFC_KMAX+1. The
+# generator evaluated every extent at np=129 (a 128-layer column); the forms
+# below reproduce each literal at NP=129 exactly and are asserted against
+# them. An extent that matches none is a layout change to review.
+_CAP_FORMS = {1: (0, 1), 3: (0, 3), 129: (1, 0), 130: (1, 1), 131: (1, 2),
+              258: (2, 0), 260: (2, 2), 520: (4, 4), 1430: (11, 11)}
+SHIPPED_KMAX = 128
+_SLOT = re.compile(r'\(workspace \+ (\d+)\),32\);(?:( gsfc_ptr<\w+> \w+ = \w+_storage \+ )(\d+);)?')
+
+
+def tier_sizes(strict, *others):
+    """Replace the 128-layer literals with ``GSFC_KMAX`` macro expressions.
+
+    ``GSFC_KMAX`` defaults to :data:`SHIPPED_KMAX`, so a build that does not
+    define it expands to exactly the old numbers; a deeper tier defines it.
+    Offsets come from the strict unit, the one holding every array; the
+    default-image unit drops five arrays and keeps their gaps.
+    """
+    entries = sorted((int(m[1]) // 32, int(m[3]) if m[3] else None) for m in _SLOT.finditer(strict))
+    words = int(re.search(r'#define GSFC_WORKSPACE_WORDS (\d+)', strict)[1])
+    table, a_sum, b_sum = {}, 0, 0
+    for i, (offset, shift) in enumerate(entries):
+        assert offset == a_sum * 129 + b_sum, 'arena offsets are not contiguous'
+        total = (entries[i + 1][0] if i + 1 < len(entries) else words) - offset
+        if shift is None:
+            assert total == 75, 'only the ozone pressure table has no origin shift'
+            a, b, form = 0, total, None
+        else:
+            assert total == 2 * shift, 'array extent differs from its origin shift'
+            form = _CAP_FORMS[shift - 8]
+            assert form[0] * 129 + form[1] == shift - 8
+            a, b = 2 * form[0], 2 * form[1] + 16
+        table[offset] = (a_sum, b_sum, shift, form)
+        a_sum += a
+        b_sum += b
+    assert a_sum * 129 + b_sum == words
+
+    def term(a, b):
+        return str(b) if a == 0 else (f'{a}*GSFC_NP+{b}' if b else f'{a}*GSFC_NP')
+
+    def convert(text):
+        def slot(m):
+            a, b, shift, form = table[int(m[1]) // 32]
+            out = (f'(workspace + {m[1]}),32);' if a == 0
+                   else f'(workspace + 32*({term(a, b)})),32);')
+            if m[2]:
+                out += m[2] + (str(shift) if form[0] == 0 else f'({term(form[0], form[1] + 8)})') + ';'
+            return out
+        text = _SLOT.sub(slot, text)
+        macros = ('#ifndef GSFC_KMAX\n#define GSFC_KMAX %d\n#endif\n'
+                  '#define GSFC_NP (GSFC_KMAX+1)\n#define GSFC_WORKSPACE_WORDS (%s)\n'
+                  % (SHIPPED_KMAX, term(a_sum, b_sum)))
+        text = re.sub(r'#define GSFC_WORKSPACE_WORDS \d+\n', lambda m: macros, text, count=1)
+        assert text.count('float zero[129]') == 1
+        return text.replace('float zero[129]', 'float zero[GSFC_NP]')
+    return (convert(strict),) + tuple(convert(o) for o in others)

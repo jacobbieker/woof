@@ -401,6 +401,12 @@ CORRECTIONS = {
         "descriptor gfortran gives one element, so the zeroing writes to address 0 and every time step "
         "with the column biogeochemistry dies there; the correction zeroes only the fields that have an "
         "array, which nothing else reads"),
+    "zap_snow_area": (
+        "zap_small_areas zeroes the category's area and then calls zap_snow with it (ice_itd.F90:1188-1202), "
+        "so zap_snow's surface-layer snow volume dvssl = min(0.5*vsnon, hs_ssl*aicen) is 0: a zapped "
+        "category's whole snow goes to flux_bio at the interior layer's concentration, and the surface "
+        "layer's vertical tracer is lost (zap_snow_temperature passes the area it has); the correction "
+        "passes zap_snow the category's area before the zeroing"),
     "bgc_snow_new_category": (
         "update_snow_bgc divides the category's initial snow volume by its initial area with no guard "
         "(ice_aerosol.F90:543, hs_old = vsno_old/aice_old), and only column_vertical_thermodynamics refreshes "
@@ -440,11 +446,13 @@ CORRECTIONS = {
 
 
 def corrections(configs: dict) -> frozenset[str]:
-    """The opt-in corrections ``configs`` applies: the ones it names
-    (:func:`named_corrections`), and under ``woof_quirk_corrections = 'all'``
-    (woof.quirk_corrections) every one of :data:`CORRECTIONS`. A correction
-    whose scheme the configuration does not run then changes nothing; one
-    it refuses in this configuration is refused by name, as when named."""
+    """The corrections ``configs`` applies: the ones it names
+    (:func:`named_corrections`); with none named, every one of
+    :data:`CORRECTIONS` in correct mode (the default) and none in exact
+    mode; and every one under ``woof_quirk_corrections = 'all'``
+    (woof.quirk_corrections.seaice_names). A correction the configuration
+    did not name and whose scheme it does not run changes nothing; only
+    named ones are refused where the configuration cannot take them."""
     from woof import quirk_corrections
     return named_corrections(configs) | frozenset(quirk_corrections.seaice_names(configs))
 

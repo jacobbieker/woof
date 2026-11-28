@@ -1,4 +1,8 @@
 // Generated from pristine WRF v4.6.1 FLG gas statements.
+#ifndef FLG_NVX
+#define FLG_NVX 100
+#endif
+#define FLG_NV1X (FLG_NVX+1)
 #define FG_AD(a,b) __fadd_rn((a),(b))
 #define FG_SU(a,b) __fsub_rn((a),(b))
 #define FG_MU(a,b) __fmul_rn((a),(b))
@@ -37,13 +41,13 @@ return;
 }
 
 __device__ void flg_gases(int nv,int nv1,int ib,int ig,float& hk,const float* pp,float* pt,const float* ph,const float* po,float* tg,const float* tables,const int* table_offsets,const float* gas_values,const int* gas_switches){
-float fkg[101];
-float fkga[101];
-float fkgb[101];
-float pq[101];
-float tg1[101];
-float tg2[101];
-float tg3[101];
+float fkg[FLG_NV1X];
+float fkga[FLG_NV1X];
+float fkgb[FLG_NV1X];
+float pq[FLG_NV1X];
+float tg1[FLG_NV1X];
+float tg2[FLG_NV1X];
+float tg3[FLG_NV1X];
 float fk;
 int i;
 switch(ib){
@@ -187,19 +191,19 @@ return;
 
 __device__ void flg_gases_new(int nv,int nv1,int ib,int ig1,int ig2,float& hk,const float* pp,float* pt,const float* ph,const float* po,float* tg,const float* tables,const int* table_offsets,const float* gas_values,const int* gas_switches){
 int ig;
-float fkg[101];
-float fkga[101];
-float fkgb[101];
-float fkgc[101];
-float fkgd[101];
-float fkge[101];
-float pq[101];
-float fkg1[101];
-float tg1[101];
-float tg2[101];
-float tg3[101];
-float tg4[101];
-float tg5[101];
+float fkg[FLG_NV1X];
+float fkga[FLG_NV1X];
+float fkgb[FLG_NV1X];
+float fkgc[FLG_NV1X];
+float fkgd[FLG_NV1X];
+float fkge[FLG_NV1X];
+float pq[FLG_NV1X];
+float fkg1[FLG_NV1X];
+float tg1[FLG_NV1X];
+float tg2[FLG_NV1X];
+float tg3[FLG_NV1X];
+float tg4[FLG_NV1X];
+float tg5[FLG_NV1X];
 float fk;
 int i;
 switch(ib){
@@ -738,8 +742,8 @@ return;
 }
 
 __device__ void flg_qopcon(int nv,int nv1,float vv,float* tg,const float* pp,float* pt,const float* ph,const float* po,const float* tables,const int* table_offsets,const float* gas_values,const int* gas_switches){
-float ff[101];
-float pe[101];
+float ff[FLG_NV1X];
+float pe[FLG_NV1X];
 float x;
 float y;
 float z;
@@ -818,7 +822,7 @@ return;
 }
 
 __device__ void flg_qopcfc11(int nv,int nv1,float coefcfc,float* tg,const float* pp,float* pt,const float* ph,const float* po,const float* tables,const int* table_offsets,const float* gas_values,const int* gas_switches){
-float fkg[101];
+float fkg[FLG_NV1X];
 int i;
 float am=137.3684f;
 for(i=1;i<=nv1;++i){
@@ -831,7 +835,7 @@ return;
 }
 
 __device__ void flg_qopcfc12(int nv,int nv1,float coefcfc,float* tg,const float* pp,float* pt,const float* ph,const float* po,const float* tables,const int* table_offsets,const float* gas_values,const int* gas_switches){
-float fkg[101];
+float fkg[FLG_NV1X];
 int i;
 float am=120.9138f;
 for(i=1;i<=nv1;++i){

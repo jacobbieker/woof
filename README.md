@@ -1,6 +1,6 @@
 # Recast WOOF
 
-**Weather Observations and Open Forecasting: a GPU-native weather model you run on your own card.**
+**Weather Observations and Open Forecasting: GPU-native weather models you run on your own card.**
 
 > **This is a fork.** WOOF is written and maintained by Recast Systems at
 > [github.com/recastsystems/woof](https://github.com/recastsystems/woof),
@@ -12,23 +12,44 @@
 > Apple-silicon build is `metal-woof`, which is unofficial and not supported
 > by Recast Systems.
 
-WOOF is a regional weather model with WRF-class physics that runs on one
-NVIDIA GPU, with its own preprocessing, data assimilation and plots. One
-install carries two models:
+WOOF is two weather models that run on NVIDIA GPUs, in one install with
+their own preprocessing and maps: WOOF-ArWen (the `woof` command) and
+WOOF-HEX-A (hexagonal mesh; A for Atmosphere, as in MPAS-A), the `woof hex`
+command.
 
-| Model | Command | Status |
+| Model | What it is | Command |
 | --- | --- | --- |
-| Regional (WRF-ARW class, nests, DA) | `woof` | Production |
-| Hex (MPAS-Atmosphere v8.4.2 on the GPU, regional and global) | `woof hex`, `woof hex global` | Preview |
+| WOOF-ArWen | The WRF engine: WRF-ARW on GPUs for regions you draw, with nests and storm-following runs. Fast numerics by default; an exact mode is checked against native WRF 4.8.0 on the cases its verification page names. | `woof` |
+| WOOF-HEX-A | The MPAS engine: MPAS-Atmosphere v8.4.2 and NOAA's hrrrv5 (RRFS v2) configuration on GPUs, on hexagonal meshes: whole globes, zoom globes, limited-area and storm-following regions, with a tangent-linear and adjoint for sensitivity work. | `woof hex`, `woof hex global` |
 
-Preview means the model is in the package, documented and tested on CPU, and
-its command says preview each time it runs; its config and checkpoint formats
-may change in a minor release. The major-version promise covers the regional
-model.
+WRF and MPAS are developed at NCAR; WOOF is not affiliated with or endorsed
+by NCAR or UCAR.
 
-Production means the regional commands and their config and checkpoint
-formats are covered by that promise. It is not a statement about forecast
-accuracy; see Science and limits below.
+Each engine keeps its own version number. WOOF-ArWen is also released on its
+own as the `gpuwm` package, and WOOF-HEX-A as `gpuwm-hex`; WOOF 1.1.7
+carries gpuwm 3.0.4 and gpuwm-hex 0.6.2. Install `recast-woof`, or `gpuwm`
+and `gpuwm-hex`, not both in one environment: they install the same
+top-level packages and the same `rw-wps` command.
+
+The WOOF site's API keeps its own values for the two models:
+
+| API `model` value | Model |
+| --- | --- |
+| `regional`, `cyclone` (and `kind: arwen` in run lists) | WOOF-ArWen |
+| `hex` | WOOF-HEX-A |
+
+Separate projects, not part of this package: woof-nam
+([recastsystems/woof-nam](https://github.com/recastsystems/woof-nam)) and
+ArWen Global
+([FahrenheitResearch/gpuwm-global](https://github.com/FahrenheitResearch/gpuwm-global)).
+
+WOOF-ArWen is the production model: its commands and their config and
+checkpoint formats are covered by the major-version promise. That is not a
+statement about forecast accuracy; see Science and limits below.
+
+WOOF-HEX-A is a preview: it is in the package, documented and tested on CPU,
+and its command says preview each time it runs; its config and checkpoint
+formats may change in a minor release.
 
 ## Install
 
@@ -57,35 +78,45 @@ outside a published wheel install.
 
 ```bash
 python3 -m venv ~/woof-env
-~/woof-env/bin/python -m pip install 'recast-woof[all-cu13]'
-~/woof-env/bin/woof fetch-tables
-~/woof-env/bin/woof fetch-geog --datasets wrf
-~/woof-env/bin/woof doctor
+. ~/woof-env/bin/activate       # puts woof and its tools on PATH; again in each new shell
+python -m pip install 'recast-woof[all-cu13]'
+woof fetch-tables
+woof fetch-geog --datasets wrf
+woof doctor
+```
+
+For WOOF-HEX-A, add the geography its meshes read, then check it:
+
+```bash
+woof fetch-geog --datasets mesh
+woof hex doctor
 ```
 
 For a driver that serves only CUDA 12, install `all-cu12` explicitly
-instead; `all` and `gpu` mean the CUDA 13 pair. The hex model runs on either extra:
+instead; in this fork `all` and `gpu` mean the CUDA 13 pair. WOOF-HEX-A runs on either extra:
 `all-cu12` works on a CUDA 12 or CUDA 13 driver, `all-cu13` needs a CUDA 13
 driver, and `woof hex doctor` names the one for your driver. Install one
 CuPy/CUDA major per environment.
 The Linux wheel carries the native tools (GRIB and NetCDF decoding, the
 WPS-equivalent preprocessor, the renderer).
 
-`fetch-geog` downloads the global geography every forecast builds its
-terrain, land use and soil from: about 1.3 GB, 17 GB unpacked, once per
-computer. `fetch-tables` adds two Thompson microphysics tables (about 314 MiB).
+`fetch-geog --datasets wrf` downloads the global geography every forecast
+builds its terrain, land use and soil from: about 2.6 GB, about 26 GiB
+unpacked, once per computer. `fetch-tables` adds two Thompson microphysics tables (about 314 MiB).
 Reference tables and map assets arrive with the `recast-woof-data` package.
 `woof doctor` reports each remedy as a command or a `#` comment explaining
 the manual step.
 
 For a developer installation from a clone of this repository, use
 `bash install.sh`: it installs the checkout's `recast-woof-data` companion and
-the package with its extras, builds the native tools (this needs Rust and a C
-toolchain) and ends with `woof doctor`. The explicit `bash install.sh` form
+the package with its extras, builds the native tools (this needs Rust, a C
+toolchain and CMake) and ends with `woof doctor`. The explicit `bash install.sh` form
 also works when an extracted source archive has lost its executable bits; use
 it if `./install.sh` reports `Permission denied`.
 
 ## Run a forecast
+
+WOOF-ArWen, a 3 km regional forecast:
 
 ```bash
 woof domain --point 35.3,-97.5 --source hrrr --cycle latest --hours 3 \
@@ -111,12 +142,57 @@ woof render --diff runA/ runB/ --out diff/
 The pair must share the grid and the valid times; a mismatch is refused by
 name.
 
+WOOF-HEX-A, a 120 km global forecast in one command (it fetches its mesh,
+start and kernels itself):
+
+```bash
+woof hex global --row global-120km --cycle 2026-10-11T12 --work-dir RUN
+```
+
+## The derivative commands (WOOF-HEX-A)
+
+`woof hex tangent`, `adjoint-test`, `sensitivity` and `param-grad` run the
+tangent-linear and adjoint of the exact-mode hrrrv5 forecast
+(`--physics-mode exact`), not of the correct-mode forecast `woof hex
+forecast` runs by default. They run on NVIDIA cards of compute capability
+12.0 (GeForce RTX 50 series, RTX PRO Blackwell) and need the `ad` extra, in
+a Python 3.14 environment of its own (the extra brings its own CuPy package,
+and one environment holds one):
+
+```bash
+python3.14 -m venv ~/woof-ad
+~/woof-ad/bin/python -m pip install 'recast-woof[ad]'
+~/woof-ad/bin/woof hex adjoint-test --row hrrrv5-q12.96.2890.n40.60w91.30 --steps 15 \
+     --at 40.6,-91.3 --radius-km 150 --out cut12
+```
+
+The last command is the 12 km example: one card with 28,700 MiB free (a 32 GB
+GeForce RTX 5090 runs it) and 47,104 MiB of host memory. It fetches its own
+1.20 GB of inputs and ends PASS when the adjoint passes its transpose check
+over the window and the gradient test (the real model rerun from a nudged
+start, against the 1 per cent bar) finds no test direction outside the bar
+and two independent directions inside it; a direction it cannot resolve is
+named. No PASS covers a measure of the storm itself (rain water, cloud water
+or updraft), and a measure built on radar reflectivity is refused. What each example row holds, and every
+measured limit, is in `components/hex/docs/differentiable/` (`LIMITS.md`).
+
+The learned column correction (`WOOF_HEX_LEARNED_CORRECTION`, from a
+checkpoint of your own; no weights ship) and the two network options on the
+hrrrv5 suite (the surface-flux network and the neural boundary layer) need
+PyTorch, from the `torch` extra, which adds it to the `ad` environment:
+`~/woof-ad/bin/python -m pip install 'recast-woof[torch]'`. Each is off
+unless named, and no skill is claimed for them; the User Manual's chapter 11
+(`components/hex/docs/manual/11-new-in-0.6.2.md`) says what each does.
+
 ## Documentation
 
+- [FAMILY.md](FAMILY.md): the two models, their packages, commands and
+  versions, and which installs can share an environment.
 - `docs/public/`: the CLI manual, physics, hardware guidance and data sources.
-  The [code verification record](docs/public/VERIFICATION.md) documents
-  historical WRF v4.6.1 comparisons and their configuration and coverage
-  limits.
+  The [WRF comparison](docs/public/README-EVIDENCE.md#wrf-comparison) names
+  the grids, physics and fields of WOOF-ArWen's exact-mode cases, and the
+  [code verification record](docs/public/VERIFICATION.md) keeps the earlier
+  WRF v4.6.1 comparisons with their configuration and coverage limits.
 - [Energy forecasts](docs/energy-forecasts.md): `woof energy` builds 50-100 m
   forecasts along power lines, substations and renewable sites from
   OpenStreetMap or your own grid data, with line rating, icing and power
@@ -126,19 +202,30 @@ name.
 - [Smoke, dust and air quality](docs/public/SMOKE-AND-AIR-QUALITY.md): wildfire
   smoke, dust, sea salt, carbon and CAMS air-quality species are an opt-in
   product, off unless a configuration names `chem_sets`.
-- `components/hex/`: the hex model's manual, tests and tools.
-- `woof --help-all` lists every command; `woof hex --help` lists the hex
-  model's commands.
+- `components/hex/`: WOOF-HEX-A's manual, tests and tools.
+- `woof --help-all` lists every command; `woof hex --help` lists WOOF-HEX-A's
+  commands.
 
 ## Science and limits
 
-WOOF implements a WRF-ARW-class regional model and WRF-derived physics on the
-GPU. Comparisons against WRF Fortran, ULP and byte-identity checks, and the
+WOOF-ArWen implements a WRF-ARW-class regional model and WRF-derived physics
+on the GPU.
+Comparisons against WRF Fortran, ULP and byte-identity checks, and the
 matched-run and ensemble consistency comparisons are **code verification**:
 evidence that the tested code computes its intended equations. Each result
 belongs to the build, reference version and configuration it tested. None
 establishes general equivalence with WRF or skill for every combination of
 physics, input data and hardware.
+
+In strict numerics, a build of gpuwm 3.0.3 (the release before gpuwm 3.0.4,
+which WOOF-ArWen carries here) matched stock WRF 4.8.0 in every stored value on two one-hour, 3 km
+cases (40 x 40 x 50 points), on one card and one process. With
+`--physics-mode exact --numerics strict`, gpuwm-hex 0.6.0's one-hour hrrrv5
+forecasts on a 12 km and a 3 km limited-area mesh matched the patched native
+RRFS-MPAS 44c0849 reference in every stored value, on one card and one
+process. The default forecasts (fast numerics, and correct mode on
+WOOF-HEX-A) are not bit for bit, by design, and other meshes, dates and
+lengths are not claimed by these lines.
 
 **Solution verification** estimates numerical error in a particular run.
 Routine numerical-error budgets for weather forecasts remain a gap.
@@ -152,29 +239,25 @@ Published observation evidence is limited to specific runs and variables,
 including the ASOS snow/soil comparison, the station/ceilometer fog-suite
 comparison and an MRMS model-top comparison. The observation scoreboard is
 in development. These do not establish a broad validation record across
-regions, seasons or forecast lengths. The
-[evidence page](docs/public/VERIFICATION.md) documents historical WRF v4.6.1
-code comparisons and their configuration and coverage limits.
+regions, seasons or forecast lengths.
 
-The hex model is a GPU port of MPAS-Atmosphere v8.4.2, with MPAS-A's own
-physics suites as its default and this engine's physics selectable; it is not
-MPAS and is not endorsed by UCAR. Use official
-meteorological services for forecasts and warnings.
+WOOF-HEX-A is a GPU port of MPAS-Atmosphere v8.4.2, with MPAS-A's own
+physics suites as its default and ArWen physics selectable; it is not MPAS.
+Use official meteorological services for forecasts and warnings.
 
-WOOF continues an engine released before under another name: WOOF 1.0 is
-that engine's release 2.8.0 and the fixes made since, under the WOOF name,
-with the hex model inside it. Settings spelled `GPUWM_*` keep
-working beside the new `WOOF_*` spelling.
+WOOF 1.0 was the engine's release 2.8.0 and the fixes made since, under the
+WOOF name, with WOOF-HEX-A inside it. Settings spelled `GPUWM_*` keep working
+beside the new `WOOF_*` spelling.
 
 ## This fork
 
 Everything above describes Recast WOOF, and is kept as upstream wrote it.
-This section is the fork's own. The fork carries upstream WOOF 1.1.6 and adds
+This section is the fork's own. The fork carries upstream WOOF 1.1.7 and adds
 the work below on top of it. It does not change upstream's defaults: each new
 option is off until selected, and a configuration that selects none of them
 runs as upstream's does. The section is grouped by area, and where
-something is partial it says so. Every merge into the fork's `main` is released as a
-new `metal-woof` build (`metal-vX.Y.Z.N`). The fork's own changes are recorded
+something is partial it says so. Every merge into the fork's `main` is tagged and released on GitHub as a
+new `metal-woof` build (`metal-vX.Y.Z.N`); PyPI gets the newest one daily. The fork's own changes are recorded
 in [FORK-CHANGELOG.md](FORK-CHANGELOG.md).
 
 Upstream now covers several things this section once listed as the fork's:
@@ -183,6 +266,17 @@ storm merge), coupled ocean waves and storm surge, a GPU mixed-layer ocean
 and sea ice, coupled hydrology over a NextGen hydrofabric, HRRR-Smoke and
 aerosol transport, and its own wiring of `use_theta_m`, FARMS, MAD-WRF and
 Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
+
+Notes on the 1.1.7 sync:
+
+- Upstream 1.1.7 removed `woof local-da`. The fork keeps it, with its
+  tests, and it runs as before.
+- The fork takes upstream 1.1.7's correct mode (`physics.mode`
+  `correct`/`exact`) and its default-on corrections as upstream ships them.
+  The fork's own quirk corrections follow the same switch: on in correct
+  mode (the default), off in exact mode.
+- The hex MPAS-route qsat pole guard is now correction RP9, not RP8. This
+  is a user-visible ID change with no alias.
 
 ### What it adds
 
@@ -304,7 +398,15 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     in the split-explicit step (GM before the implicit mixing and after the
     last diagnostics, the bolus velocity in the transport, Redi in the
     tracer tendency, `ocn_reconstruct_gm_vectors`) and over forward steps
-    (the cold start's bolus transport); off by default. Three v8.4.2 quirks keep
+    (the cold start's bolus transport); off by default; and CVMix's
+    vertical mixing coefficients (`ocn_vmix_coefs_cvmix_build` with CVMix
+    v0.84-beta: KPP's boundary layer, SimpleShapes and MatchBoth
+    diffusivities and non-local flux, Pacanowski-Philander or KPP shear,
+    convection, the background) in the implicit vertical mixing, at RKIND 8
+    only (v8.4.2 does not compile CVMix at RKIND 4), standalone; transcribed
+    under CVMix's Apache-2.0 grant, with the two v0.84-only options
+    (`config_cvmix_kpp_EkmanOBL`, `config_cvmix_kpp_use_enhanced_diff =
+    .false.`) refused by name. Three v8.4.2 quirks keep
     their words by default and have corrected opt-ins, each tested on its
     own: the ISOMIP freezing point taken at the boundary layer's salinity
     rather than its temperature
@@ -433,8 +535,11 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     separated after the pre-dynamics and combined before each ridging, the
     vertical thermodynamics, the shortwave and `coupling_prep`) and the
     coupled step with the velocity solver, word for
-    word with v8.4.2 on CUDA and Metal. Two v8.4.2 quirks there have opt-in
-    corrections: `subcycle_snow_ice_tracers` (v8.4.2 combines every dynamics
+    word with v8.4.2 on CUDA and Metal. Three v8.4.2 quirks there have opt-in
+    corrections: `zap_snow_area` (`zap_small_areas` hands `zap_snow` the area
+    it has just zeroed, so the snow surface layer's tracer drops out of the
+    flux; the correction passes the category's area),
+    `subcycle_snow_ice_tracers` (v8.4.2 combines every dynamics
     subcycle but separates once a step, so an earlier subcycle's ridging of
     the tracers is lost) and `bgc_snow_new_category` (without the vertical
     thermodynamics `update_snow_bgc` divides 0/0 for a category the last
@@ -602,7 +707,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   remap computes its init geometry (frames, moments, MPAS's RBF
   coefficients) itself, and refuses halo exchanges and periodic planar
   meshes by name. The sea-ice column physics' time step (mushy vertical thermodynamics,
-  shortwave), ocean KPP and GM/Redi,
+  shortwave), CVMix in the ocean's split-explicit step and KPP's non-local
+  flux in its tracer tendency,
   and the coupler pieces other than the ocean merge and the ocean's import and export are not ported. A few RKIND 8 cases need the LGPL libm
   opt-in below. These are ported pieces and steps, not coupled forecasts.
   Plan: [docs/mpas-coupled-roadmap.md](docs/mpas-coupled-roadmap.md).
@@ -628,17 +734,46 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     bit with the WRF route's adapter on the same columns; a 1 h forecast on
     the `edi-vr` variable-resolution mesh takes 0.184 s/step on CUDA (A6000)
     and 0.282 s/step on Metal (M3 Max).
-- **Corrections of WRF/MPAS quirks, each opt-in and off by default.**
-  The default stays word for word with the WRF 4.7.1 / MPAS v8.4.2
-  oracle; each key changes only the arithmetic it names.
-  - `woof_quirk_corrections = "all"` turns every correction below on at
-    once, each where its scheme runs (default `"none"`; the hex door takes
-    `--quirk-corrections all`). A key set against it is refused by name,
-    and so is a correction its own key refuses in that combination. It
-    turns on `gf_deep_rain_evaporation_booking`,
-    `ysu_surface_heat_exner` and `mynn_sfclay_psih_zolzt` (WRF route); `--undriven-species-boundary
-    wrf-flow-dependent` (hex, regional, where its drivers carry it; the only
-    flag `--quirk-corrections all` sets); `woof_land_ice_isomip_freezing_salinity`,
+- **WRF 4.8.1 as the reference (in progress).** `wrf_reference` accepts
+  `"4.8.1"` (the default), `"4.8.0"` and `"4.7.1"`. The 4.8.1 pin is the
+  `v4.8.1` tag commit plus its submodule commits, because the release
+  tarball ships the submodules empty. `tools/wrf481_source` records the
+  sha256 of every WRF file the repository cites, in 4.8.1 and in 4.8.0, and
+  names the change behind each file that differs. A WRF 4.8.1 namelist
+  imports under the 4.8.1 Registry, which has the same keys and defaults as
+  4.8.0's. The scheme fixes in 4.8.1 are being ported one family at a time.
+  Until a family lands, a run receipt that says `"4.8.1"` also lists the
+  changes the engine does not run yet (`wrf_reference_pending`). Of the 42
+  dycore, advection, nesting and diffusion oracle lanes, 23 are re-pinned to
+  4.8.1 with their fixtures as they are: no routine they exercise differs
+  from their 4.6.1, 4.7.1 or 4.8.0 pin (`tools/wrf481_source/lanes-v4.8.1.json`,
+  built by `python -m tools.wrf481_source.lanes`). The other 19 wait for the
+  port that changes their words. Noah-MP 5.2.2 stays excluded on licence
+  grounds.
+- **Corrections of WRF/MPAS quirks, on by default (correct mode).**
+  Each key changes only the arithmetic it names, where its scheme runs.
+  Exact mode turns every one off, so the run is the WRF 4.7.1 / MPAS v8.4.2
+  oracle word for word; parity tests run in exact mode. Exact mode is a
+  strict `GPUWM_WRF_EXACT=1` process or every correct-mode key set false
+  (WRF route), `--physics-mode exact` (hex door), or
+  `config_physics_mode = 'exact'` (MPAS-Ocean, MALI and MPAS-Seaice config
+  dicts).
+  - `woof_quirk_corrections` is the umbrella. Unset (the default), the
+    corrections follow the mode, and a correction's own key wins: that
+    turns one off in correct mode, or on in exact mode. `"all"` / `"none"`
+    turns every one on / off whatever the mode (the hex door takes
+    `--quirk-corrections all|none`); a key set false next to `"all"` is
+    refused by name, and a key set next to `"none"` wins. On the WRF route
+    the keys are correct-mode findings FQ1-FQ12, so the run receipt's
+    `correct_mode` block names them.
+    It covers `gf_deep_rain_evaporation_booking`, `ysu_surface_heat_exner`,
+    `mynn_sfclay_psih_zolzt`, `noah_smc_floor_booking`,
+    `thompson_rain_snow_closure`, `rrtmg_lw_model_top`,
+    `thompson_lamc_updated_rc`, `noah_land_ice_rain_runoff`,
+    `noah_snow_series_conductivity`, `mynn_sfclay_q2_land_cap`,
+    `kf_capped_downdraft_rain_floor` and `diff_metrics_seam_slope` (WRF route);
+    `--undriven-species-boundary wrf-flow-dependent` (hex, regional, where its drivers carry it; the only
+    flag `--quirk-corrections` sets); `woof_land_ice_isomip_freezing_salinity`,
     `woof_bottom_drag_dry_edges`, `woof_rayleigh_bottom_friction` and
     `woof_redi_k33` (MPAS-Ocean); `woof_sgh_init_mask`, `woof_enthalpy_advection_units`,
     `woof_simple_velocity_bed`, `woof_statistics_extrema` and
@@ -646,7 +781,7 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     `set_sfcflux_order`, `ice_velocity_at_cell`,
     `ccsm3_absorbed_solar_layers`, `dedd_zero_volume_ice`,
     `zbgc_c2n_proteins`, `bgc_inactive_diagnostics`, `zsal_solve`,
-    `bgc_snow_new_category`, `subcycle_snow_ice_tracers` and
+    `bgc_snow_new_category`, `subcycle_snow_ice_tracers`, `zap_snow_area` and
     `zaero_snow_scavenging`;
     and the MPAS-Seaice velocity solver's `planar_metric_terms`,
     `periodic_local_coords` and `weak_ridge_delta`.
@@ -657,8 +792,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     potential temperature as if it were a temperature flux and converts
     back with pi, so the column gets `HFX*pi` instead of `HFX`. That loses
     4.5% of the surface heating at 850 hPa and 14% at 600 hPa. The option
-    uses `HFX/pi(1)` (refused with BEP/BEM, where YSU takes the urban
-    heat sources instead). Checked by the column heat budget, not yet scored
+    uses `HFX/pi(1)` (not read with BEP/BEM, where YSU takes the urban
+    heat sources instead; the receipt lists it as uncorrected there). Checked by the column heat budget, not yet scored
     against observations; the hex MPAS-suite YSU does not carry it yet.
   - `mynn_sfclay_psih_zolzt` (MYNN surface layer, `sf_sfclay_physics = 5`,
     WRF route). WRF integrates the 2 m and 10 m heat profile from `z0/L`
@@ -666,7 +801,72 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     roughness `zt/L`. The option uses `zt/L` throughout. It moves only the
     T2/Q2 diagnostics; checked against the corrected CPU reference, not yet
     scored against observations.
-- **Observation-driven corrections, each opt-in and off by default:**
+  - `noah_smc_floor_booking` (Noah, `sf_surface_physics = 2`, WRF route).
+    WRF's Noah raises a soil layer that dries below 0.02 to 0.02 and books
+    the water it adds nowhere, so dry sandy columns gain water (up to 30 mm
+    in a step on a column that starts below the floor). The option takes it
+    from the layer below, and past the bottom layer from the drainage, so
+    the column water budget closes. Not read with a WRF-Hydro coupling. Not
+    yet scored against observations; the hex MPAS-suite Noah does not carry
+    it yet.
+  - `thompson_rain_snow_closure` (Thompson, `mp_physics = 8, 28, 38`, WRF
+    route). Below 0 C, WRF's Thompson limits the rain and snow losses of
+    rain-snow collection but keeps the graupel gain at its unlimited value,
+    so the exchange creates graupel (and its freezing heat) when rain or
+    snow runs out. The correction makes the gain equal what rain and snow
+    lose, floored at zero (finding FQ5). Not yet scored against observations; the hex
+    MPAS-suite Thompson and RCON (`mp_physics = 29`) do not carry it.
+  - `rrtmg_lw_model_top` (legacy RRTMG longwave, `ra_lw_physics = 4` with
+    `ra_rrtmg_variant = "rrtmg_legacy"`, WRF route). WRF's RRTMG longwave
+    matches its standard profile to the column in a loop that starts one
+    interface too low, so it overwrites the model-top interface temperature
+    and the top layer's with the profile and anchors at the interface below
+    the top. The option keeps both and anchors at the top interface (finding
+    FQ6). Not read by RTE+RRTMGP; not yet scored against observations.
+  - `thompson_lamc_updated_rc` (aerosol-aware Thompson, `mp_physics = 28,
+    38`, WRF route). After the cloud-water update WRF's number balance forms
+    the cloud slope from the entry cloud mass instead of the updated mass,
+    so its mean-size clamp, and the cloud number it rediagnoses, answer a
+    mass the cloud no longer holds (the sources only remove cloud water, so
+    the mean size is too large: a spurious clamp at 2*D0r or a missed one at
+    D0c). The option forms it from the updated
+    mass (finding FQ7). The classic Thompson (`mp_physics = 8`) holds a fixed
+    droplet number that never leaves the call, so it does not read it; not
+    yet scored against observations.
+  - `noah_land_ice_rain_runoff` (Noah, `sf_surface_physics = 2`, land-ice
+    points, WRF route). WRF's glacial arm keeps liquid rain in `PRCPF` and
+    never reads it, booking only the snowmelt as `RUNOFF1`, so rain on a
+    glacier leaves the water budget unbooked. The option adds it to the
+    surface runoff (finding FQ8); a WRF-Hydro coupling carries it. Not yet
+    scored against observations.
+  - `noah_snow_series_conductivity` (Noah, `sf_surface_physics = 2`, snow-covered
+    land points, WRF route). WRF's `SFLX` computes the series (harmonic)
+    snow-soil conductivity `DF1H` and never reads it; the soil heat flux
+    blends the arithmetic `DF1A`, which overstates the conductivity of a thin
+    pack. The option blends `DF1H` (finding FQ9); a snow-free or fully
+    covered point is unchanged. Not yet scored against observations.
+  - `mynn_sfclay_q2_land_cap` (MYNN surface layer, `sf_sfclay_physics = 5`
+    at `wrf_461`, WRF route). WRF's MYNN caps its 2 m mixing ratio at 1.05
+    times the lowest level at every point, water included, while the
+    surface driver's cap of the same limit runs over land only. The option
+    caps over land only, so Q2 over a warm sea under cooler, drier air keeps
+    its surface-flux value (finding FQ10). Only Q2 moves; not yet scored
+    against observations.
+  - `kf_capped_downdraft_rain_floor` (Kain-Fritsch eta, KF-CuP and MSKF,
+    `cu_physics = 1, 10, 11`, WRF route). When the scheme caps the
+    downdraft (`DDINC = TRPPT/TDER`), binary32 `TDER*DDINC` can round
+    above `TRPPT`, and WRF's bare `PPTFLX = TRPPT - TDER` then publishes a
+    few ulp of negative `RAINCV` for the whole `NCA` window. The option
+    floors the flux at zero, the float64 answer (finding FQ11). Off, and in
+    exact mode, each kernel is WRF's subtraction byte for byte.
+  - `diff_metrics_seam_slope` (where WRF's mixing package runs on a periodic axis,
+    WRF route). WRF's `compute_diff_metrics` fills the coordinate slope at
+    a periodic seam for every level but the top w level, which keeps its
+    initial zero while every other column has its slope. The option fills
+    the top level too, as the engine always has; off (exact mode) the seam
+    is WRF's word for word (finding FQ12). Bounded axes are unchanged.
+- **Observation-driven corrections, each opt-in and off by default** (GF's
+  is also a quirk correction, so it is on in correct mode):
   - `gf_deep_rain_evaporation_booking` (Grell-Freitas, `cu_physics = 3`).
     WRF's deep GF counts the downdraft evaporation it returns to vapour as
     surface rain too, so deep `pret` is 1.29 to 1.66 times the column's
@@ -687,11 +887,13 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     hour 0. UGWP non-orographic drag does not help. Evidence:
     [declared-divergences.md](components/hex/docs/declared-divergences.md)
     section 1.
-  - On the MPAS suite route the 50 km lid needs correction RP8. MPAS
+  - On the MPAS suite route the 50 km lid needs correction RP9. MPAS
     v8.4.2's MYNN `qsat_blend` has a pole where p reaches the saturation
-    vapour pressure, which happens above about 35 km. RP8 adds the
+    vapour pressure, which happens above about 35 km. RP9 adds the
     NOAA-GSL MYNN-EDMF guards. It is on in correct mode (the route's
-    default), and `--physics-correct-skip RP8` turns it off.
+    default), and `--physics-correct-skip RP9` turns it off. This
+    correction was RP8 before the 1.1.7 sync; upstream 1.1.7 uses RP8 for
+    the BouLac sign fix, so the fork's ID changed to RP9 with no alias.
   - The MPAS suite route also runs the declaration's upper damping as
     MPAS v8.4.2's `&damping` options (`config_mpas_cam_coef`,
     `config_rayleigh_damp_u` and their level counts and timescale). The
@@ -717,7 +919,16 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     -30 m cut-off removes the surface drag in 32 % of land cells there,
     and against WIS2 stations it raised the 10 m wind bias by 0.5 m/s.
     The seam warns above 4 km
-    ([TERRAIN-DRAG.md](docs/public/TERRAIN-DRAG.md));
+    ([TERRAIN-DRAG.md](docs/public/TERRAIN-DRAG.md)).
+    `slope_rad = 1` on the WOOF column route builds SLOPE and SLP_AZI from
+    the least-squares terrain plane through each cell's mesh neighbours, in
+    place of WRF's grid-axis centred differences (`woof/hex/slope_statics.py`
+    documents the difference); spherical meshes only. `topo_shading = 1`
+    runs WRF's sun and shadow test along the sun azimuth over the mesh,
+    sampling the terrain every mean neighbour spacing up to `shadlen` by
+    linear interpolation on the Voronoi cells' Delaunay triangles
+    (`woof/hex/topo_shading.py`); on a plane its mask is WRF's, on real
+    terrain it samples different points of the same surface;
   - CCPP TKE-EDMF on the column seam;
   - diagnostics: `nwp_diagnostics` maxima, `p_lev`/`z_lev` levels, `tslist`
     station series, `prec_acc_dt` windows and `acc_phy_tend`, AFWA
@@ -737,18 +948,42 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     threat, gust);
   - `aer_opt = 1, 2`, `w_damping`, grid and spectral analysis nudging, and
     WRF observation nudging (`obs_nudge_opt = 1`, `--obs-nudging`), with
-    WRF's weights and great-circle radii found through a cell KD-tree;
+    WRF's weights and great-circle radii found through a cell KD-tree.
+    Observation nudging runs on both the WOOF column route and the MPAS
+    v8.4.2 suite route (R2, one card, cold start), which reads WRF's PBL
+    and surface-layer inputs from the suite's own fields;
   - stochastic physics: SPP (`spp_conv`, `spp_pbl`, `spp_lsm`) on the WOOF
     column route, WRF-Solar EPS (`multi_perturb`) on regional meshes, and
     WRF's inflow perturbation on the regional relax rings
     (`woof hex forecast --inflow-perturbation`, which takes its depth from
-    the run's own boundary-layer height since hex has no parent model);
+    the run's own boundary-layer height since hex has no parent model).
+    `--w-damping` and `--inflow-perturbation` run on both the WOOF column
+    route and the MPAS v8.4.2 suite route (R2), where the depth is the
+    suite's `hpbl`;
+  - WRF diffusion and advection settings (`diff_opt`, `khdif`, `kvdif`,
+    `c_s`, `mix_full_fields` and the `*_adv_order` options) pass on hex
+    only where MPAS-A runs the same operator (`diff_opt=0` with
+    `--horiz-mixing off`, `v_mom_adv_order=3`, `mix_full_fields=true`,
+    `khdif=0`, `kvdif=0`). Every other value is refused with the reason
+    the two operators differ and MPAS's own option for it;
   - WRF's flow-dependent specified zone for the microphysics species a
     regional boundary stream does not drive (`woof hex forecast
     --undriven-species-boundary wrf-flow-dependent`: outflow copies the
     first cell inside the zone, inflow sets 0, or `ccn_conc` for the CCN
-    number). The default, `free`, keeps MPAS's behaviour: those species
-    get no boundary step;
+    number). The default, `free`, keeps MPAS's behaviour: on the WOOF
+    column route those species get no boundary step, and on the MPAS
+    v8.4.2 suite route (R2) they are driven from the boundary pool's
+    allocated values. R2 carries the rule on one card when the flag is
+    given (correct mode and `--quirk-corrections all` leave R2 native): it
+    then drives only the species the boundary files hold;
+  - extra-species microphysics on regional hex runs: CAM-MG, Morrison and
+    Morrison-aerosol, NSSL-2, Milbrandt-Yau, P3 (mp 50-53), NTU, ISHMAEL,
+    UDM, WDM6, Goddard 4-ice, Ferrier-Aligo with advected rime (mp 15)
+    and Fast-SBM run in the hex option matrix on
+    CUDA and Metal (`components/hex/evidence/option-matrix.json`).
+    Fast-SBM history frames carry the allocated reflectivity default,
+    because WRF's Fast-SBM writes no `REFL_10CM`. ISHMAEL needs its WRF
+    tables staged first (`woof fetch-tables --ishmael`);
   - `woof resume` and `woof branch` for hex runs
     ([docs/branch-from-checkpoint.md](docs/branch-from-checkpoint.md));
   - GRIB2 and Earth2 export ([docs/grib2-export.md](docs/grib2-export.md));
@@ -762,14 +997,24 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
     transition-band diagnostics. The step is set by the smallest cell, so
     a graded mesh costs about what its finest cells cost;
   - an option matrix that runs generic-seam column options through a real
-    hex forecast on CUDA and Metal. Every row now runs or is refused by
-    name with its reason: CAM radiation is refused on Metal, GFDL-Eta on
-    the 149-level case (nominal eta), MAD-WRF (species row) and any
-    radiation-off run with Noah-MP (no GLW source); the WSM3, WSM5
-    and KF-CuP rows state their layer limits. BouLac and QNSE PBL now
-    admit 256 levels (compile-time 128/256 tier; at 128 levels or fewer
-    the unchanged kernel, word for word); their matrix rows still record
-    the old 128-level refusal until the 149-level hex case is re-run.
+    hex forecast on CUDA and Metal. Every row runs, is refused by name
+    with its reason, or records its failure: CAM radiation is refused on
+    Metal, GFDL-Eta on the 149-level case (nominal eta), MAD-WRF
+    (species row) and any shortwave-only or radiation-off run with Noah-MP
+    (no GLW source). On the 149-level case the CUDA rows for WSM3, WSM5,
+    WSM7, WDM5, WDM7, BouLac, QNSE (PBL and surface layer), Multiscale
+    Kain-Fritsch and Fu-Liou-Gu now run within the baseline's budget
+    tolerances, since each admits 256 levels (compile-time tiers or
+    runtime-sized workspaces; words at the old level counts unchanged,
+    `tests/test_cu_kfcup_mskf_256_levels_gpu.py` and each family's
+    256-level test). KF-CuP now passes admission there too but its CUDA
+    row stops with negative accumulated `rainc` (a binary32 rounding in
+    the capped downdraft, not the level count); the row records that
+    failure until the fix lands. The Metal entries, KF-CuP's 128-level
+    refusal among them, predate the WRF
+    4.8.0 sync: the case runs the default Grell-Freitas
+    (`gfl_873b414`), which is refused on Metal, so they refresh after the
+    GF Metal port lands.
 
   Limits: the MPAS v8.4.2 suite route (R2) takes a subset of these, and
   refuses the rest by name. WRF's adaptive time step (`--adaptive-timestep`)
@@ -847,7 +1092,9 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
 - **Applied tooling:** wind-energy siting, hindcasts and power products,
   storm-track planning, and delete-after-commit backpressure and domain
   selection for upstream's Icechunk store export
-  (`[output] icechunk_delete_after_commit`, `icechunk_domains`).
+  (`[output] icechunk_delete_after_commit`, `icechunk_domains`), and
+  store-only S3 credentials for a store in another account
+  (`WOOF_ICECHUNK_AWS_*`, read by the writer alone).
 - **Observation referees for MPAS-layout history.** These are for the hex
   model or native MPAS-A.
   - `woof.hex.sonde_profile_referee` scores temperature against radiosondes
@@ -1271,8 +1518,10 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   1e-14, WRFPLUS `g_/a_advance_w` and `g_/a_calc_p_rho` to about 1e-15,
   and the float build reproduces the strict primal's words, with map
   factors too (`advance_w_phi_msf`, against WRFPLUS with msftx = msfty =
-  msft). The w damper
-  (`damp_opt=3`) is refused, since WRFPLUS has none. `calc_coef_w`
+  msft). The `damp_opt=3` implicit w damper is linearised too (heights
+  from the geopotential, the column mass and WRF's w_save active),
+  matching WRFPLUS's own damper to 1e-12; the step TL/AD runs with it,
+  but not with the fork's `noaa_wrf39` upper-wind limiter. `calc_coef_w`
   (woof's `calc_coefs`: c2a and the implicit w factors) matches WRFPLUS
   `g_/a_calc_coef_w` to about 1e-15. `advance_mu_t` (woof's
   `advance_mu_th` and the specified-frame mu/theta/muts update) matches
@@ -1330,11 +1579,19 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   qr: calc_cq, the moist pressure gradient, buoyancy and diagnosis,
   sumflux and the non-PD scalar update, and qv's boundary rows with
   flow_dep_bdy for qc and qr). The forecast path does not import any of
-  it.
-  On a dry state the step also covers WRF's diff_opt 1 / km_opt 4
-  horizontal mixing (`woof.grad.wrfplus.diffusion`, bound into the step
-  on periodic and specified domains, word for word against
-  `dycore.step`; the moist rows are next): the deformation (WRF
+  it. With moist_adv_opt 1 (WRF's default) the last RK stage runs the
+  positive-definite scalar advection (`woof.grad.wrfplus.pdadv`, WRF
+  `advect_scalar_pd`, v_sca_adv_order 2, 3, 4 or 6). Its binary32 base
+  reproduces woof's strict PD stage word for word. It matches WRFPLUS
+  4.7.1's `g_/a_advect_scalar_pd` to about 1e-15 on non-hybrid levels,
+  and the finite differences of WRF 4.7.1's nonlinear routine on hybrid
+  ones. The TL/AD take the base state's limiter branches.
+  v_sca_adv_order 5 with PD is refused: woof's strict path there is the
+  HRRR fork's vertical arm, not WRF's.
+  The step also covers WRF's diff_opt 1 / km_opt 4 horizontal mixing
+  (`woof.grad.wrfplus.diffusion`, bound into the step on periodic and
+  specified domains, dry or moist, word for word against
+  `dycore.step`): the deformation (WRF
   `compute_diff_metrics` + `cal_deform_and_div`) and `smag2d_km`'s
   xkmh/xkhh with the 10 * mlen
   cap. Their binary32 base reproduces woof's strict `wrf_smag_deform` and
@@ -1344,6 +1601,20 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   (`hd_tl/hd_ad`: WRF `horizontal_diffusion` for u, v, w and scalars,
   `horizontal_diffusion_3dmp` for theta) reproduce woof's strict
   `wrf_diff_opt1_horizontal` and match WRFPLUS to about 1e-16.
+  diff_opt 2 with km_opt 3 or 4 (dry, no PBL or surface layer) is bound
+  too: `horizontal_diffusion_2` and `vertical_diffusion_2` with its
+  isfflx 0-2 surface terms, and the coefficients (`smag2d_km` with its
+  terrain-slope limiter, `calculate_N2` and `smag_km`), each reproducing
+  woof's strict kernels word for word and checked against FD of WRF
+  4.7.1's own routines.
+  The step also covers WRF's external-mode filter (`emdiv > 0`, WRF's
+  default 0.01): advance_uv's damping term from the column-mass tendency
+  the previous acoustic substep wrote, carried between substeps and
+  stages and reset on the first RK stage. It reproduces `dycore.step` word
+  for word, and the substep chain matches WRFPLUS 4.7.1 to 1e-12 on the
+  terrain-following coordinate (WRFPLUS's TL/AD drop WRF's `c1h` factor
+  on this term, so with the hybrid coordinate woof follows WRF's
+  nonlinear model instead).
 - **LETKF host solve on every core by default (Linux).** An analysis on host
   arrays (no `solve_namespace`, the dense reference route) now runs its
   chunks on forked worker processes once the work is large (2x10^8
@@ -1368,8 +1639,8 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   WRFDA 4.7.1, background-error statistics from woof forecasts, and hybrid
   3DEnVar with the LETKF members. Radar, GOES and radiances come later;
   radiances need an opt-in CRTM. It also scopes opt-in gradient and
-  neural-network options inside the DA. 4D-Var waits for the adjoints in
-  the plan above. So far `woof.da.var` reads WRFDA's `be.dat` and has a
+  neural-network options inside the DA. 4D-Var (outer loops included) is
+  described below; its check against compiled WRFDA is still to come. So far `woof.da.var` reads WRFDA's `be.dat` and has a
   binary64 reference of the control-variable transform `U` and its
   adjoint; on WRFDA's tutorial case both equal a compiled WRFDA 4.7.1 word
   for word. `DeviceU` runs `U` and `U^T` as CUDA or Metal kernels: the
@@ -1422,6 +1693,21 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   with first guesses from a WRF 4.7.1 forecast, it takes WRFDA 4.7.1
   FGAT's 31 iterations to its final cost, and the analysis meets O7's
   tolerances.
+  4D-Var (experimental; `woof var --4dvar` with the FGAT slots runs one loop
+  with the identity TL). On the Python door it supports WRFDA's outer loops
+  (`max_ext_its`): each loop reruns a nonlinear model you supply, then
+  relinearises P3a's window TL/AD about the new run and recomputes every
+  slot's innovations. `Jb` is measured from the first guess and the
+  increments accumulate, as in `da_solve`. WRFDA's `var4d_bin` and
+  `time_step` rules are enforced, and `var4d_lbc`, `jcdfi_use` and
+  `multi_inc` are refused by name. On a dry OSSE, two outer loops lower
+  the nonlinear cost and pass the gradient, dot-product and TL-vs-FD
+  checks. The window model perturbs the lateral boundary tables as WRFDA
+  does with `var4d_lbc` off, and carries each loop's table increment to
+  the next. Against compiled WRFDA 4.7.1 + WRFPLUS 4.7.1 on the adiabatic
+  L1 lane it agrees to tolerance, not word for word, because woof runs its
+  own trajectory (docs/var.md). The window model is binary64 and refused
+  on Metal.
   `woof.da.var.gen_be` (experimental, Python API, host binary64) makes a
   `be.dat` from woof or WRF history files (NMC 24 h minus 12 h pairs, or
   ensemble members minus their mean): WRFDA's gen_be stages for
@@ -1548,10 +1834,30 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   range), but T2 is then no better than the physics run (+0.04 K, CI
   spanning zero): no evidence of skill. Results and per-step costs are in
   [docs/nn-physics.md](docs/nn-physics.md).
+- **How long a run takes (`woof estimate`).** Gives a low-high wall clock
+  for a configuration on this box, a card from a built-in table (A6000,
+  A100, H100, L4, L40S, RTX 30/40/50 series, Apple M-series) or a
+  `[runner]` TOML. It breaks the time into prepare, compile, model steps,
+  radiation, output, restart writes and DA. Each figure is labelled
+  measured, scaled by memory bandwidth, calibrated or substituted, and the
+  anchors are named runs with receipts. `--calibrate N` times N steps on
+  this box and remembers the result, and `woof go`'s forecast heartbeat now
+  shows an ETA ([docs/public/HARDWARE.md](docs/public/HARDWARE.md#how-long-a-run-takes-woof-estimate)).
+- **Packing runs onto cards (`woof pack-plan`).** Takes one or more
+  configurations, or N copies of one, and a runner. It recommends runs
+  per card, MPS on or off, and the order, with every option's predicted
+  makespan against one run at a time and the `woof multi-run` /
+  `woof energy worker` command to run it. Every option goes through
+  multi-run's own admission (priced memory, margin, slot and CPU caps), so
+  it never recommends a packing admission would refuse. Contention comes
+  from measured rows: on an RTX A6000, two to eight runs sharing the card
+  without MPS each ran 2.2-9.1x slower, so packing gains only start-up
+  overlap there. MPS options compete on their measured makespan like the
+  others ([docs/public/HARDWARE.md](docs/public/HARDWARE.md#packing-runs-onto-cards-woof-pack-plan)).
 - **Continuous integration and releases:** GitHub Actions on Linux and
   macOS, with a self-hosted CUDA job. Hosted runners skip a few heavyweight
   tests by name, and main's full run is periodic. Every merge to `main`
-  tags, writes release notes and publishes `metal-woof` to PyPI
+  tags and writes release notes; PyPI gets the newest `metal-woof` tag once a day
   ([docs/dev/ci.md](docs/dev/ci.md)).
 - **256-level columns for WSM3, WSM5, WSM7, WDM5 and WDM7.** These five
   microphysics units (`mp_physics` 3, 4, 24, 14 and 26) keep their level
@@ -1565,9 +1871,81 @@ Deng shallow cumulus. Where both existed, upstream's keys are the ones to use.
   seam and follows the same bound. WSM6 and WDM6 already ran 256 levels on
   a column workspace; the five here keep the per-thread arrays, so a
   256-level run reserves several GiB of local memory on a large card
-  ([the frame table](docs/kernel_local_memory_bounds.md)). The committed hex
-  option-matrix rows for WSM3 and WSM5 still record the old 80-level
-  refusal at 149 levels until the matrix is re-run on its staged case.
+  ([the frame table](docs/kernel_local_memory_bounds.md)). On the hex
+  option matrix's 149-level case the WSM3, WSM5, WSM7, WDM5 and WDM7 rows
+  run on CUDA.
+- **256-level columns for the GSFC shortwave scheme.** `ra_sw_physics=2`
+  was refused above 128 layers: its per-column arena (every array's extent
+  and offset) and the entry point's `zero[]` were literals for a 128-layer
+  column. They are now expressions of `GSFC_KMAX`, whose source default is
+  128, so a column of 128 layers or fewer compiles the unchanged-meaning
+  source (the oracle fixture words and a raw-bit comparison at nz = 49 and
+  128 are identical) and a deeper column adds `-D GSFC_KMAX=256`. The
+  local frame stays 0 B at both tiers; the arena grows from 32,677 to 62,885
+  words per column (535 MB to 1.03 GB for the 4,096-column chunk) and
+  preflight prices it by tier. Past 256 is refused by name. Hex does not
+  offer `ra_sw_physics=2`, so only the WRF route is affected
+  ([the record](docs/kernel_local_memory_bounds.md)).
+- **256-level columns for GFDL Eta radiation.** `ra_lw_physics` and
+  `ra_sw_physics` 99 were refused above 81 layers. That was a limit of this
+  port, not of WRF. Stock `module_ra_gfdleta.F` sizes its model-level arrays
+  from `kte`, and its `NL=81` is the ozone climatology's fixed pressure grid,
+  which it interpolates to any model grid. The port's transcription gives
+  every per-column array fixed storage, generated at 81. The same lowering
+  is now regenerated at 256 (`tools/gfdleta_wrf461_oracle/build_tier.py`)
+  into `gfdleta_column_l256` and `gfdleta_co2_init_l256`:
+  - A column of 81 layers or fewer runs the unchanged units.
+  - A deeper column runs the 256-layer units.
+  - Past 256 is refused by name.
+
+  Both tiers are tested word for word:
+  - Forcing the deep tier onto the 12- to 60-layer WRF fixtures reproduces
+    every word.
+  - A 256-layer column matches the byte-unmodified WRF 4.6.1 module run at
+    256 layers in strict numerics, for every CO2/ozone table word and every
+    output word.
+
+  The deep column workspace is 1.30 MB per slot, against 234 KB. Preflight
+  prices it by tier, and `column_chunk` is the lever at both tiers.
+- **256-level columns for Fu-Liou-Gu radiation.** `ra_lw_physics=7`
+  (with `ra_sw_physics=7`) was refused above 100 layers, stock WRF's
+  `nvx = 100` scratch bound. The generators now emit that bound as the
+  macro `FLG_NVX`, whose source default is the stock 100: every column of
+  100 layers or fewer compiles stock WRF's bound, and its SASS is identical
+  to the previous kernel's on sm_86, sm_100 and sm_120 in both numerics
+  modes. A 101 to 256 layer column adds `-D FLG_NVX=256` and is checked
+  word for word in strict mode against WRF's `module_ra_flg.F` with only
+  `nvx` raised to 256 (the patch, its hash and why it changes no
+  arithmetic are in `woof/data/wrf_radiation/flg/PROVENANCE.md`). In the
+  forecast column the per-level storage was already a global workspace
+  sized by the column, so the local frame does not grow (928 B on sm_86 at
+  both tiers); the workspace grows from 30,301 to 77,101 words per column
+  at 100 and 256 layers, and admission prices it per domain. Past 256 is
+  refused by name. The hex option-matrix row runs on CUDA at 149
+  levels ([the record](docs/kernel_local_memory_bounds.md)).
+- **KF-family capped-downdraft rain floor is a quirk correction.** When
+  `KF_cup_PARA` caps the downdraft (`DDINC = TRPPT/TDER`), binary32
+  `TDER*DDINC` can round one ulp above `TRPPT`, and the bare
+  `TRPPT - TDER` then gives about -2e-10 mm of `RAINCV` for the whole
+  `NCA` window, at any level count; on the hex option matrix's 149-level
+  case that drove `RAINC` below zero and the forecast stopped. KF-eta,
+  KF-CuP and MSKF now floor the flux at zero under
+  `kf_capped_downdraft_rain_floor` (correct-mode FQ11, on by default); in
+  exact mode each kernel is WRF's bare subtraction byte for byte (WRF
+  4.7.1 and 4.8.1 carry no floor at `module_cu_kfeta.F:1821`,
+  `module_cu_kfcup.F:2721` or `module_cu_mskf.F:5840`). WRF's own Fortran
+  gives 0 on the KF-CuP column, as the strict port does; the negative is
+  the default arithmetic's (`tests/test_kfcup_capped_downdraft_gpu.py`).
+- **256-level hex member init and TC potential intensity.** The hex GPU
+  member init (`woof/hex/init_gpu/physics.cu`) and the TC diagnostics'
+  potential-intensity sounding (`tc_climate/potential_intensity.cu`) held
+  per-thread columns of 128 levels and refused deeper meshes. Both bounds
+  are now macros whose default is 128 (`MAX_FG`/`MAX_Z`, `PI_MAX_LEV`): a
+  mesh of 128 levels or fewer compiles the unchanged text (the PI source
+  preprocesses to the old literal source, and the deep builds reproduce the
+  shipped words at 64 levels), and a deeper mesh prepends a 256 define.
+  Past 256 is refused by name. A 200-level resampling of the PI reference
+  sounding gives the reference PI to within 0.4 m/s.
 
 ### Licensing and opt-ins
 

@@ -1,6 +1,6 @@
 # Hardware and VRAM sizing
 
-WOOF runs on one NVIDIA GPU with CUDA 12.x or 13.x, field-verified
+WOOF-ArWen runs on one NVIDIA GPU with CUDA 12.x or 13.x, field-verified
 through 13.2 driver stacks on sm_89 by two independent nodes. This
 page explains how
 the sizing model works, where its safety factor comes from, and what
@@ -481,6 +481,16 @@ child's completion was not observed (Ctrl-C). The command refuses when the
 control binary is missing. This is the same daemon code as
 `woof energy worker --mps` (`woof/gpu_packing.py`). Packing and MPS have not
 been timed on hardware by this tree.
+
+The per-run GPU preflight reads `nvidia-smi pmon` types C, G, M and their
+`+` joins (an MPS client is `M+C`). A compute process is a co-tenant, priced
+against the card's free memory, unless it is something this multi-run launched
+and priced: an MPS client whose environment carries the multi-run's private
+`WOOF_MPS_PACK_TOKEN` under the same `CUDA_MPS_PIPE_DIRECTORY`, or the
+`nvidia-cuda-mps-server` of a daemon this multi-run started. An unrelated
+client of the same pipe directory (an adopted or system daemon), another
+daemon's client, and the server of an adopted daemon stay co-tenants. An
+unrecognised type string still fails closed.
 
 ### Small domains: the host decides the step time
 
@@ -987,6 +997,196 @@ not price that.
   ([docs/install.md](../install.md)).
 - The stock-WRF interoperability receipts (serial and 12/24-rank MPI)
   were produced on Linux nodes ([WRF-INTEROP.md](WRF-INTEROP.md)).
+
+## How long a run takes: `woof estimate`
+
+`woof estimate CONFIG` says how long a run will take on a runner, as a
+low-high wall clock with a line per phase: prepare, kernel compile,
+model steps, radiation steps, output, restart writes and, with `--da`,
+data assimilation.
+
+```bash
+woof estimate my-run.toml                  # this box (nvidia-smi or the Apple chip)
+woof estimate my-run.toml --gpu "RTX 4090" # a card from the table
+woof estimate my-run.toml --runner big.toml --json
+woof estimate --list-cards
+```
+
+The runner is this box by default. `--card NAME` picks a row of the
+built-in table: RTX A6000, A100 40/80 GB, H100 PCIe/SXM, L4, L40S, RTX
+3080/3090/4080/4090/5070 Ti/5090, RTX PRO 6000 and Apple M1-M4 Max/Ultra/Pro.
+Every row cites its datasheet. A `[runner]` TOML overrides any field:
+`card`, `backend`, `vram_gib`, `bandwidth_gbs`, `sm_count`, `fp32_tflops`,
+`pinned_gbps`, `host_ram_gib`, `cpu_cores`, `gpus`, `slots_per_gpu` and
+`mps`.
+
+What it reads from the configuration: every domain's columns, levels,
+time step and window (nests start late and step on their own clock),
+the radiation cadence (`radt`), the physics rung, the history interval,
+the restart interval, the adaptive clock and the route (`[model] engine =
+"hex"` prices from the hex anchors). Doubling the levels doubles the step;
+halving the time step doubles the steps but not the radiation calls.
+
+Each figure carries a label:
+
+- **measured**: an anchor on the same card. A forecast in
+  `woof.runtime_estimate.ANCHORS` names its card, grid, time step and
+  contention, and links a receipt.
+- **scaled**: an anchor on another card, carried by memory bandwidth to
+  the power 0.78-1.0. The 0.78 is the measured RTX 5090 to RTX 5070 Ti
+  ratio (1.72x time for 2.0x bandwidth,
+  [manual 08](../manual/08-operational-envelope.md)); 1.0 is the pure
+  bandwidth limit. Metal goes through the measured A6000-to-M3 Max ratio,
+  1.09-4.13x depending on the kernel mix.
+- **calibrated**: this box's own measurement (`--calibrate`, below).
+- **substituted**: no anchor covers it. A rung with no anchor is priced as
+  the slowest rung that has one, and a card with no bandwidth as the
+  slowest card of its backend. The note says which.
+
+A radiation step costs 3.40-9.99x an ordinary one. That is the measured
+range on an A6000 (3.40 on the LES case, 9.99 on a 200x200 HRRR domain);
+the 450x360 receipt below measured 4.97. The bracket also carries the
+session-to-session variance measured on one box (up to 1.30x).
+
+Rates per column differ either side of 100,000 columns: below it, launch
+overhead sets the step time. The estimator prefers anchors on the same
+side of that line as the domain, and anchors measured on this tree's code
+over older ones. The RTX 5090 CONUS and RTX 4090 rows predate this code:
+scaled to the A6000, they price the 450x360 step below at 0.54-1.31 s,
+against 0.21 s measured.
+
+### Measured against predicted (RTX A6000)
+
+All three runs were `woof go` from fetch to the end, with no other compute
+process on the card (nvidia-smi sampled every 15 s). Receipts are in
+[receipts/runtime-estimate](receipts/runtime-estimate/).
+
+| run | predicted | measured |
+|---|---|---|
+| 450x360x49, 3 km, dt 7.5 s, 6 h, before the A6000 had an anchor above 100,000 columns | 14-32 min | 11.3 min (outside: the 18,000-column anchors over-price a loaded card) |
+| 600x480x49, 3 km, dt 7.5 s, 3 h (held out) | 10.4-17.4 min | 10.3 min (0.5 % under the low end) |
+| 300x240x49, 9 km, dt 45 s, KF, 6 h (held out) | 1.7-5.3 min | 2.2 min (inside) |
+
+The first row's run became the A6000 anchor above the launch bound; the
+two held-out runs were predicted before they ran. Above the bound the
+step scaled with the columns: 1.29 microseconds per column-step at 162,000
+columns and 1.28 at 288,000. `--calibrate 100` on the first configuration
+extrapolated 9.5 min of steps against the full run's 10.1.
+
+### Calibrating on your box
+
+```bash
+woof estimate my-run.toml --calibrate 50
+```
+
+This runs the configuration on this box (`woof go --products none`). It
+stops after `--warmup` steps (default 5) plus 50, extrapolates the
+measured step to the whole forecast, and prints measured against
+predicted. The calibration is stored in
+`~/.cache/woof/runtime-calibration.json` (`$WOOF_RUNTIME_CALIBRATION`
+moves it). Later estimates on this card, route and physics rung are
+priced from it and labelled calibrated; `--no-calibration` ignores it.
+With `--prepared-root DIR` it skips the fetch and preparation.
+
+### The ETA while it runs
+
+`woof go` prints a heartbeat while the forecast runs. Once the run has a
+pace, that line carries the share done and an ETA, extrapolated the
+same way `--calibrate` does:
+
+```
+     .. forecast, 4m 40s, RUNNING, 9000 model seconds, 42% of the forecast, ETA ~6.1 min
+```
+
+### Pricing runs that share a card
+
+`--copies N` prices N identical runs sharing the card. Admission by priced
+memory (multi-run's rule) may lower N. Each run's slowdown comes from
+measured rows (`SHARING_ROWS`), the card's own rows first:
+
+| card | domain | runs | MPS | each run's step, against alone |
+|---|---|---|---|---|
+| RTX A6000 | 450x360x49 (162,000 columns) | 2 / 3 / 4 | off | 2.24x / 3.37x / 4.50x |
+| RTX A6000 | 450x360x49 | 2 / 3 | on | 1.95x / 2.93x |
+| RTX A6000 | 150x120x49 (18,000 columns) | 2 / 4 / 8 | off | 2.24x / 4.51x / 9.05x |
+| RTX A6000 | 150x120x49 | 2 / 3 / 5 | on | 1.75x / 2.53x / 4.17x |
+| RTX 4090 | streamed 1200x900x49 | 2 | off | 1.94x |
+| RTX PRO 6000 | 88x78 and 272x232 members | 4 | off | 1.08x |
+
+On the A6000, runs in separate contexts without MPS are time-sliced: each
+ran slower than its share of the card (2.24x for two), whatever the domain
+size, so packing gains only the overlap of the runs' start-up. MPS cut each run's step time by 13 % at two and at three large runs
+(0.398 against 0.456 s, 0.596 against 0.685 s; 15 % more step throughput),
+and by 22 % at two small runs (0.048 against 0.061 s; 28 % more
+throughput). Its small three- and five-run rows have no matching no-MPS
+count, so they are compared only against the interpolated off rows (about
+25 %). The RTX PRO 6000 row
+disagrees with the A6000 at four small runs; a card with no rows of its own
+is bracketed by both. A count between measured rows is interpolated, and a
+count past the last follows the measured trend at the low end and the
+worst measured slowdown per copy at the high end. Both are labelled
+UNMEASURED. The receipt is
+[a6000-packing-20261127.json](receipts/runtime-estimate/a6000-packing-20261127.json).
+
+What it does not price: host CPU and network during the fetch (the
+preparation fit is from one test host), cumulus cost apart from the
+anchors that include it, the hex door's preparation, and the
+observation preprocessing of data assimilation.
+
+## Packing runs onto cards: `woof pack-plan`
+
+`woof pack-plan` takes one or more configurations, or `--copies N` of one,
+and a runner (resolved as `woof estimate` resolves it). It recommends how
+many runs share each card, whether MPS is on, and the order. It prints
+every option's predicted makespan against one run at a time, and the
+command that runs it:
+
+```bash
+woof pack-plan member.toml --copies 8 --card a6000 --prepared
+woof pack-plan a.toml b.toml c.toml --runner box.toml --objective throughput
+woof pack-plan member.toml --copies 8 --deadline-hours 2 --emit-plan plan.toml
+```
+
+- **Admission is the run-time rule.** A run starts on a card in the
+  simulation only when `woof.multi_run.packed_admission` admits it: the
+  priced peak plus the 1 GiB margin against the card's free memory (less
+  what other processes hold), at most 8 runs per card and at most one per
+  CPU core of the card's share of the host. An option that admission
+  refuses is shown as REFUSED and never recommended.
+- **Contention** is `woof estimate`'s sharing bracket above. A streamed
+  run is bus-bound: it is priced at pure time-slicing (no gain from
+  sharing). Multi-run admission has no streamed-run rule, so packing one is
+  not refused.
+- **Choice.** `--objective makespan` (the default) or `throughput`, with
+  an optional `--deadline-hours` every run must meet. Options within 5 % of
+  the best are not separated by the prediction. Among them, measured
+  contention wins, then fewer runs per card, then MPS off.
+- **MPS** options compete on predicted makespan like the others, and win
+  only by more than the 5 % band. This relies on the GPU preflight
+  accepting every `nvidia-smi pmon` type and exempting the run's own MPS
+  siblings (PR #876); before that, 1 of 4 and 3 of 8 runs launched with
+  `--mps` exited before their first step.
+- `--emit-plan FILE` writes a `gpuwm.multi-run-plan/v1` plan in the
+  recommended order. The output also names the matching `woof energy
+  worker --slots-per-gpu N` for a hindcast queue.
+
+### Predicted against measured (RTX A6000)
+
+Predicted with `--card a6000 --prepared`, then run under `woof multi-run`
+from one prepared bundle, with no other compute process on the card (the
+same sweep as the sharing rows).
+
+| runs | plan | predicted makespan | measured |
+|---|---|---|---|
+| 4 x 450x360 3 km, 1 h | one at a time (recommended) | 6.4-16 min | 8.2 min |
+| 4 x 450x360 3 km, 1 h | 4 per card, MPS off | 7.2-15 min | 8.1 min |
+| 8 x 150x120 12 km, 6 h | 4 per card, MPS off (recommended) | 3.6-13 min | 3.7 min |
+| 8 x 150x120 12 km, 6 h | 8 per card, MPS off | 3.6-12 min | 3.5 min (3 % under the low end) |
+
+The rows above feed the prediction, so this table checks the simulation
+and the admission replay, not the contention model. The wide high ends
+are each run's alone bracket from `woof estimate`; `--calibrate` narrows
+them.
 
 ## Throughput reference points (all measured, RTX 5090)
 

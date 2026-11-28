@@ -31,7 +31,11 @@ TEMPERATURE = np.array([298.0, 290.0, 280.0])
 
 
 def _saturation(temperature, pressure):
-    return saturation_mixing_ratio(temperature, pressure, phase="liquid")
+    """Bolton/Tetens saturation over liquid water, written out here so the
+    cap is checked against the formula and not against its own helper."""
+    es = 1000.0 * c.SVP1 * np.exp(c.SVP2 * (temperature - c.SVPT0)
+                                  / (temperature - c.SVP3))
+    return c.EP2 * es / np.maximum(pressure - es, 1.0)
 
 
 def _background(relative_humidity=0.9):

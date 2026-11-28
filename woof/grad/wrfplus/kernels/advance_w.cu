@@ -10,8 +10,18 @@
 // wreal is binary64 unless the unit is built with -DWRFPLUS_REAL=float.
 // The base-state statements keep the primal's operation order, so the
 // float instantiation of advance_w_tl's base state reproduces the strict
-// primal's words.  The w damper (damp_opt = 3) is not linearised here;
-// the wrapper refuses it.
+// primal's words.  The float build takes glibc_trig_flt32.cuh's glibc_sinf
+// (MIT-licensed Arm optimized-routines; prepended by the wrapper) for the
+// damper, as the strict primal does; binary64 takes sin.
+//
+// damp_opt = 3 (dampmag > 0): WRF advance_w's implicit Rayleigh w damper
+// (module_small_step_em.F:1445), after the back substitution and before
+// the phi'' update.  Per column, htop = (phb + php)(nz)/g, hbot = htop -
+// zdamp; at each level k >= 1 with hk = (phb + php)(k)/g >= hbot,
+// dw = dampmag*sin^2(pi/2 (hk - hbot)/zdamp) and
+// w'' = (w'' - dw (c1f mut + c2f) w_ref)/(1 + dw).  Active in it: w'',
+// php (the heights: WRF's ph_1, woof's ph_save), mup (mut) and w_ref
+// (WRF w_save, woof's state.w).  Passive: phb, c1f, c2f, dampmag, zdamp.
 //
 // Layout: woof's (k, j, i).  w levels (nz+1, ny, nx), mass (nz, ny, nx),
 // u faces (nz, ny, nx+1), v faces (nz, ny+1, nx), 2-D (ny, nx).  One thread
@@ -19,7 +29,7 @@
 //
 // Active inputs: w_pp, ph_pp, rw_t, rph_t, ww_pp, mu_pp, mu_pp_old, th_pp,
 // th_pp_old, thp, php, alt, c2a, a, alpha, gam, mup, u_pp, v_pp, cqw (when
-// moist_cq).  Outputs: w_pp, ph_pp, p_pp, al_pp.  Passive: phb, ht, rdn,
+// moist_cq), w_ref (when dampmag > 0).  Outputs: w_pp, ph_pp, p_pp, al_pp.  Passive: phb, ht, rdn,
 // rdnw, fnm, fnp, c1h, c2h, c1f, c2f, mub2d, msft and the scalars.  With
 // has_msf == 0 the factors are an exact 1 and msft is not read, so the
 // words are the msf-free kernel's.
@@ -41,6 +51,14 @@ typedef WRFPLUS_REAL wreal;
 #endif
 
 #define WG ((wreal)9.81)
+#define WPI2 ((wreal)1.5707963267948966)
+
+static __device__ __forceinline__ double wsin(double x) { return sin(x); }
+static __device__ __forceinline__ double wcos(double x) { return cos(x); }
+#ifdef WRFPLUS_FLOAT_TRIG
+static __device__ __forceinline__ float wsin(float x) { return glibc_sinf(x); }
+static __device__ __forceinline__ float wcos(float x) { return cosf(x); }
+#endif
 #define WT0 ((wreal)300.0)
 #define W3S(k, j, i, ny, nxs) ((size_t)(k) * (ny) * (nxs) + (size_t)(j) * (nxs) + (i))
 
@@ -59,12 +77,14 @@ typedef WRFPLUS_REAL wreal;
     const wreal* __restrict__ fnp, const wreal* __restrict__ c1h,          \
     const wreal* __restrict__ c2h, const wreal* __restrict__ c1f,          \
     const wreal* __restrict__ c2f, const wreal* __restrict__ mub2d,        \
-    const wreal* __restrict__ cqw, const wreal* __restrict__ msft
+    const wreal* __restrict__ cqw, const wreal* __restrict__ msft,         \
+    const wreal* __restrict__ w_ref
 
 #define W_GEOM_PARAMS                                                       \
     int nz, int ny, int nx, int spec_zone, int base3d, int top_lid,        \
     int moist_cq, int boundary_x, int boundary_y, wreal cf1, wreal cf2,    \
-    wreal cf3, wreal rdx, wreal rdy, wreal dtau, wreal epssm, int has_msf
+    wreal cf3, wreal rdx, wreal rdy, wreal dtau, wreal epssm, int has_msf, \
+    wreal dampmag, wreal zdamp
 
 // WRF's t_2ave (acoustic.cu wrf_theta_average, strict).
 static __device__ __forceinline__
@@ -125,6 +145,7 @@ void advance_w_tl(wreal* __restrict__ w_pp, wreal* __restrict__ ph_pp,
                   const wreal* __restrict__ alpha_d, const wreal* __restrict__ gam_d,
                   const wreal* __restrict__ mup_d, const wreal* __restrict__ u_d,
                   const wreal* __restrict__ v_d, const wreal* __restrict__ cqw_d,
+                  const wreal* __restrict__ wref_d,
                   int nl, W_GEOM_PARAMS)
 {
     int c = blockIdx.x * blockDim.x + threadIdx.x;
@@ -300,6 +321,31 @@ void advance_w_tl(wreal* __restrict__ w_pp, wreal* __restrict__ ph_pp,
         wl[k] -= gam[f] * wl[k + 1];
     }
 
+    // damp_opt = 3 w damper (WRFPLUS g_advance_w, with woof's hybrid
+    // c1f mut + c2f where WRFPLUS has mut).
+    if (dampmag > (wreal)0.0) {
+        wreal htop = (phb[(size_t)nz * bstr + boff] + php[(size_t)nz * st + c]) / WG;
+        wreal hbot = htop - zdamp;
+        wreal hbot_d = php_d[(size_t)nz * st + c] / WG;
+        for (int k = 1; k <= nz; ++k) {
+            size_t f = (size_t)k * st + c;
+            wreal hk = (phb[(size_t)k * bstr + boff] + php[f]) / WG;
+            if (hk >= hbot) {
+                wreal angle = WPI2 * (hk - hbot) / zdamp;
+                wreal sn = wsin(angle);
+                wreal ang_d = WPI2 * (php_d[f] / WG - hbot_d) / zdamp;
+                wreal dw = dampmag * sn * sn;
+                wreal dw_d = (wreal)2.0 * dampmag * sn * wcos(angle) * ang_d;
+                wreal cfm = c1f[k] * mut + c2f[k];
+                wreal num = wl[k] - dw * cfm * w_ref[f];
+                wreal num_d = wld[k] - (dw_d * cfm + dw * c1f[k] * mut_d) * w_ref[f]
+                            - dw * cfm * wref_d[f];
+                wl[k] = num / ((wreal)1.0 + dw);
+                wld[k] = (num_d - wl[k] * dw_d) / ((wreal)1.0 + dw);
+            }
+        }
+    }
+
     // phi'' update.
     for (int k = 1; k <= nz; ++k) {
         wreal bs = c1f[k] * muts + c2f[k];
@@ -365,6 +411,7 @@ void advance_w_ad(wreal* __restrict__ w_a, wreal* __restrict__ ph_a,
                   wreal* __restrict__ c2a_a, wreal* __restrict__ a_a,
                   wreal* __restrict__ alpha_a, wreal* __restrict__ gam_a,
                   wreal* __restrict__ mup_a, wreal* __restrict__ cqw_a,
+                  wreal* __restrict__ wref_a,
                   wreal* __restrict__ aw0, W_GEOM_PARAMS)
 {
     int c = blockIdx.x * blockDim.x + threadIdx.x;
@@ -390,7 +437,7 @@ void advance_w_ad(wreal* __restrict__ w_a, wreal* __restrict__ ph_a,
     wreal muave = (wreal)0.5 * (((wreal)1.0 + e) * mu_pp[c]
                               + ((wreal)1.0 - e) * mu_pp_old[c]);
     wreal phl[WV_LEV], rhs2[WV_LEV], rhs3[WV_LEV], t2[WV_LEV];
-    wreal w5[WV_LEV], w6[WV_LEV], w7[WV_LEV], pho[WV_LEV];
+    wreal w5[WV_LEV], w6[WV_LEV], w7[WV_LEV], w8[WV_LEV], pho[WV_LEV];
     for (int k = 0; k <= nz; ++k) phl[k] = ph_pp[(size_t)k * st + c];
     rhs2[0] = 0;
     for (int k = 1; k <= nz; ++k) {
@@ -456,9 +503,28 @@ void advance_w_ad(wreal* __restrict__ w_a, wreal* __restrict__ ph_a,
         size_t f = (size_t)k * st + c;
         w7[k] = w6[k] - gam[f] * w7[k + 1];
     }
+    // The damper (w7 -> w8; w8 = w7 where it does not act).
+    wreal htop = 0, hbot = 0;
+    if (dampmag > (wreal)0.0) {
+        htop = (phb[(size_t)nz * bstr + boff] + php[(size_t)nz * st + c]) / WG;
+        hbot = htop - zdamp;
+    }
+    for (int k = 0; k <= nz; ++k) {
+        w8[k] = w7[k];
+        if (dampmag > (wreal)0.0 && k >= 1) {
+            size_t f = (size_t)k * st + c;
+            wreal hk = (phb[(size_t)k * bstr + boff] + php[f]) / WG;
+            if (hk >= hbot) {
+                wreal sn = wsin(WPI2 * (hk - hbot) / zdamp);
+                wreal dw = dampmag * sn * sn;
+                w8[k] = (w7[k] - dw * (c1f[k] * mut + c2f[k]) * w_ref[f])
+                      / ((wreal)1.0 + dw);
+            }
+        }
+    }
     pho[0] = phl[0];
     for (int k = 1; k <= nz; ++k)
-        pho[k] = rhs3[k] + msf * (wreal)0.5 * dtau * WG * ((wreal)1.0 + e) * w7[k]
+        pho[k] = rhs3[k] + msf * (wreal)0.5 * dtau * WG * ((wreal)1.0 + e) * w8[k]
                          / (c1f[k] * muts + c2f[k]);
 
     // ---- Reverse sweep. ----
@@ -512,7 +578,27 @@ void advance_w_ad(wreal* __restrict__ w_a, wreal* __restrict__ ph_a,
         wreal cw = msf * (wreal)0.5 * dtau * WG * ((wreal)1.0 + e);
         arhs[k] += apho[k];
         aw[k] += apho[k] * cw / bs;
-        amuts += -apho[k] * cw * w7[k] * c1f[k] / (bs * bs);
+        amuts += -apho[k] * cw * w8[k] * c1f[k] / (bs * bs);
+    }
+    // The damper (aw: w8 -> w7).
+    if (dampmag > (wreal)0.0) {
+        for (int k = 1; k <= nz; ++k) {
+            size_t f = (size_t)k * st + c;
+            wreal hk = (phb[(size_t)k * bstr + boff] + php[f]) / WG;
+            if (!(hk >= hbot)) continue;
+            wreal angle = WPI2 * (hk - hbot) / zdamp;
+            wreal sn = wsin(angle);
+            wreal dw = dampmag * sn * sn;
+            wreal cfm = c1f[k] * mut + c2f[k];
+            wreal anum = aw[k] / ((wreal)1.0 + dw);
+            wreal adw = -anum * w8[k] - anum * cfm * w_ref[f];
+            amut += -anum * dw * w_ref[f] * c1f[k];
+            wref_a[f] += -anum * dw * cfm;
+            aw[k] = anum;
+            wreal ah = (wreal)2.0 * dampmag * sn * wcos(angle) * adw * WPI2 / zdamp / WG;
+            php_a[f] += ah;
+            php_a[(size_t)nz * st + c] -= ah;
+        }
     }
     // Back substitution (aw: w7 -> w6).
     for (int k = 1; k <= nz - 1; ++k) {

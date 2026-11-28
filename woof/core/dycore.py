@@ -216,6 +216,17 @@ def _boundary_y(cfg: RunConfig) -> bool:
     return cfg.open_y or _boundary_forced(cfg)
 
 
+def smag_boundary_flags(cfg: RunConfig) -> tuple[np.int32, np.int32]:
+    """The (x, y) boundary flags of the WrfSmagGrid kernels (smag2d.cu
+    ``wrf_grid``): 1 for a bounded axis, 0 for a periodic one, and 2 for a
+    periodic one whose seam slope keeps WRF's cold zero at the top w level
+    (RunConfig.diff_metrics_seam_slope off: compute_diff_metrics fills the
+    seam's zx / zy for levels 1..ktf only)."""
+    cold = getattr(cfg, "diff_metrics_seam_slope", True) is False
+    return tuple(np.int32(1 if bounded else (2 if cold else 0))
+                 for bounded in (bool(_boundary_x(cfg)), bool(_boundary_y(cfg))))
+
+
 def _boundary_forced(cfg: RunConfig) -> bool:
     """WRF ``specified_bdy``: external specified OR nested forcing."""
     return bool(getattr(cfg, "specified", False)
@@ -1415,13 +1426,13 @@ def launch_wrf_smag2d_km(state: DomainState, cfg: RunConfig,
     common = _wrf_smag_grid_args(state, cfg, time_t=time_t)
     dims = [np.int32(nz), np.int32(ny), np.int32(nx),
             np.int32(state.phb.ndim == 3),
-            np.int32(_boundary_x(cfg)), np.int32(_boundary_y(cfg))]
+            *smag_boundary_flags(cfg)]
     grid = ((nx + _TPB - 1) // _TPB, ny, nz)
     launch_wrf_deform(state, cfg, common, (d11, d22, d12), dims, grid)
     tail = [DTYPE(cfg.c_s), DTYPE(_PRANDTL), d11, d22, d12, xkmh, xkhh,
             np.int32(nz), np.int32(ny), np.int32(nx),
             np.int32(state.phb.ndim == 3),
-            np.int32(_boundary_x(cfg)), np.int32(_boundary_y(cfg))]
+            *smag_boundary_flags(cfg)]
     if cfg.diff_opt == 1:
         get_kernel("diff_opt1", "wrf_diff_opt1_km4")(
             grid, (_TPB, 1, 1),
@@ -1492,7 +1503,7 @@ def launch_wrf_isotropic_km(state: DomainState, cfg: RunConfig,
     common = _wrf_smag_grid_args(state, cfg, time_t=time_t)
     dims = [np.int32(nz), np.int32(ny), np.int32(nx),
             np.int32(state.phb.ndim == 3),
-            np.int32(_boundary_x(cfg)), np.int32(_boundary_y(cfg))]
+            *smag_boundary_flags(cfg)]
     grid = ((nx + _TPB - 1) // _TPB, ny, nz)
     # D22/D12 hold the face workspaces here, so the stored hats take the
     # u/v carrying buffers, which every caller zeroes after this launch.
@@ -1540,7 +1551,7 @@ def launch_wrf_calc_n2(state: DomainState, cfg: RunConfig, bn2, *,
     common = _wrf_smag_grid_args(state, cfg, time_t=time_t)
     dims = [np.int32(nz), np.int32(ny), np.int32(nx),
             np.int32(state.phb.ndim == 3),
-            np.int32(_boundary_x(cfg)), np.int32(_boundary_y(cfg))]
+            *smag_boundary_flags(cfg)]
     grid = ((nx + _TPB - 1) // _TPB, ny, nz)
     suffix = "0" if time_t else ""
     thp = getattr(state, "thp" + suffix)
@@ -1602,7 +1613,7 @@ def launch_wrf_tke_km(state: DomainState, cfg: RunConfig,
     common = _wrf_smag_grid_args(state, cfg, time_t=time_t)
     dims = [np.int32(nz), np.int32(ny), np.int32(nx),
             np.int32(state.phb.ndim == 3),
-            np.int32(_boundary_x(cfg)), np.int32(_boundary_y(cfg))]
+            *smag_boundary_flags(cfg)]
     grid = ((nx + _TPB - 1) // _TPB, ny, nz)
     # The stored hats take diff6_x/diff6_y; BN2 borrows diff6_x after them.
     launch_wrf_deform(state, cfg, common, (d11, d22, d12), dims, grid)
@@ -1716,7 +1727,7 @@ def launch_wrf_smag3d_km(state: DomainState, cfg: RunConfig,
     common = _wrf_smag_grid_args(state, cfg, time_t=time_t)
     dims = [np.int32(nz), np.int32(ny), np.int32(nx),
             np.int32(state.phb.ndim == 3),
-            np.int32(_boundary_x(cfg)), np.int32(_boundary_y(cfg))]
+            *smag_boundary_flags(cfg)]
     grid = ((nx + _TPB - 1) // _TPB, ny, nz)
     # The stored hats take diff6_x/diff6_y; BN2 borrows diff6_x after them.
     launch_wrf_deform(state, cfg, common, (d11, d22, d12), dims, grid)
@@ -1798,7 +1809,7 @@ def launch_wrf_smag2d_hd_multi(state: DomainState, cfg: RunConfig, rows,
     common = _wrf_smag_grid_args(state, cfg, time_t=time_t)
     tail = [np.int32(nz), np.int32(ny), np.int32(nx),
             np.int32(state.phb.ndim == 3),
-            np.int32(_boundary_x(cfg)), np.int32(_boundary_y(cfg))]
+            *smag_boundary_flags(cfg)]
     pairs = [(state.scratch((nz, ny, nx + 1), "diff6_x"),
               state.scratch((nz, ny + 1, nx), "diff6_y"))]
     for extra in range(1, SMAG_MULTI_ROWS):
@@ -1854,7 +1865,7 @@ def launch_wrf_smag_uv_faces(state: DomainState, cfg: RunConfig, xk, *,
     common = _wrf_smag_grid_args(state, cfg, time_t=time_t)
     tail = [np.int32(nz), np.int32(ny), np.int32(nx),
             np.int32(state.phb.ndim == 3),
-            np.int32(_boundary_x(cfg)), np.int32(_boundary_y(cfg))]
+            *smag_boundary_flags(cfg)]
     get_kernel("smag2d_uv_faces", "wrf_smag_uv_coef_faces")(
         ((nx + 1 + _TPB - 1) // _TPB, ny + 1, nz), (_TPB, 1, 1),
         tuple(common + [xk, cm, c12] + tail))
@@ -1886,7 +1897,7 @@ def launch_wrf_smag2d_hd(state: DomainState, cfg: RunConfig, f, xk, tend,
     common = _wrf_smag_grid_args(state, cfg, time_t=time_t)
     tail = [np.int32(nz), np.int32(ny), np.int32(nx),
             np.int32(state.phb.ndim == 3),
-            np.int32(_boundary_x(cfg)), np.int32(_boundary_y(cfg))]
+            *smag_boundary_flags(cfg)]
     nlev, nys, nxs = f.shape
     grid = ((nxs + _TPB - 1) // _TPB, nys, nlev)
     if stagger == "":
@@ -1986,7 +1997,7 @@ def launch_wrf_smag2d_vertical(
     common = _wrf_smag_grid_args(state, cfg, time_t=time_t)
     tail = [np.int32(nz), np.int32(ny), np.int32(nx),
             np.int32(state.phb.ndim == 3),
-            np.int32(_boundary_x(cfg)), np.int32(_boundary_y(cfg))]
+            *smag_boundary_flags(cfg)]
     if kmv is None:
         kmv = km
     if w_km is None:
@@ -2644,7 +2655,7 @@ def _compute_wrf_smag_tendencies(state: DomainState, cfg: RunConfig,
             common = _wrf_smag_grid_args(state, cfg, time_t=time_t)
             tail = [np.int32(nz_), np.int32(ny_), np.int32(nx_),
                     np.int32(state.phb.ndim == 3),
-                    np.int32(_boundary_x(cfg)), np.int32(_boundary_y(cfg))]
+                    *smag_boundary_flags(cfg)]
             mass_grid = ((nx_ + _TPB - 1) // _TPB, ny_, nz_)
             get_kernel("smag2d", "wrf_smag_vd_s")(
                 mass_grid, (_TPB, 1, 1),
@@ -2714,7 +2725,7 @@ def _compute_wrf_moist_theta_mixing(state, cfg, km, kh, specs, *, time_t,
         common = _wrf_smag_grid_args(state, cfg, time_t=time_t)
         tail = [np.int32(nz), np.int32(ny), np.int32(nx),
                 np.int32(state.phb.ndim == 3),
-                np.int32(_boundary_x(cfg)), np.int32(_boundary_y(cfg))]
+                *smag_boundary_flags(cfg)]
         get_kernel("smag2d", "wrf_smag_vd_s")(
             ((nx + _TPB - 1) // _TPB, ny, nz), (_TPB, 1, 1),
             tuple(common + [state.tke0 if time_t else state.tke,
@@ -2936,9 +2947,10 @@ def prepare_fixed_tendencies(state: DomainState, cfg: RunConfig,
             physics_tendencies=physics_tendencies)
         if cfg.m_opt:
             from woof.core.sfs_output import capture
+            flag_x, flag_y = smag_boundary_flags(cfg)
             capture(state, cfg, km, _horizontal_w_km(state, cfg),
                     _wrf_smag_grid_args(state, cfg, time_t=True),
-                    boundary_x=_boundary_x(cfg), boundary_y=_boundary_y(cfg))
+                    boundary_x=flag_x, boundary_y=flag_y)
     if (WRF_EXACT and physics_tendencies is not None
             and not ((cfg.use_theta_m or cfg.km_opt == 5) and include_smag)):
         _fold_physics_wrf(state, specs, physics_tendencies)
@@ -3267,9 +3279,10 @@ def add_smag2d_tendencies(state: DomainState, cfg: RunConfig,
             state, cfg, km, kh, specs, time_t=False)
         if cfg.m_opt:
             from woof.core.sfs_output import capture
+            flag_x, flag_y = smag_boundary_flags(cfg)
             capture(state, cfg, km, _horizontal_w_km(state, cfg),
                     _wrf_smag_grid_args(state, cfg, time_t=False),
-                    boundary_x=_boundary_x(cfg), boundary_y=_boundary_y(cfg))
+                    boundary_x=flag_x, boundary_y=flag_y)
     pairs = tuple((state.scratch(f.shape, slot), tend)
                   for f, tend, _xk, _c1, _c2, slot, _stag in specs
                   if tend is not None)
@@ -3319,7 +3332,7 @@ def _prepare_small_step_init_launch(state: DomainState, cfg: RunConfig,
     periodic.  The uv kernel builds WRF's ``muu``/``muus`` inline and
     ``calc_mu_uv`` picks the boundary face's off-domain neighbour from
     ``periodic_x``/``periodic_y`` (module_big_step_utilities_em.F:59-115),
-    so the flag has to reach the kernel; WOOF's spelling of "not periodic"
+    so the flag has to reach the kernel; WOOF-ArWen's spelling of "not periodic"
     is ``_boundary_x``/``_boundary_y`` (open, specified, or nested), the same
     predicate ``slow_pgf`` and the advection launchers already pass.
     """

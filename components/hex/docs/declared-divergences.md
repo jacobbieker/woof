@@ -1,10 +1,10 @@
 # Declared divergences
 
-**This register is about the default WOOF physics route.** On that route
-woof hex runs WOOF's physics, not MPAS's, so whole-model agreement with
+**This register is about the default ArWen physics route.** On that route
+woof hex runs WOOF-ArWen's physics, not MPAS's, so whole-model agreement with
 native MPAS-Atmosphere is not reachable there and is not its standard: **the
 dynamical core is byte-identical to native v8.4.2 on the measured cases (see
-[compatibility](mpas-compatibility.md)), and WOOF's physics is judged by skill
+[compatibility](mpas-compatibility.md)), and WOOF-ArWen's physics is judged by skill
 against observations, MRMS and ASOS, not by agreement with another model.**
 Since 0.4.0 the MPAS physics suites are a separate route, ported from MPAS-A
 v8.4.2 and matched against native MPAS bit for bit
@@ -15,7 +15,7 @@ This document is the register of the known physics-shaped differences against
 native. Each one is **declared**: measured, mechanism named, referee named. A
 declared divergence is not a blocker and it is not a licence to ignore a
 defect: a bias that is wrong against *observations* is still wrong. Judging
-WOOF's physics by observations instead of by MPAS changes the referee; it
+WOOF-ArWen's physics by observations instead of by MPAS changes the referee; it
 does not clear a finding.
 
 **The status of the referee itself: it has run.** The first real run is
@@ -165,8 +165,8 @@ is byte-identical to 2.7.3 on all 500 arrays of that profile
 That the manifest does not reach the boundary-layer kernel is a named
 follow-up; it is not a claim this page makes.
 
-The 2026-10-05 move to the gpuwm 2.8.6 candidate (an unpublished
-2.8.6 engine build) moved ten of the sixteen pinned files
+The 2026-10-05 move to an unpublished gpuwm 2.8.6 engine build
+moved ten of the sixteen pinned files
 against the 2.8.0 manifest, measured against the engine tree:
 `woof/config.py`, `woof/core/gf.py`, `woof/core/kernels/gf.cu`,
 `woof/core/kernels/__init__.py`, `woof/core/microphysics.py`,
@@ -365,8 +365,8 @@ different causes:
   so it does not drive the cold drift. It does inflate RAINC, which bears on
   section 2's live-referee sign.
 
-**Fixed by default, 2026-10-05: New Tiedtke at 20 km and coarser.** This
-ruling was delegated by the owner on 2026-10-05: New Tiedtke becomes the hex
+**Fixed by default, 2026-10-05: New Tiedtke at 20 km and coarser.** Decided
+on 2026-10-05: New Tiedtke becomes the hex
 coarse-mesh default once a second case confirms it. It supersedes the
 2026-08-26 resolution rule's Grell-Freitas answer for those meshes. The
 reason is the observation-scored drift above, not parity.
@@ -571,7 +571,7 @@ moves.
   at step 162 with "found a non-finite normal velocity: 1197680 edge values
   on 80 levels ... the mesh geometry equals its sealed copy". The geometry
   is intact; the integration blew up.
-- The blow-up is MYNN's, not the dycore's (correction RP8, 2026-11-15).
+- The blow-up is MYNN's, not the dycore's (correction RP9, 2026-11-15; RP8 on the fork before WOOF 1.1.7, whose RP8 is the BouLac sign).
   MPAS v8.4.2's `qsat_blend` (`mynn_shared.F90:90-98`) is
   `0.622*e/(p-e)` with no guard. Under a 30 km lid, p - e stays far from
   zero. Under the 50 km lid, levels 59-80 have p of 50-300 Pa and a
@@ -585,13 +585,13 @@ moves.
   because the same case fails with the damping on.
 - Correct mode now carries the NOAA-GSL MYNN-EDMF guards
   (`module_bl_mynnedmf.F90:7650-7662`: e at most 0.15 p, p - e at least
-  1e-5). Exact mode keeps MPAS's text, and `--physics-correct-skip RP8`
+  1e-5). Exact mode keeps MPAS's text, and `--physics-correct-skip RP9`
   restores it in correct mode.
 - On the default 55-level, 30 km lid the cap binds only at the top level
   in a warm stratopause. Over the 11-05 00Z 72 h case that was 6,939
   (cell, hour) points, with largest e/p 0.23. The air there is dry
   (qv / capped qsat at most 1e-9). On Metal, that 72 h default forecast
-  is bitwise identical with and without RP8 in every history field.
+  is bitwise identical with and without RP9 in every history field.
 - The WOOF-arm row is not affected: it completed all seven cases.
 
 ## 2. Convective-to-explicit precipitation repartition
@@ -628,7 +628,7 @@ MRMS; run against Stage-IV, for the reason above.
 **Status: MEASURED, and it went the other way.**
 
 The registered claim `current-arwen-convective-rainfall-deficit` says current
-WOOF has a *negative* one-hour precipitation bias against observations. The
+WOOF-ArWen has a *negative* one-hour precipitation bias against observations. The
 referee returns **DISFAVORED**: the paired case-block interval is entirely
 positive. Estimate **+0.0247 mm/h**, 95 % interval **[+0.0041, +0.0606]**, four
 cases, 5,000 replicates. Against Stage-IV the port is **wet**, in every case:
@@ -908,7 +908,7 @@ way from the deficit. Three things would move the rest.
    `woof.hex.sonde_profile_referee` against IGRA v2 and WIS2 radiosondes.
    Its seven-case result is in section 1: the polar-top drift is MPAS's
    low-top configuration, and `global-120km-high-top` is the opt-in fix.
-3. **Any GF-lane change re-measures all three**, (3) explicitly only after (2).
+3. **Any Grell-Freitas change re-measures all three**, (3) explicitly only after (2).
    The re-measurement now has a standing target rather than an empty column:
    a GF change that removes the convective rainfall deficit against native
    would, on this evidence, make the port *wetter* against observations than it

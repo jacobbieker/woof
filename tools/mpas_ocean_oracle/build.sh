@@ -25,6 +25,14 @@
 # pixi environment's unless GFORTRAN names one.  On a host whose libm is not
 # glibc the oracles link tools/oracle_libm/glibc_host.cpp, so their libm calls
 # return glibc's words (TOOLCHAIN.txt records which).
+#
+# CVMix: at RKIND 8 only (mpas_ocn_vmix_cvmix.F does not compile at RKIND 4:
+# CVMix is real(8) throughout), when a CVMix v0.84-beta source directory (its
+# src/shared, as MPAS's get_cvmix.sh links it) is found at CVMIX_SOURCE or at
+# MPAS_SOURCE_ROOT/src/core_ocean/cvmix, its ten modules (checked against
+# CVMIX_SOURCES.sha256) and mpas_ocn_vmix_cvmix.F are compiled verbatim with
+# the vertical mixing into run_vmix_cvmix_r8.  Nothing of CVMix is in this
+# repository; the oracle compiles what it downloads.
 set -euo pipefail
 if [[ $# -ne 2 ]]; then
     echo "usage: build.sh MPAS_SOURCE_ROOT BUILD_DIR" >&2
@@ -43,6 +51,18 @@ read -r -a fc <<< "${GFORTRAN:-gfortran}"
 }
 
 ocean="${source_root}/src/core_ocean/shared"
+cvmix_root="${CVMIX_SOURCE:-${source_root}/src/core_ocean/cvmix}"
+if [[ -f "${cvmix_root}/cvmix_kpp.F90" ]]; then
+    cvmix_root=$(cd "${cvmix_root}" && pwd)
+    ( cd "${cvmix_root}" && grep -v '^#' "${script_dir}/CVMIX_SOURCES.sha256" \
+        | { command -v sha256sum >/dev/null && sha256sum -c --quiet - || shasum -a 256 -c --quiet -; } ) || {
+        echo "a CVMix source differs from CVMIX_SOURCES.sha256; refusing to build" >&2
+        exit 3
+    }
+else
+    echo "no CVMix source (CVMIX_SOURCE or ${source_root}/src/core_ocean/cvmix): run_vmix_cvmix_r8 is not built" >&2
+    cvmix_root=""
+fi
 for precision in r4 r8; do
     rm -rf "${build_dir}/${precision}" && mkdir -p "${build_dir}/${precision}" && cd "${build_dir}/${precision}"
     flags=(-c -cpp -O0 -ffp-contract=off -ffree-form -ffree-line-length-none)
@@ -175,6 +195,23 @@ for precision in r4 r8; do
         echo "end module ocn_timestep_cut"; } > ocn_timestep_cut.F
       "${fc[@]}" "${flags[@]}" -I.. ocn_timestep_cut.F
       "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/run_forward.F90" )
+    # CVMix (RKIND 8 only), verbatim, with mpas_ocn_vmix_cvmix.F and the
+    # vertical mixing recompiled against it in a directory of its own (its
+    # ocn_vmix_cvmix replaces stubs_vmix.F90's there)
+    if [[ ${precision} == r8 && -n ${cvmix_root} ]]; then
+        mkdir -p cvmix
+        ( cd cvmix
+          for unit in cvmix_kinds_and_types cvmix_utils cvmix_math cvmix_put_get cvmix_background \
+                      cvmix_convection cvmix_shear cvmix_tidal cvmix_ddiff cvmix_kpp; do
+              "${fc[@]}" "${flags[@]}" "${cvmix_root}/${unit}.F90"
+          done
+          "${fc[@]}" "${flags[@]}" -I. -I../eos -I.. "${ocean}/mpas_ocn_vmix_cvmix.F"
+          for unit in mpas_ocn_vmix_coefs_const mpas_ocn_vmix_coefs_tanh mpas_ocn_vmix_coefs_rich \
+                      mpas_ocn_vmix_coefs_redi mpas_ocn_vmix; do
+              "${fc[@]}" "${flags[@]}" -I. -I../eos -I.. "${ocean}/${unit}.F"
+          done
+          "${fc[@]}" "${flags[@]}" -I. -I../eos -I.. "${script_dir}/run_vmix.F90" )
+    fi
     # GM, verbatim, in a directory of its own for run_gm (its own driver and
     # stream); it assigns huge(0D0) to RKIND arrays, which gfortran
     # converts at RKIND 4 (to +Inf) only with -fno-range-check
@@ -186,7 +223,8 @@ for precision in r4 r8; do
       "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/oracle_stream.F90"
       "${fc[@]}" "${flags[@]}" -I.. "${script_dir}/run_gm.F90" )
     if command -v objdump >/dev/null; then
-        if objdump -d mpas_ocn_*.o eos/mpas_ocn_*.o eos/ocn_*.o gm/mpas_ocn_*.o mpas_constants.o | grep -Eq '\bv?fn?m(add|sub)([0-9]|[[:space:]]|$)'; then
+        if objdump -d mpas_ocn_*.o eos/mpas_ocn_*.o eos/ocn_*.o gm/mpas_ocn_*.o mpas_constants.o \
+                $(compgen -G 'cvmix/*.o' || true) | grep -Eq '\bv?fn?m(add|sub)([0-9]|[[:space:]]|$)'; then
             echo "an oracle object contains an FMA instruction; refusing" >&2
             exit 4
         fi
@@ -258,6 +296,11 @@ for precision in r4 r8; do
         mpas_ocn_vel_*.o mpas_ocn_thick_hadv.o mpas_ocn_thick_vadv.o mpas_ocn_thick_surface_flux.o mpas_ocn_forcing.o \
         mpas_ocn_constants.o mpas_constants.o stubs_unported.o stubs.o mpas_kind_types.o \
         ${libm_objects[@]+"${libm_objects[@]}"}
+    if [[ -d cvmix ]]; then
+        "${fc[@]}" -o "${build_dir}/run_vmix_cvmix_${precision}" cvmix/run_vmix.o eos/oracle_stream.o \
+            cvmix/mpas_ocn_vmix*.o cvmix/cvmix_*.o eos/mpas_ocn_equation_of_state*.o mpas_ocn_constants.o \
+            mpas_constants.o stubs.o mpas_kind_types.o ${libm_objects[@]+"${libm_objects[@]}"}
+    fi
     "${fc[@]}" -o "${build_dir}/run_gm_${precision}" gm/run_gm.o gm/oracle_stream.o gm/mpas_ocn_gm.o \
         mpas_ocn_constants.o mpas_constants.o stubs.o mpas_kind_types.o ${libm_objects[@]+"${libm_objects[@]}"}
 done
@@ -266,5 +309,6 @@ done
     echo "flags: -O0 -ffp-contract=off -cpp -ffree-form -ffree-line-length-none; r4 adds -DSINGLE_PRECISION (and -fno-range-check for mpas_ocn_gm.F)"
     echo "host: $(uname -srm)"
     cat "${build_dir}/r4/libm.txt"
+    if [[ -n ${cvmix_root} ]]; then echo "CVMix: ${cvmix_root} (CVMIX_SOURCES.sha256), RKIND 8 only"; fi
 } > "${build_dir}/TOOLCHAIN.txt"
-echo "built ${build_dir}/run_{oracle,pgrad_hmix,tendency,eos,diagnostics,tracer_advection,tracer_hmix,tend_tracer,vmix,vert_transport,btr_subcycle,split_step,forward,frazil,land_ice,gm}_{r4,r8}"
+echo "built ${build_dir}/run_{oracle,pgrad_hmix,tendency,eos,diagnostics,tracer_advection,tracer_hmix,tend_tracer,vmix,vert_transport,btr_subcycle,split_step,forward,frazil,land_ice,gm}_{r4,r8}${cvmix_root:+ and run_vmix_cvmix_r8}"

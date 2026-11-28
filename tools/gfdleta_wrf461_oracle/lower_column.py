@@ -5,10 +5,14 @@ reviewable Fortran-77 intermediate with fixed per-column storage. Numerical
 validation remains against the byte-unmodified Fortran module.
 """
 from pathlib import Path
-import argparse,re,subprocess,json
+import argparse,re,subprocess,json,os
 
 SELECT={'ETARA','RADTN','GAUSIN','ZENITH','OZON2D','O3INT','CLO89','LWR88','FST88','E1E290','SPA88','E290','E2SPEC','E3V88','SWR93','RADFS','SOLARD','CAL_MON_DAY'}
-MAXL=81
+# Per-column storage bound. The shipped kernels are generated at 81; the deep
+# tier (woof/core/gfdleta_levels.py) regenerates them with GFDLETA_MAXL=256.
+# WRF's own NL=81 (the GFDL ozone climatology's fixed pressure levels:
+# XDUO3N, PRGFDL, OZON2D's QO3O3) is data, not a model-level bound, and stays 81.
+MAXL=int(os.environ.get('GFDLETA_MAXL','81'))
 
 def split_top(s,sep=','):
  out=[];depth=0;start=0;quote=None
@@ -103,11 +107,11 @@ GLOBALS={
  'SOURCE':('REAL','28,15'),'DSRCE':('REAL','28,15'),
  'T1':('REAL','5040'),'T2':('REAL','5040'),'T4':('REAL','5040'),'EM1V':('REAL','5040'),'EM1VW':('REAL','5040'),'EM3V':('REAL','5040'),
  'AXSD':('REAL','310'),'RSQR':('REAL',None),
- 'CO251':('REAL','82,82'),'CDT51':('REAL','82,82'),'C2D51':('REAL','82,82'),'CO258':('REAL','82,82'),'CDT58':('REAL','82,82'),'C2D58':('REAL','82,82'),
+ 'CO251':('REAL',f'{MAXL+1},{MAXL+1}'),'CDT51':('REAL',f'{MAXL+1},{MAXL+1}'),'C2D51':('REAL',f'{MAXL+1},{MAXL+1}'),'CO258':('REAL',f'{MAXL+1},{MAXL+1}'),'CDT58':('REAL',f'{MAXL+1},{MAXL+1}'),'C2D58':('REAL',f'{MAXL+1},{MAXL+1}'),
  'TBPVS':('REAL','7501'),'C1XPVS':('REAL',None),'C2XPVS':('REAL',None),
 }
-for n in 'STEMP GTEMP CO231 CO238 C2D31 C2D38 CDT31 CDT38 CO271 CO278 C2D71 C2D78 CDT71 CDT78'.split():GLOBALS[n]=('REAL','82')
-for n in 'CO2M51 CO2M58 CDTM51 CDTM58 C2DM51 C2DM58'.split():GLOBALS[n]=('REAL','81')
+for n in 'STEMP GTEMP CO231 CO238 C2D31 C2D38 CDT31 CDT38 CO271 CO278 C2D71 C2D78 CDT71 CDT78'.split():GLOBALS[n]=('REAL',str(MAXL+1))
+for n in 'CO2M51 CO2M58 CDTM51 CDTM58 C2DM51 C2DM58'.split():GLOBALS[n]=('REAL',str(MAXL))
 CLOCK={'R1':('REAL',None),'RSIN1':('REAL',None),'RCOS1':('REAL',None),'RCOS2':('REAL',None)}
 PARAM={'NL':('INTEGER','81'),'NBLY':('INTEGER','15'),'RTHRESH':('REAL','1.E-15'),'RTD':('REAL','57.2957763671875'),
  'XSDMAX':('REAL','3.1'),'DXSD':('REAL','.01'),'NXSD':('INTEGER','310'),'SDPRINT':('LOGICAL','.FALSE.'),
@@ -164,7 +168,7 @@ def lower(name,source):
   if re.match(r'END\s+(SUBROUTINE|FUNCTION)',s,re.I):s='END'
   body.append((label,s))
  text=' '.join(s for _,s in source)
- extra=[('','INTEGER GDMAX'),('','PARAMETER(GDMAX=81)')]
+ extra=[('','INTEGER GDMAX'),('','PARAMETER(GDMAX='+str(MAXL)+')')]
  for n,(kind,value) in PARAM.items():
   if n not in declared and re.search(r'\b'+n+r'\b',text,re.I):extra.extend([('',kind+' '+n),('','PARAMETER('+n+'='+value+')')])
  # Commons have identical declaration order in every unit. A colliding local

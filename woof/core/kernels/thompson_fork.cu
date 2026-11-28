@@ -1531,6 +1531,20 @@ __device__ bool tf_mp_thompson(
                 prr_rcs = (double)(ratio * copysignf(1.0f, (float)prr_rcs));
                 prs_rcs = -prr_rcs;
             }
+#ifdef THOMPSON_RAIN_SNOW_CLOSURE
+            // RunConfig.thompson_rain_snow_closure (FQ5): the fork
+            // re-pairs the rain-snow transfer only above 0 C.  Below it the
+            // graupel gain keeps its pre-limiter value while the rain and
+            // snow limiters shrink the losses; the gain becomes what they
+            // lose, floored at zero (snow then takes only what rain lost).
+            if (temp[k] < TF_T_0) {
+                prg_rcs = -(prr_rcs + prs_rcs);
+                if (prg_rcs < 0.0) {
+                    prs_rcs = -prr_rcs;
+                    prg_rcs = 0.0;
+                }
+            }
+#endif
         }
 
         // ---- tendencies (:2796-2960) ----
@@ -1563,6 +1577,16 @@ __device__ bool tf_mp_thompson(
                 nu_c = min(15, tf_nint(1000.E6f / xnc) + 2);
                 lamc = (double)tf_powf(xnc * TF_am_r * CCG(2, nu_c)
                                        * OCG1(nu_c) / rc[k], TF_obmr);
+#ifdef THOMPSON_LAMC_UPDATED_RC
+                // RunConfig.thompson_lamc_updated_rc (FQ7): the fork forms
+                // lamc from the entry cloud mass rc(k) (:2839) although the
+                // balance's mass is the updated xrc (:2830); this divides by
+                // xrc.  xrc <= rc(k) (qcten holds only sinks), so the entry
+                // mass gives xDc too large, never too small (prw_vcd joins
+                // qcten only at :3237, after this balance).
+                lamc = (double)tf_powf(xnc * TF_am_r * CCG(2, nu_c)
+                                       * OCG1(nu_c) / xrc, TF_obmr);
+#endif
                 const float xDcb = (float)((double)(TF_bm_r + (float)nu_c
                                                     + 1.0f) / lamc);
                 if (xDcb < TF_D0c) {

@@ -83,7 +83,7 @@ def _replay(tmp_path, **env_extra):
     return json.loads(out.read_text())
 
 
-def _differences(result, arms, reference="ctl"):
+def _differences(result, arms, reference):
     return {f"{case_arm}:{field}": row[reference]
             for case_arm, fields in result["cases"].items()
             if case_arm.split("__")[1] in arms
@@ -111,17 +111,20 @@ KM2 = ("km2", "km2_isotropic", "km2_seed_pbl0")
 def test_strict_km4_coordinate_mixing_every_wrf461_word(tmp_path):
     """Deformation, K, and every u/v/w/theta/moisture tendency, bitwise.
 
-    Against unmodified WRF the only differing words are the ones WRF's
-    periodic-seam slope defect moves (compute_diff_metrics leaves the
-    model-top zx/zy at the seam unwritten); WOOF computes that slope.
+    With diff_metrics_seam_slope off (FQ12, exact mode) the engine is
+    unmodified WRF word for word, WRF's periodic-seam slope defect included
+    (compute_diff_metrics leaves the model-top zx/zy at the seam unwritten);
+    with it on, the seam control build.  The words FQ12 moves are exactly
+    the ones the seam control moves in WRF.
     """
     import cupy  # noqa: F401  (device test: the conftest marker reads this import)
     result = _replay(tmp_path, GPUWM_WRF_EXACT="1", GPUWM_WRF_EXACT_DIFFUSION="1")
-    assert _differences(result, KM4) == {}
-    against_wrf = _differences(result, KM4, "wrf")
-    assert against_wrf == {k: v for k, v in _seam_moved().items()
-                           if k.split("__")[1].split(":")[0] in KM4 and v}
-    assert against_wrf, "the periodic case must exercise WRF's seam defect"
+    assert _differences(result, KM4, "wrf") == {}
+    assert _differences(result, KM4, "ctl") == {}
+    moved = _differences(result, KM4, "seam")
+    assert moved == {k: v for k, v in _seam_moved().items()
+                     if k.split("__")[1].split(":")[0] in KM4 and v}
+    assert moved, "the periodic case must exercise WRF's seam defect"
 
 
 @pytest.mark.gpu
@@ -129,7 +132,8 @@ def test_strict_km4_coordinate_mixing_every_wrf461_word(tmp_path):
 def test_strict_km2_coordinate_mixing_every_wrf461_word(tmp_path):
     import cupy  # noqa: F401  (device test: the conftest marker reads this import)
     result = _replay(tmp_path, GPUWM_WRF_EXACT="1", GPUWM_WRF_EXACT_DIFFUSION="1")
-    assert _differences(result, KM2) == {}
+    assert _differences(result, KM2, "wrf") == {}
+    assert _differences(result, KM2, "ctl") == {}
 
 
 @pytest.mark.gpu
@@ -137,4 +141,5 @@ def test_strict_km2_coordinate_mixing_every_wrf461_word(tmp_path):
 def test_strict_build_alone_selects_wrf_diffusion_order(tmp_path):
     import cupy  # noqa: F401  (device test: the conftest marker reads this import)
     result = _replay(tmp_path, GPUWM_WRF_EXACT="1")
-    assert _differences(result, KM4) == {}
+    assert _differences(result, KM4, "wrf") == {}
+    assert _differences(result, KM4, "ctl") == {}

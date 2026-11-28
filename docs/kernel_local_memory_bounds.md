@@ -1488,3 +1488,65 @@ reads both tiers back off the driver; `tests/test_pbl_qnse_boulac_256_levels.py`
 runs a 256-level column to a 1 hPa top (finite, non-trivial), proves the
 256 tier reproduces the unchanged kernel word for word at `nz` 49 and 128,
 and compares CUDA with Metal.
+
+## GSFC shortwave to 256 levels (compile-time tier)
+
+`kernels/gsfcsw.cu` (strict) and `gsfcsw_fast.cuh` (default) keep every
+per-level array in a per-column arena in global memory, so the local frame
+does not grow with the column; what a 128-layer ceiling sized was the arena
+layout itself (every array's extent and offset was a literal for
+`np = 129`) and the 129-word `zero[]` the entry point passes for the
+unused WRF arguments. Those are now expressions of `GSFC_KMAX`
+(`woof/core/gsfcsw_levels.py`): its `#ifndef` default is 128, so a column of
+at most 128 layers compiles the shipped tier, where every expression
+evaluates to the old literal (re-pinned sources; the oracle replay and
+`tests/test_gsfcsw_256_levels.py` hold the words), and a 129 to 256 layer
+column adds `-D GSFC_KMAX=256` through `get_kernel_int_defines`.
+
+The arena is affine in the interface count: `236 x (GSFC_KMAX + 1) + 2233`
+float words per column (`GSFC_WORKSPACE_WORDS`). Preflight prices it per
+domain at the tier it launches, 4,096 columns at a time:
+
+| tier | words/column | arena for 4,096 columns |
+|---|---|---|
+| 128 | 32,677 | 535,379,968 B (510.6 MiB) |
+| 256 | 62,885 | 1,030,307,840 B (982.6 MiB) |
+
+Local frame, read through the production loader on an RTX A6000 (sm_86,
+NVRTC 12.9.86, 2026-11-22), both `GPUWM_WRF_EXACT` modes: 0 B at tier 128 and
+0 B at tier 256 (94 registers fast, 179 strict, the same at both tiers);
+`ptxas -v` for sm_86, sm_100 and sm_120 reports a 0-byte stack frame for the
+128 and 256 builds alike. The deep tier's frame therefore stays inside the
+shipped 16 B ceiling, and no driver reservation follows from the deeper
+column. `tests/test_gsfcsw_256_levels.py` runs a 256-level column to a 1 hPa
+top (finite, bounded heating and fluxes, net top minus net surface flux
+equals the column absorption), proves the 256 tier reproduces the shipped
+tier word for word at nz = 49 and 128, and compares CUDA with Metal.
+
+## WRF Fu-Liou-Gu radiation to 256 levels (compile-time tier)
+
+Stock WRF sizes FLG's level scratch by `PARA_FILE`'s `nvx = 100`. The
+generated headers (`flg_column_generated.cuh`, `flg_gases_generated.cuh`,
+`flg_streams_generated.cuh`, `flg_workspace_generated.cuh`) and the
+component units `flg.cu` and `flg_gases.cu` now carry that bound as
+`FLG_NVX` (`woof/core/flg_levels.py`), `#ifndef` default 100. A column of at
+most 100 layers compiles the stock tier; a 101 to 256 layer column adds
+`-D FLG_NVX=256`.
+
+The forecast unit (`flg_column`) already kept every per-level array in the
+warp-interleaved global workspace, `300 x FLG_NV1 + 1` float words per
+column with `FLG_NV1` the column's interface count (30,301 words at 100
+layers, 77,101 at 256), which admission (`flg_radiation_vram_bytes`) prices
+per domain. In that unit `FLG_NVX` reaches only the aerosol code stock
+`RAD_FLG` (`naero = 0`) never runs, so the compiler removes it: compiled
+with nvcc 13.3 (no `-lineinfo`) from the exact loader source, the
+`flg_column` SASS before and after the macro, and with and without
+`-D FLG_NVX=256`, is identical on sm_86, sm_100 and sm_120 in both
+numerics modes, at `FLG_NV1` 33 and 101. The stack frame is 928 B (sm_86),
+896 B (sm_100; 912 B in strict mode) and 912 B (sm_120) at both tiers, inside
+the priced 928 B, so
+the deep tier needs no driver reservation of its own;
+`tests/test_flg_256_levels.py` reads the loaded frame at 100 and 256 layers.
+The component oracles (`flg`, `flg_gases`, `flg_streams`, never selected by a
+forecast) size thread-local level arrays by the tier, so their frames grow
+at 256; at the stock tier their SASS is likewise identical.

@@ -9,6 +9,12 @@ import re
 import sys
 from extract_tables import statements,split_items
 
+# WRF sizes FLG's level scratch by PARA_FILE's nvx (100) and nv1x = nvx + 1.
+# The headers keep that bound as a compile-time tier: the #ifndef default is
+# the stock 100, so a column of at most 100 layers compiles stock WRF's
+# bound; woof.core.flg_levels adds -D FLG_NVX=256 for a deeper column.
+NVX_PREAMBLE='#ifndef FLG_NVX\n#define FLG_NVX 100\n#endif\n#define FLG_NV1X (FLG_NVX+1)\n'
+
 ROUTINES=('gascon','gases','gases_new','qks','qki','qkio3','qopo3s','qoph2o','qopch4','qopn2o','qopo3i','qophc','qopcon',
           'qopo2','qopco2','qopco','qopno','qopch3cl','qopso2','qopcfc11','qopcfc12')
 FLOAT_GLOBALS=('umco2','umch4','umn2o','umo2','umno','umso2','umno2','umch3cl','umco','umcfc11','umcfc12')
@@ -127,7 +133,7 @@ def translate(name,routine,manifest):
                 else:
                     arrays[var]=(var,shape)
                     if var not in routine['args']:
-                        declarations.append(kind+' '+var+'['+'*'.join('101' if d in ('nv','nv1') else d for d in shape)+'];')
+                        declarations.append(kind+' '+var+'['+'*'.join('FLG_NV1X' if d in ('nv','nv1') else d for d in shape)+'];')
             else:
                 variables[var]=(var,kind)
                 if var not in routine['args']:
@@ -193,7 +199,7 @@ def generate(source,manifest):
     for name in ROUTINES:
         signature,body=translate(name,routines[name],manifest); signatures.append(signature+';'); bodies.append(body)
     return """// Generated from pristine WRF v4.6.1 FLG gas statements.
-#define FG_AD(a,b) __fadd_rn((a),(b))
+"""+NVX_PREAMBLE+"""#define FG_AD(a,b) __fadd_rn((a),(b))
 #define FG_SU(a,b) __fsub_rn((a),(b))
 #define FG_MU(a,b) __fmul_rn((a),(b))
 #define FG_DV(a,b) __fdiv_rn((a),(b))

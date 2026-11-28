@@ -26,6 +26,7 @@ LIBM = Path(__file__).resolve().parents[2] / "core" / "kernels" / "glibc_flt32.c
 @lru_cache(maxsize=None)
 def _device_module(real: str, device: int, build: tuple = ()):
     import cupy as cp
+    from woof.certify.kernel_manifest import record_module
     source = (KERNELS / "rk_stage.cu").read_text(encoding="utf-8")
     if real == "float":
         # The strict diagnosis's binary32 log/pow (MIT-licensed Arm
@@ -33,8 +34,12 @@ def _device_module(real: str, device: int, build: tuple = ()):
         # gives the primal's words.
         source = (LIBM.read_text(encoding="utf-8")
                   + "\n#define WRFPLUS_FLOAT_LIBM 1\n" + source)
-    return cp.RawModule(code=source, options=(
-        "--fmad=false", f"-DWRFPLUS_REAL={real}", f"-DRK_KCHUNK={AD_KCHUNK}") + build)
+    options = ("--fmad=false", f"-DWRFPLUS_REAL={real}",
+               f"-DRK_KCHUNK={AD_KCHUNK}") + build
+    module = cp.RawModule(code=source, options=options)
+    record_module("woof.grad.wrfplus.stage", source=source, options=options,
+                  module=module)
+    return module
 
 
 def _kernel(name: str, dtype):
